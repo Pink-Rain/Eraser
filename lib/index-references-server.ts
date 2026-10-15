@@ -20,7 +20,7 @@ import {
   type ReferenceRequest,
   type ResolvedReference,
 } from "@/lib/index-references"
-import type { TabLayouts } from "@/lib/index-layouts"
+import { hoverVersionOf, type TabLayouts } from "@/lib/index-layouts"
 import { builtinLayoutFor } from "@/lib/index-layout-defaults"
 import { listIndexLayouts } from "@/lib/index-layouts-store"
 import type { JdrSheetKey } from "@/lib/jdr-sheets"
@@ -229,7 +229,7 @@ export async function resolveReferences(requests: ReferenceRequest[], options: {
       const cell = citedCell(table, row, request.column)
       results[key] = cell ? { ...base, ...cell } : null
     } else {
-      const layout = await hoverLayoutOf(source.key, table.tab, layouts)
+      const layout = await hoverLayoutOf(source.key, table.tab, layouts, request.hover)
       const hidden = (column: string) => Boolean(options.player && source.hiddenForPlayers?.(column))
       results[key] = { ...base, ...rowDetails(table, row, { object: source.key === OBJECT_REFERENCE_INDEX }), ...(layout ? { layout: hoverOf(layout, table, row, hidden) } : {}) }
     }
@@ -242,13 +242,14 @@ export async function resolveReferences(requests: ReferenceRequest[], options: {
  * dont un seul onglet en a une la garde pour tous ses onglets (les index d'entités ont un
  * onglet « Corbeille » de plus). Lue une fois par résolution.
  */
-async function hoverLayoutOf(index: string, tab: string, cache: Map<string, Promise<Record<string, TabLayouts>>>) {
+async function hoverLayoutOf(index: string, tab: string, cache: Map<string, Promise<Record<string, TabLayouts>>>, hoverId?: string) {
   let pending = cache.get(index)
   if (!pending) { pending = listIndexLayouts(index).catch(() => ({})); cache.set(index, pending) }
-  const layouts = Object.entries(await pending).filter(([, entry]) => entry.hover)
+  const layouts = Object.entries(await pending).filter(([, entry]) => entry.hover || entry.hovers?.length)
   const exact = layouts.find(([name]) => foldName(name) === foldName(tab))
-  // Sans survol réglé : celui qu'Eraser dessinait (les niveaux d'un état, l'icône d'un modificateur).
-  return (exact ?? (layouts.length === 1 ? layouts[0] : undefined))?.[1].hover ?? builtinLayoutFor(index, tab, "hover")
+  // Une version choisie par une présentation, sinon l'étoilée ; sans survol réglé : celui qu'Eraser
+  // dessinait (les niveaux d'un état, l'icône d'un modificateur).
+  return hoverVersionOf((exact ?? (layouts.length === 1 ? layouts[0] : undefined))?.[1], hoverId) ?? builtinLayoutFor(index, tab, "hover")
 }
 
 

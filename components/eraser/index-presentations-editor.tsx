@@ -19,7 +19,7 @@ import { IndexStats } from "@/components/eraser/index-stats"
 import { IndexPresentation } from "@/components/eraser/index-presentation"
 import { layoutIcons, useIndexSettings } from "@/components/eraser/index-windows"
 import { CopyToTabsDialog, ManagePresetsDialog, NamePresetDialog, PreviewDialog, PreviewExpandButton, VariantsPanel } from "@/components/eraser/index-variants-panel"
-import { accentOptions, Choice, ColorSwatches, ColumnField, ColumnsPicker, densityOptions, fieldLabel, fieldStyleOptions, hintText, IconPick, ImageBoxControls, imageShapeOptions, radiusOptions, Range, Segmented, settingsGroup, settingsTitle, SettingsRow, sizeOptions, Tabs, Toggle } from "@/components/eraser/editor-controls"
+import { accentOptions, Choice, HoverChoice, ColorSwatches, ColumnField, ColumnsPicker, densityOptions, fieldLabel, fieldStyleOptions, hintText, IconPick, ImageBoxControls, imageShapeOptions, radiusOptions, Range, Segmented, settingsGroup, settingsTitle, SettingsRow, sizeOptions, Tabs, Toggle } from "@/components/eraser/editor-controls"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -61,6 +61,8 @@ type Ctx = {
   cards: Array<{ id: string; name: string }>
   /** Les formulaires de l'onglet (« principal » : l'étoilé), pour l'élément et le détail. */
   forms: Array<{ id: string; name: string }>
+  /** Les survols de l'onglet (« principal » : l'étoilé) : au passage de la souris sur un élément. */
+  hovers: Array<{ id: string; name: string }>
   /** Les statistiques de l'index et les autres vues réglées de l'onglet (tuiles du tableau de bord). */
   stats: Array<{ id: string; title: string }>
   presentations: TabPresentations
@@ -143,6 +145,7 @@ function ClickSettings({ ctx }: { ctx: Ctx }) {
       {click === "side" && !master && <Choice label="Largeur du panneau" value={detail.width ?? "normal"} options={[{ value: "narrow", label: "Étroit" }, { value: "normal", label: "Normal" }, { value: "wide", label: "Large" }]} onChange={(width) => update({ width: width === "normal" ? undefined : width })} disabled={disabled} />}
       {panel && <span className={cn(fieldLabel, "self-end pb-1.5")}><Toggle checked={Boolean(detail.nav)} onChange={(nav) => update({ nav: nav || undefined })} disabled={disabled}>Précédent / suivant</Toggle></span>}
     </SettingsRow>
+    <HoverChoice value={layout.hover} hovers={ctx.hovers} onChange={(hover) => set({ hover })} disabled={disabled} />
   </div>
 }
 
@@ -977,7 +980,7 @@ function CodexPages(ctx: Ctx): Page[] {
 type Page = { key: string; label: string; icon: ReactNode; render: () => ReactNode }
 
 /** Les réglages d'une vue (sa forme déjà choisie), en pages propres à son type. */
-export function PresentationKindSettings({ kind, layout, columns, onChange, cards = [], forms = [], stats = [], presentations = {}, optionsOf, disabled = false, element }: {
+export function PresentationKindSettings({ kind, layout, columns, onChange, cards = [], forms = [], hovers = [], stats = [], presentations = {}, optionsOf, disabled = false, element }: {
   kind: PresentationKind
   layout: Presentation
   columns: string[]
@@ -985,6 +988,8 @@ export function PresentationKindSettings({ kind, layout, columns, onChange, card
   cards?: Array<{ id: string; name: string }>
   /** Les formulaires de l'onglet (« principal » : l'étoilé) : l'élément et le détail peuvent en lire un. */
   forms?: Array<{ id: string; name: string }>
+  /** Les survols de l'onglet (« principal » : l'étoilé) : au passage de la souris sur un élément. */
+  hovers?: Array<{ id: string; name: string }>
   /** Les statistiques de l'index et les vues réglées de l'onglet : le tableau de bord en fait des tuiles. */
   stats?: Array<{ id: string; title: string }>
   presentations?: TabPresentations
@@ -1006,7 +1011,7 @@ export function PresentationKindSettings({ kind, layout, columns, onChange, card
     for (const key of Object.keys(next) as Array<keyof PresentationLook>) if (next[key] === undefined) delete next[key]
     set({ look: Object.keys(next).length ? next : undefined })
   }
-  const ctx: Ctx = { kind, layout, columns, set, setLook, look, cards, forms, stats, presentations, optionsOf, disabled, element }
+  const ctx: Ctx = { kind, layout, columns, set, setLook, look, cards, forms, hovers, stats, presentations, optionsOf, disabled, element }
   const pages = kind === "list" ? ListPages(ctx)
     : kind === "kanban" ? KanbanPages(ctx)
     : kind === "master-detail" ? MasterDetailPages(ctx)
@@ -1156,7 +1161,7 @@ export function PresentationsPanel({ kind, tabName, columns, value, selectedId, 
 const screens = { phone: "24rem", tablet: "44rem", desktop: "100%" } as const
 const screenOptions: Array<{ value: keyof typeof screens; label: string; icon: ReactNode; title: string }> = [{ value: "phone", label: "", icon: <Smartphone className="size-3.5" />, title: "Téléphone" }, { value: "tablet", label: "", icon: <Tablet className="size-3.5" />, title: "Tablette" }, { value: "desktop", label: "", icon: <Monitor className="size-3.5" />, title: "Toute la largeur" }]
 
-export function IndexPresentationsEditor({ kind, versionId = MAIN_PRESENTATION_ID, tabName, columns, rows, value, onChange, optionsOf, cards = [], cardColumns = [], forms = [], stats = [], disabled = false }: {
+export function IndexPresentationsEditor({ kind, versionId = MAIN_PRESENTATION_ID, tabName, columns, rows, value, onChange, optionsOf, cards = [], cardColumns = [], forms = [], hovers = [], stats = [], disabled = false }: {
   /** La vue réglée (l'onglet de « Modifier » : Liste, Kanban…). */
   kind: PresentationKind
   /** La version de la vue modifiée (l'étoilée par défaut). */
@@ -1174,6 +1179,8 @@ export function IndexPresentationsEditor({ kind, versionId = MAIN_PRESENTATION_I
   cardColumns?: CardColumn[]
   /** Les formulaires de l'onglet (brouillon compris) : un élément ou un détail « formulaire en lecture » les dessine. */
   forms?: NamedLayout[]
+  /** Les survols de l'onglet (« principal » : l'étoilé) : au passage de la souris sur un élément. */
+  hovers?: Array<{ id: string; name: string }>
   /** Les statistiques de l'index (Modifier › Stats) : une tuile du tableau de bord en dessine une. */
   stats?: StatDefinition[]
   disabled?: boolean
@@ -1227,7 +1234,7 @@ export function IndexPresentationsEditor({ kind, versionId = MAIN_PRESENTATION_I
   return <div className="grid min-h-0 gap-3 lg:h-full lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
     <div className="grid content-start gap-2 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
       <div className="flex justify-end"><Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={disabled} onClick={() => setStarting(true)} title="Repartir d’une forme de base, remplie avec les colonnes de cet onglet et dessinée sur ses lignes"><Sparkles className="size-3.5" />Forme de base</Button></div>
-      <PresentationKindSettings kind={kind} layout={layout} columns={columns} onChange={setLayout} element={cardColumns.length ? { columns: cardColumns, samples: rows, tabCards: cards } : undefined} cards={cards.map((card) => ({ id: card.id, name: card.name }))} forms={forms.map((form) => ({ id: form.id, name: form.name }))} stats={stats.map((stat) => ({ id: stat.id, title: stat.title }))} presentations={value} optionsOf={optionsOf} disabled={disabled} />
+      <PresentationKindSettings kind={kind} layout={layout} columns={columns} onChange={setLayout} element={cardColumns.length ? { columns: cardColumns, samples: rows, tabCards: cards } : undefined} cards={cards.map((card) => ({ id: card.id, name: card.name }))} forms={forms.map((form) => ({ id: form.id, name: form.name }))} hovers={hovers} stats={stats.map((stat) => ({ id: stat.id, title: stat.title }))} presentations={value} optionsOf={optionsOf} disabled={disabled} />
     </div>
     <section className="min-w-0 rounded-xl border bg-muted/20 p-3 lg:min-h-0 lg:overflow-auto" aria-label="Aperçu">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">

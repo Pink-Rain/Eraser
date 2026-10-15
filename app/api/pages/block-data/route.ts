@@ -135,6 +135,8 @@ export async function GET(request: Request) {
           cards: cardsOf(table.tabName).length > 0,
           // Les formulaires de l'onglet (Modifier › Formulaire) : un bloc « Valeurs de la ligne » en choisit un.
           formList: tabFormsOf(tabLayoutsOf(layouts, table.tabName)).map((form) => ({ id: form.id, name: form.name })),
+          // Les autres survols de l'onglet : une forme propre à la page en choisit un au passage de la souris.
+          hoverList: (tabLayoutsOf(layouts, table.tabName)?.hovers ?? []).map((hover) => ({ id: hover.id, name: hover.name })),
           cardList: cardsOf(table.tabName).map((card) => ({ id: card.id, name: card.name })),
           // Les autres versions des vues de l'onglet (Modifier › Liste, Kanban… › Nouveau) : un bloc en choisit une.
           viewList: namedPresentationsOf(Object.entries(presentations).find(([name]) => name.toLocaleLowerCase("fr") === table.tabName.toLocaleLowerCase("fr"))?.[1]).map((item) => ({ id: item.id, name: item.name, kind: item.layout.kind })),

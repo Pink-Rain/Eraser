@@ -49,8 +49,10 @@ export function parseReferenceHref(href: string): IndexReference | null {
 }
 
 /** Clé d'une référence (une ligne, ou une case d'une ligne). */
-export function referenceKey(reference: IndexReference) {
-  return `${reference.index}\u0001${reference.id}\u0001${fold(reference.column ?? "")}`
+export function referenceKey(reference: IndexReference & { hover?: string }) {
+  // Une version de survol autre que l'étoilée : une clé à part (les autres clés ne changent pas).
+  const hover = !reference.column && reference.hover && reference.hover !== "principal" ? `\u0001${reference.hover}` : ""
+  return `${reference.index}\u0001${reference.id}\u0001${fold(reference.column ?? "")}${hover}`
 }
 
 /** Le séparateur du libellé d'une case citée : « Sérénité › Type ». */
@@ -177,7 +179,7 @@ export { fold as foldReferenceText }
 // ---------------------------------------------------------------------------
 
 /** Ce qu'une référence demande : sa ligne, et la case quand c'en est une. `name` : repli par le nom. */
-export type ReferenceRequest = IndexReference & { name?: string }
+export type ReferenceRequest = IndexReference & { name?: string; /** Une version du survol de la ligne (une présentation la choisit) ; absente : l'étoilée. */ hover?: string }
 
 /** Comment une case citée s'affiche : le style imposé de sa colonne, la couleur de ses choix. */
 export type ReferenceLook = { style?: ColumnStyle; options?: Array<{ value: string; color?: string }>; unit?: string; kind?: string; multiple?: boolean }

@@ -19,7 +19,7 @@ import type { EditorMode } from "@/components/eraser/index-editor"
 import { SavedViewDialog, savedViewMark, useIndexSettings } from "@/components/eraser/index-windows"
 import { IndexCardGrid, IndexDisplayControls, NoCardsYet, isCardChoice, isIndexDisplay, type CardRowSource, type IndexDisplay } from "@/components/eraser/index-card"
 import { pickCard, tabCardsOf } from "@/lib/index-cards"
-import { isValidGridSort, ObjectViewGrid, objectViewGridKey, objectViewSortKey, specIn } from "@/components/eraser/object-view-grid"
+import { isValidGridSort, ObjectViewGrid, objectRowRef, objectViewGridKey, objectViewSortKey, specIn } from "@/components/eraser/object-view-grid"
 import { isGridFilters, type GridFilters } from "@/components/eraser/sheet-grid-filter"
 import { IndexStats, TAB_PSEUDO } from "@/components/eraser/index-stats"
 import { ObjectSendDialog } from "@/components/eraser/object-send-dialog"
@@ -812,7 +812,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
       {settings.savedViewsUnavailable && <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">Les vues enregistrées n’ont pas pu être lues sur le serveur partagé d’Eraser : seuls les onglets-fenêtres de la feuille sont montrés, et une vue ne peut pas être enregistrée pour l’instant.</p>}
       {activeView && activeView.kind === "stats" ? <IndexStats key={activeView.id} {...statsProps} statIds={activeView.statIds} pinnedOnly canEdit={!busy} onManage={() => void openEditor("stats")} />
         : activeView ? <ObjectViewGrid key={activeView.id} view={filterWindowOf(activeView)} sortDefault={activeView.sort} tables={tables} schemas={schemas} disabled={busy} layout={activeLayout} cards={settings.cards} onEdited={() => { editedInView.current = true }} /> : selected && display === "cards" ? (shownCard
-        ? <IndexCardGrid card={shownCard} rows={displayedRows} rowSource={cardRow} onOpen={setDetails} hrefOf={rowHref} empty={selected.rows.length ? "Aucune ligne ne correspond à la recherche." : "Ce tableau est vide. Ajoute son premier item."} />
+        ? <IndexCardGrid card={shownCard} rows={displayedRows} rowSource={cardRow} onOpen={setDetails} hrefOf={rowHref} rowRef={(rowKey) => { const row = selected.rows.find((candidate) => String(candidate.rowNumber) === rowKey); return row ? objectRowRef(selected, row) : null }} empty={selected.rows.length ? "Aucune ligne ne correspond à la recherche." : "Ce tableau est vide. Ajoute son premier item."} />
         : <NoCardsYet tabName={selected.tabName} onCreate={() => void openEditor("cards")} />
       ) : selected ? (
         <SheetGrid

@@ -46,7 +46,7 @@ import {
 } from "lucide-react"
 
 import { IndexCard, cardGridStyle, cardWidthRem, type CardRowSource } from "@/components/eraser/index-card"
-import { Choice, ImageBoxControls, SettingsRow, Tabs } from "@/components/eraser/editor-controls"
+import { Choice, HoverChoice, ImageBoxControls, SettingsRow, Tabs } from "@/components/eraser/editor-controls"
 import { useIndexSettings } from "@/components/eraser/index-windows"
 import { CopyToTabsDialog, ManagePresetsDialog, NamePresetDialog, PreviewDialog, PreviewExpandButton, VariantsPanel } from "@/components/eraser/index-variants-panel"
 import { Button } from "@/components/ui/button"
@@ -1026,7 +1026,7 @@ const cardPages: Array<{ value: CardPageKey; label: string; icon: ReactNode }> =
 ]
 
 /** L'éditeur de la carte choisie : ses réglages en pages, et l'aperçu en direct. */
-export function IndexCardEditor({ tabName, columns, value, builtins, samples, selected, onSelect, onChange, disabled = false }: {
+export function IndexCardEditor({ tabName, columns, value, builtins, samples, selected, onSelect, onChange, hovers, disabled = false }: {
   tabName: string
   columns: CardColumn[]
   /** Les cartes de l'onglet (brouillon). */
@@ -1037,6 +1037,8 @@ export function IndexCardEditor({ tabName, columns, value, builtins, samples, se
   selected: string | null
   onSelect: (id: string | null) => void
   onChange: (value: TabCards) => void
+  /** Les survols de l'onglet : la carte en choisit un au passage de la souris (vue Cartes) ; absent : pas de choix. */
+  hovers?: Array<{ id: string; name: string }>
   disabled?: boolean
 }) {
   const [creating, setCreating] = useState(false)
@@ -1053,7 +1055,10 @@ export function IndexCardEditor({ tabName, columns, value, builtins, samples, se
     {creating && <NewCardDialog columns={columns} samples={samples} builtins={builtins} onPick={(next) => { onChange({ ...value, cards: [...value.cards, next] }); onSelect(next.id); setCreating(false) }} onClose={() => setCreating(false)} />}
   </div>
 
-  return <SingleCardEditor key={card.id} card={card} columns={columns} samples={samples} onChange={updateCard} disabled={disabled} />
+  return <div className="grid min-h-0 gap-2 lg:h-full lg:grid-rows-[auto_minmax(0,1fr)]">
+    {hovers && <div className="max-w-md"><HoverChoice value={card.hover} hovers={hovers} onChange={(hover) => updateCard({ ...card, hover })} disabled={disabled} /></div>}
+    <SingleCardEditor key={card.id} card={card} columns={columns} samples={samples} onChange={updateCard} disabled={disabled} />
+  </div>
 }
 
 /**

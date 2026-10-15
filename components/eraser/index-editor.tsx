@@ -1308,6 +1308,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             cards={cardsEnabled ? cardsOf(tab).cards : []}
             cardColumns={cardsEnabled ? cardColumnsOf(tab) : []}
             forms={[{ id: DEFAULT_FORM_ID, name: "Formulaire principal", layout: layoutOf(tab, "form").layout }, ...namedFormsOf(tab)]}
+            hovers={namedLayoutsOf(tab, "hover").map((hover) => ({ id: hover.id, name: hover.name }))}
             stats={stats}
           />
         </section>}
@@ -1324,6 +1325,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               samples={sampleRows[tab.original ?? tab.name] ?? []}
               selected={selectedCard[tab.id] ?? null}
               onSelect={(id) => setSelectedCard((current) => ({ ...current, [tab.id]: id }))}
+              hovers={namedLayoutsOf(tab, "hover").map((hover) => ({ id: hover.id, name: hover.name }))}
               disabled={pending || layoutSaving || tab.removed}
               onChange={(next) => setCardDrafts((current) => ({ ...current, [tab.id]: { cards: next.cards, ...(next.defaultId ? { defaultId: next.defaultId } : {}) } }))}
             />

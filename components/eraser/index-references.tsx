@@ -7,13 +7,13 @@
  * de la case, dans le style de sa colonne, sans survol. Le texte enregistré ne change pas :
  * la ligne est retrouvée par son identifiant, même renommée.
  */
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react"
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 
 import { useWorldIndexVersion } from "@/components/eraser/index-cells"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexImage } from "@/components/eraser/index-image"
-import { useResolvedReferences } from "@/components/eraser/reference-store"
+import { knownReference, useResolvedReferences } from "@/components/eraser/reference-store"
 import { richTextRendering, sanitizeRichText } from "@/components/eraser/rich-text"
 import { columnStyleCss, pillStyle } from "@/components/eraser/index-style"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
@@ -394,6 +394,33 @@ export function LayoutDetails({ reference, layout, color, depth, level }: { refe
       <div className={field.large ? "font-display text-base font-semibold leading-snug" : "text-xs leading-5 [&_a]:underline"}><LayoutValue reference={reference} field={field} depth={depth} accent={accent} level={level} /></div>
     </div>} />
   </div>
+}
+
+/**
+ * Le survol d'une ligne au passage de la souris sur un élément d'une vue (liste, kanban,
+ * cartes…) : la version du survol choisie par la vue (`hover`), sinon l'étoilée. La ligne
+ * n'est lue qu'à l'ouverture (une demande groupée, gardée 30 s), jamais d'avance.
+ */
+export function RowHover({ index, id, hover, className, children }: { index: string; id: string; hover?: string; className?: string; children: ReactNode }) {
+  const request = useMemo((): ReferenceRequest => ({ index, id, ...(hover && hover !== "principal" ? { hover } : {}) }), [hover, id, index])
+  const key = referenceKey(request)
+  const [open, setOpen] = useState(false)
+  const [loaded, setLoaded] = useState<{ key: string; value: ResolvedReference | null } | null>(null)
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    void resolveReference(request).then((value) => { if (alive) setLoaded({ key, value }) }).catch(() => undefined)
+    return () => { alive = false }
+  }, [key, open, request])
+  const known = knownReference(request)
+  const reference = loaded?.key === key ? loaded.value : known ?? null
+  const color = reference?.color
+  return <HoverCard openDelay={400} closeDelay={80} open={open && Boolean(reference)} onOpenChange={setOpen}>
+    <HoverCardTrigger asChild><div className={cn("min-w-0", className)}>{children}</div></HoverCardTrigger>
+    {reference && <HoverCardContent side="top" align="start" collisionPadding={12} className={`${hoverWidthClass(reference.layout)} rounded-2xl p-3.5 text-foreground`} style={color ? { borderColor: `${color}55` } : undefined}>
+      {reference.layout ? <LayoutDetails reference={reference} layout={reference.layout} color={color} depth={0} /> : <RowDetails reference={reference} color={color} depth={0} />}
+    </HoverCardContent>}
+  </HoverCard>
 }
 
 /** La largeur de la carte de survol d'une mise en page. */

@@ -13,7 +13,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 
 import { GaugeCell, GaugeView, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexImage } from "@/components/eraser/index-image"
-import { IndexRichText } from "@/components/eraser/index-references"
+import { IndexRichText, RowHover } from "@/components/eraser/index-references"
 import { columnStyleCss, pillStyle } from "@/components/eraser/index-style"
 import { characteristicShort, type CharacteristicName } from "@/lib/characteristics"
 import {
@@ -621,7 +621,7 @@ const PAGE = 60
  * Les lignes affichées (recherche, filtres et tri compris) en cartes. Les cartes se
  * dessinent par paquets de 60 en descendant : un index de mille lignes reste fluide.
  */
-export function IndexCardGrid({ card, cardOf, rows, rowSource, onOpen, hrefOf, empty }: {
+export function IndexCardGrid({ card, cardOf, rows, rowSource, onOpen, hrefOf, rowRef, empty }: {
   card: CardTemplate
   /** La vue « Tout » : chaque ligne avec la carte de son onglet (sinon `card`). */
   cardOf?: (rowKey: string) => CardTemplate
@@ -629,6 +629,8 @@ export function IndexCardGrid({ card, cardOf, rows, rowSource, onOpen, hrefOf, e
   rowSource: (rowKey: string) => CardRowSource
   onOpen: (rowKey: string) => void
   hrefOf?: (rowKey: string) => string | undefined
+  /** La ligne citable : au passage de la souris, son survol (la version choisie par la carte, sinon l'étoilée). */
+  rowRef?: (rowKey: string) => { index: string; id: string } | null
   empty: ReactNode
 }) {
   const [limit, setLimit] = useState(PAGE)
@@ -645,7 +647,12 @@ export function IndexCardGrid({ card, cardOf, rows, rowSource, onOpen, hrefOf, e
   if (!rows.length) return <div className="rounded-xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">{empty}</div>
   return <div className="grid gap-3">
     <div className={cn("grid items-start", card.width === "full" ? "gap-1.5" : "gap-3")} style={cardGridStyle(card)}>
-      {visible.map((row) => <IndexCard key={row.key} card={cardOf?.(row.key) ?? card} row={rowSource(row.key)} onOpen={() => onOpen(row.key)} href={hrefOf?.(row.key)} />)}
+      {visible.map((row) => {
+        const shown = cardOf?.(row.key) ?? card
+        const node = <IndexCard key={row.key} card={shown} row={rowSource(row.key)} onOpen={() => onOpen(row.key)} href={hrefOf?.(row.key)} />
+        const ref = shown.hover === "-" ? null : rowRef?.(row.key)
+        return ref?.id ? <RowHover key={row.key} index={ref.index} id={ref.id} hover={shown.hover}>{node}</RowHover> : node
+      })}
     </div>
     {more && <div ref={sentinel} className="flex items-center justify-center gap-2 py-3 text-xs text-muted-foreground">
       {visible.length} / {rows.length} cartes

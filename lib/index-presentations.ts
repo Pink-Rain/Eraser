@@ -202,6 +202,11 @@ export type Presentation = {
    * le formulaire étoilé). Prend le pas sur `itemCard`.
    */
   itemForm?: string
+  /**
+   * Au passage de la souris sur un élément : le survol de sa ligne, dans cette version
+   * (« Modifier › Survol ») ; absent : le survol à l'étoile ; « - » : aucun.
+   */
+  hover?: string
   /** Au clic sur un élément : ouvrir la fiche (d'office), ouvrir la page de la ligne, afficher à côté, afficher dessous, rien. */
   click?: PresentationClick
   /** Le panneau de détail (à côté, dessous, et le maître-détail) : les colonnes, un formulaire en lecture, ou une carte ; sa largeur ; précédent / suivant. */
@@ -538,6 +543,7 @@ export function cleanPresentation(value: unknown): Presentation | undefined {
   const menu = oneOf(raw.menu, ["top", "side", "tabs"] as const)
   if (menu) layout.menu = menu
   if (text(raw.itemForm, 40)) layout.itemForm = text(raw.itemForm, 40)
+  if (text(raw.hover, 40)) layout.hover = text(raw.hover, 40)
   const click = oneOf(raw.click, ["sheet", "page", "side", "below", "none"] as const)
   if (click && click !== "sheet") layout.click = click
   if (raw.detail && typeof raw.detail === "object") {

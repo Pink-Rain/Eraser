@@ -647,6 +647,11 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   // Les colonnes ajoutées au tableau et à la fiche : « Classes et rangs », puis celles de la page qui accueille la vue.
   const pageColumns = useMemo(() => [...(classRankColumn ? [classRankColumn] : []), ...(embed?.extraColumns ?? [])], [classRankColumn, embed])
 
+  /** La ligne citable d'un élément de vue : son survol au passage de la souris. */
+  const rowRefOf = useCallback((rowKey: string) => {
+    const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
+    return id ? { index: indexKey, id } : null
+  }, [indexKey, rawOf])
   /** Ouvre une ligne : sa page (personnage, campagne, classe) ou sa fiche. */
   const openRow = useCallback((rowKey: string) => {
     const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
@@ -1542,13 +1547,14 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         renderCard={renderViewCard}
         cardOf={(rowKey, cardId) => pickCard(tabCardsOf(settings.cards, indexKey, parseRowKey(rowKey).tabName), cardId === DEFAULT_ITEM_CARD ? activeView?.cardId ?? null : cardId)}
         renderForm={renderViewForm}
+        rowRef={rowRefOf}
         empty={viewTables.some((owner) => owner.rows.length) ? "Aucune ligne ne remplit les conditions de cette vue." : `Cet onglet est vide. Ajoute ${tabDefinition.itemLabel} pour commencer.`}
       /> : table && (display === "cards" || viewLayout?.kind === "cards") ? (shownCard
         ? viewLayout?.groupBy
           // Cartes rangées en sections : une grille par valeur de la colonne choisie.
           ? <div className="space-y-6">{(cardGroups ?? []).map((group) => <section key={group.name || "*"} className="space-y-2">
             <p className="flex items-center justify-between border-b pb-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-primary/80"><span>{group.name || "Sans valeur"}</span><span className="text-muted-foreground">{group.rows.length}</span></p>
-            <IndexCardGrid card={shownCard} cardOf={spanning ? cardOf : undefined} rows={group.rows} rowSource={cardRow} onOpen={openRow} hrefOf={rowHref} empty="" />
+            <IndexCardGrid card={shownCard} cardOf={spanning ? cardOf : undefined} rows={group.rows} rowSource={cardRow} onOpen={openRow} hrefOf={rowHref} rowRef={rowRefOf} empty="" />
           </section>)}</div>
           : <IndexCardGrid
           card={shownCard}
@@ -1557,6 +1563,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
           rowSource={cardRow}
           onOpen={openRow}
           hrefOf={rowHref}
+          rowRef={rowRefOf}
           empty={activeView ? "Aucune ligne ne remplit les conditions de cette vue." : viewTables.some((owner) => owner.rows.length) ? "Aucune ligne ne correspond à la recherche." : `Cet onglet est vide. Ajoute ${tabDefinition.itemLabel} pour commencer.`}
         />
         : <NoCardsYet tabName={table.tabName} onCreate={() => void openEditor("cards")} />

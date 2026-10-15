@@ -299,3 +299,9 @@ test("lot D : galerie, chronologie, arborescence et codex — réglages nouveaux
   // Toutes les formes de départ des douze vues, sur un onglet réduit au nom : jamais une forme cassée.
   for (const kind of ["list", "kanban", "master-detail", "calendar", "dashboard", "gallery", "timeline", "tree", "codex"]) for (const starter of starters.presentationStartersFor(kind, [{ header: "Nom" }])) assert.ok(views.cleanPresentation(starter.layout), `${kind} ${starter.key}`);
 });
+
+test("le survol au passage de la souris se garde dans la présentation (absent : l'étoilé ; « - » : aucun)", () => {
+  assert.equal(views.cleanPresentation({ kind: "kanban", hover: "court" }).hover, "court");
+  assert.equal(views.cleanPresentation({ kind: "calendar", hover: "-" }).hover, "-");
+  assert.equal(views.cleanPresentation({ kind: "list" }).hover, undefined);
+});

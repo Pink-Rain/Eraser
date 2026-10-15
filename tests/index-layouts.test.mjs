@@ -342,3 +342,19 @@ test("le survol envoie les cases des couleurs lues dans une colonne (libellés, 
   const tiles = resolved.sections[0].rows[0].fields[1];
   assert.equal(tiles.cells.Teinte.value, "#397f88");
 });
+
+test("le survol d'une ligne dans la version choisie par une vue, sinon l'étoilé ; une clé de référence à part", async () => {
+  const references = await vite.ssrLoadModule("/lib/index-references.ts");
+  const star = { aside: [], sections: [{ id: "s", rows: [{ id: "r", fields: [{ column: "Nom" }] }] }] };
+  const court = { aside: [], sections: [{ id: "s", rows: [{ id: "r", fields: [{ column: "Rang" }] }] }] };
+  const entry = { hover: star, hovers: [{ id: "court", name: "Court", layout: court }] };
+  assert.equal(layouts.hoverVersionOf(entry, "court"), court);
+  assert.equal(layouts.hoverVersionOf(entry, "principal"), star);
+  assert.equal(layouts.hoverVersionOf(entry, "inconnu"), star);
+  assert.equal(layouts.hoverVersionOf(entry), star);
+  assert.equal(layouts.hoverVersionOf(null, "court"), null);
+  // La clé d'une référence ne change pas sans version ; une version a la sienne (pas de mélange en cache).
+  const plain = references.referenceKey({ index: "npcs", id: "PNJ-1" });
+  assert.equal(references.referenceKey({ index: "npcs", id: "PNJ-1", hover: "principal" }), plain);
+  assert.notEqual(references.referenceKey({ index: "npcs", id: "PNJ-1", hover: "court" }), plain);
+});

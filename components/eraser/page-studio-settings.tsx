@@ -98,7 +98,7 @@ function RadioCards<T extends string>({ name, value, options, onChange, disabled
 
 type IndexEntry = { key: string; title: string; path: string }
 type IndexDetails = {
-  tabs: Array<{ name: string; configured?: ViewBlockKind[]; forms?: Partial<Record<ViewBlockKind, Presentation>>; cards: boolean; cardList?: Array<{ id: string; name: string }>; viewList?: Array<{ id: string; name: string; kind: string }>; formList?: Array<{ id: string; name: string }>; columns?: string[]; choices?: Record<string, string[]> }>
+  tabs: Array<{ name: string; configured?: ViewBlockKind[]; forms?: Partial<Record<ViewBlockKind, Presentation>>; cards: boolean; cardList?: Array<{ id: string; name: string }>; hoverList?: Array<{ id: string; name: string }>; viewList?: Array<{ id: string; name: string; kind: string }>; formList?: Array<{ id: string; name: string }>; columns?: string[]; choices?: Record<string, string[]> }>
   stats: Array<{ id: string; title: string; pinned: boolean }>
   presets?: Array<{ id: string; name: string; kind: string; builtin: boolean }>
 }
@@ -324,7 +324,7 @@ function ViewSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { 
         <option value="own">Propre à cette page…</option>
       </select>
     </Field>}
-    {block.tab && !linked && presentation && block.layout && isPresentationKind(block.kind) && <PresentationKindSettings kind={block.kind} layout={block.layout} columns={columns} cards={tab?.cardList ?? []} onChange={(layout) => onChange({ layout: { ...layout, kind: block.kind } })} />}
+    {block.tab && !linked && presentation && block.layout && isPresentationKind(block.kind) && <PresentationKindSettings kind={block.kind} layout={block.layout} columns={columns} cards={tab?.cardList ?? []} hovers={tab?.hoverList ?? []} onChange={(layout) => onChange({ layout: { ...layout, kind: block.kind } })} />}
     {block.tab && !linked && <Field label="Seulement les lignes où…" hint={`Sans condition : toutes les lignes. « {Moi} » : le lecteur (« Joueur est {Moi} » : ses personnages ; « MJ est {Moi} » : ses campagnes).${rowOf?.index ? " « {Colonne} » prend la valeur de la ligne de la page, aussi dans un nom de colonne." : " Les colonnes masquées comptent aussi, sans jamais être montrées."}`}>
       <WhereEditor where={where} columns={columns} choices={tab?.choices ?? {}} rowPage={Boolean(rowOf?.index)} onChange={(next) => onChange({ where: next })} />
     </Field>}

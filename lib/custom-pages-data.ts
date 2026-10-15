@@ -31,7 +31,11 @@ export type IndexSource = {
   columns: Record<string, Array<{ header: string; spec: IndexColumnSpec }>>
 }
 
-export type BlockRow = { key: string; name: string; href?: string; cells: string[] }
+/**
+ * Une ligne d'un bloc. `id` : son identifiant, pour le survol au passage de la souris — jamais
+ * pour un joueur (un survol montrerait des colonnes que le bloc lui cache).
+ */
+export type BlockRow = { key: string; name: string; href?: string; cells: string[]; id?: string }
 
 export type ViewBlockData = {
   kind: "view"
@@ -123,10 +127,10 @@ function rowsOf(source: IndexSource, table: IndexSource["tables"][number], heade
       // Réglé dans le bloc : rien, ou l'adresse choisie (pour tous les lecteurs : la page ouverte vérifie l'accès).
       // Seulement les colonnes que le lecteur voit : une colonne masquée ne fuit pas dans une adresse.
       const href = click === "-" ? undefined : clickHrefFor(click, (column) => { const at = headers.some((header) => foldName(header) === foldName(column)) ? table.headers.findIndex((candidate) => foldName(candidate) === foldName(column)) : -1; return at >= 0 ? row.values[at] ?? "" : "" }, rowId)
-      return [{ key: `${table.tabName}|${rowId || position}`, name: label, ...(href ? { href } : {}), cells }]
+      return [{ key: `${table.tabName}|${rowId || position}`, name: label, ...(href ? { href } : {}), cells, ...(rowId && !options.player ? { id: rowId } : {}) }]
     }
     const href = rowPage ?? (!rowId ? undefined : source.nameHref && (!options.player || source.openToPlayers) ? source.nameHref.replace("{id}", encodeURIComponent(rowId)) : options.player ? undefined : `${source.path}?ligne=${encodeURIComponent(rowId)}`)
-    return [{ key: `${table.tabName}|${rowId || position}`, name: label, ...(href ? { href } : {}), cells }]
+    return [{ key: `${table.tabName}|${rowId || position}`, name: label, ...(href ? { href } : {}), cells, ...(rowId && !options.player ? { id: rowId } : {}) }]
   })
 }
 

@@ -303,6 +303,9 @@ test("Données d'un bloc Vue ou Stat : colonnes privées et masquées retirées,
   assert.equal(forPlayer.rows.length, 1);
   assert.equal(forPlayer.total, 2);
   assert.equal(forPlayer.rows[0].href, undefined);
+  // Le survol au passage de la souris : l'identifiant de la ligne seulement pour un MJ (jamais pour un joueur).
+  assert.equal(forPlayer.rows[0].id, undefined);
+  assert.equal(blockData.viewBlockData(source, { tab: "bibliotheque", kind: "kanban", limit: 1 }, settings, {}).rows[0].id, "PNJ-1");
   assert.equal(forPlayer.rows[0].cells[1], "<b>Forgeron</b>");
   assert.ok(!JSON.stringify(forPlayer).includes("Traître"));
   assert.equal(forPlayer.layout.kanbanColumn, undefined);

@@ -206,6 +206,13 @@ export function formOf(entry: TabLayouts | null | undefined, formId?: string | n
   return entry.form ?? null
 }
 
+/** Le survol d'un onglet par l'identifiant de sa version (choisie par une présentation) ; absent ou inconnu : l'étoilé. */
+export function hoverVersionOf(entry: TabLayouts | null | undefined, hoverId?: string | null): IndexLayout | null {
+  if (!entry) return null
+  if (hoverId && hoverId !== DEFAULT_FORM_ID) return entry.hovers?.find((item) => item.id === hoverId)?.layout ?? entry.hover ?? null
+  return entry.hover ?? null
+}
+
 /** Une mise en page (fiche ou survol) enregistrée sous un nom, pour l'appliquer à d'autres onglets. */
 export type LayoutPreset = { id: string; name: string; kind: LayoutKind; layout: IndexLayout; updatedAt: string }
 

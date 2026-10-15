@@ -153,6 +153,8 @@ export type CardWidth = "xs" | "sm" | "md" | "lg" | "xl" | "full"
 export type CardTemplate = {
   id: string
   name: string
+  /** Au passage de la souris sur la carte (vue Cartes) : cette version du survol de la ligne ; absent : l'étoilée ; « - » : aucun. */
+  hover?: string
   media?: CardMedia
   /** La couleur d'accent : prise dans une colonne (couleur, choix coloré) et, sinon, celle-ci. */
   accent?: { column?: string; color?: string }
@@ -495,6 +497,7 @@ export function parseCardTemplate(input: unknown): CardTemplate | null {
   const media = cleanMedia(raw.media)
   if (!blocks.length && !media && !text(raw.id, 40)) return null
   const card: CardTemplate = { id: text(raw.id, 40) || cardId(), name: text(raw.name, 60) || "Carte", blocks }
+  if (text(raw.hover, 40)) card.hover = text(raw.hover, 40)
   if (media) card.media = media
   if (raw.accent && typeof raw.accent === "object") {
     const accent = raw.accent as Record<string, unknown>

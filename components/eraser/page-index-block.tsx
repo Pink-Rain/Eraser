@@ -135,6 +135,8 @@ function ReadTable({ data, open }: { data: ViewData; open: (href?: string) => vo
 function ViewContent({ data, block, searching = false }: { data: ViewData; block: ViewBlock; searching?: boolean }) {
   const router = useRouter()
   const byKey = useMemo(() => new Map(data.rows.map((row) => [row.key, row])), [data.rows])
+  // Le survol au passage de la souris : seulement les lignes dont le serveur donne l'identifiant (jamais à un joueur).
+  const rowRefOf = useCallback((rowKey: string) => { const id = byKey.get(rowKey)?.id; return id ? { index: data.index, id } : null }, [byKey, data.index])
   const column = useMemo(() => new Map(data.headers.map((header, index) => [foldName(header), index])), [data.headers])
   const valueOf = useCallback((rowKey: string, header: string) => { const at = column.get(foldName(header)); return at === undefined ? "" : byKey.get(rowKey)?.cells[at] ?? "" }, [byKey, column])
   const specOf = useCallback((header: string) => data.specs[header] ?? Object.entries(data.specs).find(([name]) => foldName(name) === foldName(header))?.[1], [data.specs])
@@ -161,7 +163,7 @@ function ViewContent({ data, block, searching = false }: { data: ViewData; block
   }, [byKey, data.headers, data.rows, data.statGroups, data.stats, data.tab, openRow, specOf, valueOf])
   const empty = searching ? "Aucune ligne ne correspond à la recherche." : "Aucune ligne dans cette vue pour le moment."
   if (data.view === "cards") return card
-    ? <IndexCardGrid card={card} rows={data.rows} rowSource={rowSource} onOpen={openRow} hrefOf={hrefOf} empty={empty} />
+    ? <IndexCardGrid card={card} rows={data.rows} rowSource={rowSource} onOpen={openRow} hrefOf={hrefOf} rowRef={rowRefOf} empty={empty} />
     : <Placeholder>Cet onglet n’a pas encore de cartes : elles se règlent dans l’index (Modifier › Cartes).</Placeholder>
   if (data.layout && isPresentationKind(data.layout.kind)) return <IndexPresentation
     layout={data.layout}
@@ -178,6 +180,7 @@ function ViewContent({ data, block, searching = false }: { data: ViewData; block
     renderForm={data.forms ? renderForm : undefined}
     renderStat={data.stats ? renderStat : undefined}
     presentations={data.views}
+    rowRef={rowRefOf}
     empty={empty}
   />
   if (!data.rows.length) return <Placeholder>{empty}</Placeholder>

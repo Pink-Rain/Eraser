@@ -18,6 +18,14 @@ import { ALL_SOURCES, matchesFilter, type IndexWindow } from "@/lib/index-window
 import { DEFAULT_ITEM_CARD, isPresentationKind, type Presentation } from "@/lib/index-presentations"
 import { objectIndexCellRef } from "@/lib/object-index-refs"
 import { usePersistentState } from "@/hooks/use-persistent-state"
+import { objectItemId } from "@/lib/object-item-id"
+import { OBJECT_REFERENCE_INDEX } from "@/lib/index-references"
+
+/** L'identifiant d'un item tel que le citent les textes « { » (celui de l'inventaire : son ID, sinon sa place). */
+export function objectRowRef(table: Pick<ObjectIndexTable, "fileId" | "sheetId" | "headers">, row: { rowNumber: number; values: string[] }) {
+  const at = table.headers.findIndex((header) => /^(id|identifiant)$/i.test(header.trim()))
+  return { index: OBJECT_REFERENCE_INDEX, id: objectItemId(at >= 0 ? row.values[at] : "", table.fileId, table.sheetId, row.rowNumber) }
+}
 
 export function objectTableKey(table: ObjectIndexTable) {
   return `${table.fileId}:${table.sheetId}`
@@ -181,6 +189,7 @@ export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited, layo
       onCommit={disabled ? undefined : (rowKey, header, value) => void commit(rowKey, header, value)}
       renderCard={cards ? renderCard : undefined}
       cardOf={cards ? (rowKey, cardId) => cardOfRow(rowKey, cardId === DEFAULT_ITEM_CARD ? null : cardId) : undefined}
+      rowRef={(rowKey) => { const found = locate(rowKey); return found ? objectRowRef(found.table, found.row) : null }}
       empty="Aucun item ne remplit les conditions de cette vue."
     /> : layout?.kind === "cards" && firstCard ? <IndexCardGrid
       card={firstCard}
@@ -188,6 +197,7 @@ export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited, layo
       rows={rows}
       rowSource={cardSource}
       onOpen={() => undefined}
+      rowRef={(rowKey) => { const found = locate(rowKey); return found ? objectRowRef(found.table, found.row) : null }}
       empty="Aucun item ne remplit les conditions de cette vue."
     /> : <SheetGrid
       layoutKey={objectViewGridKey(view.id)}

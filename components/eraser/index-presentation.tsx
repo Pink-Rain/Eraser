@@ -8,6 +8,7 @@ import { loadWorldIndexData } from "@/components/eraser/index-cells"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { addDays, addMonths, calendarsFromTables, compareCalendarDates, dateFromDayNumber, dayNumber, firstWeekdayOf, formatCalendarDate, monthLength, parseCalendarDate, realCalendar, REAL_CALENDAR, seasonOf, weekdayOf, weekStartOf, yearLength, type CalendarDate, type CalendarDefinition } from "@/lib/calendars"
 import { cardGridStyle, cardWidthRem, IndexCard, TypedValue, type CardRowSource } from "@/components/eraser/index-card"
+import { RowHover } from "@/components/eraser/index-references"
 import type { CardTemplate } from "@/lib/index-cards"
 import { parseGlyphValue, type IndexColumnSpec } from "@/lib/index-columns"
 import { cellNumber, cellParts } from "@/lib/index-stats"
@@ -55,6 +56,24 @@ export type PresentationProps = {
   inert?: boolean
   /** Le type de chaque colonne : les valeurs se montrent comme sur les cartes (charges, icônes, couleurs…). */
   specOf?: (header: string) => IndexColumnSpec | undefined
+  /** La ligne citable (index, identifiant) : au passage de la souris, son survol (la version de `layout.hover`). */
+  rowRef?: (rowKey: string) => { index: string; id: string } | null
+}
+
+/**
+ * Le survol des éléments d'une vue (« Au passage de la souris ») : chaque élément s'enveloppe
+ * pour montrer celui de sa ligne. Sans ligne citable, ou « Aucun » : l'élément tel quel.
+ */
+type RowHoverWrap = (row: string, node: ReactNode, className?: string) => ReactNode
+const RowHovers = createContext<RowHoverWrap>((_row, node) => node)
+const useRowHover = () => useContext(RowHovers)
+
+/** Aucun survol au passage de la souris (`layout.hover`). */
+export const NO_ROW_HOVER = "-"
+
+/** Un élément dessiné ailleurs (une carte, une vignette, une ligne d'arbre) avec le survol de sa ligne. */
+function WithRowHover({ row, className, children }: { row: string; className?: string; children: ReactNode }) {
+  return <>{useRowHover()(row, children, className)}</>
 }
 
 /** Le type des colonnes de la vue, pour dessiner chaque valeur selon son type. */
@@ -86,7 +105,7 @@ function cardFor(props: Pick<PresentationProps, "layout" | "renderCard" | "rende
     // eslint-disable-next-line react/display-name -- un rendu par ligne, pas un composant
     return (row: string) => {
       const node = <IndexCard card={template} row={{ value: (header) => props.valueOf(row, header), spec: props.specOf ?? noSpecs }} onOpen={props.inert ? undefined : () => props.onOpen(row)} />
-      return options.fill || wide ? node : <div className="w-full min-w-0" style={{ maxWidth: `${cardWidthRem(template)}rem` }}>{node}</div>
+      return <WithRowHover row={row}>{options.fill || wide ? node : <div className="w-full min-w-0" style={{ maxWidth: `${cardWidthRem(template)}rem` }}>{node}</div>}</WithRowHover>
     }
   }
   const drawCard = itemCard && props.renderCard ? (row: string) => {
@@ -102,8 +121,9 @@ function cardFor(props: Pick<PresentationProps, "layout" | "renderCard" | "rende
   // eslint-disable-next-line react/display-name -- un rendu par ligne, pas un composant
   return (row: string) => {
     const node = draw(row)
-    if (!node || !intercept) return node
-    return <div onClickCapture={(event) => { event.stopPropagation(); event.preventDefault(); if (!props.inert) props.onOpen(row) }} className={props.inert ? "" : "cursor-pointer"}>{node}</div>
+    if (!node) return node
+    if (!intercept) return <WithRowHover row={row}>{node}</WithRowHover>
+    return <WithRowHover row={row}><div onClickCapture={(event) => { event.stopPropagation(); event.preventDefault(); if (!props.inert) props.onOpen(row) }} className={props.inert ? "" : "cursor-pointer"}>{node}</div></WithRowHover>
   }
 }
 
@@ -302,7 +322,8 @@ function Item({ row, props, fields, framed, extra, className = "", lead }: { row
   const color = rowColor(layout, row, valueOf, optionsOf)
   const frame = accentFrame(look, color)
   const fieldList = fields ?? layout.fields ?? []
-  return <article className={`min-w-0 ${framed ? `border bg-card ${boxClass(look)}` : ""} ${paddings[look.density ?? "normal"]} ${frame.className} ${className}`} style={frame.style}>
+  const withHover = useRowHover()
+  return withHover(row, <article className={`min-w-0 ${framed ? `border bg-card ${boxClass(look)}` : ""} ${paddings[look.density ?? "normal"]} ${frame.className} ${className}`} style={frame.style}>
     <div className={`flex min-w-0 items-center ${look.density === "airy" ? "gap-3" : "gap-2"}`}>
       {lead}
       <RowImage src={rowImage(layout, row, valueOf)} look={look} />
@@ -313,7 +334,7 @@ function Item({ row, props, fields, framed, extra, className = "", lead }: { row
       </div>
       {extra}
     </div>
-  </article>
+  </article>)
 }
 
 /** L'ancre d'une section dans la page (le menu des sections y descend). */
@@ -440,14 +461,14 @@ function ListLayout(props: PresentationProps) {
     const flipped = Boolean(look.zigzag) && index % 2 === 1
     const chosenBelow = layout.click === "below" && props.chosen === row
     return <li key={row} className={`min-w-0 ${paddings[layout.compact ? "compact" : look.density ?? "normal"]} ${boxed ? `border bg-card ${boxClass(look)}` : columnsClass ? "border-b" : ""} ${zebra && index % 2 === 1 ? "bg-muted/35" : ""} ${chosenBelow ? "ring-1 ring-primary/40" : ""} ${frame.className}`} style={frame.style}>
-      <div className={`flex min-w-0 items-center ${look.density === "airy" ? "gap-3" : "gap-2"} ${flipped ? "flex-row-reverse text-right" : ""}`}>
+      <WithRowHover row={row}><div className={`flex min-w-0 items-center ${look.density === "airy" ? "gap-3" : "gap-2"} ${flipped ? "flex-row-reverse text-right" : ""}`}>
         {number(index)}
         <RowImage src={rowImage(layout, row, valueOf)} look={look} size={layout.compact ? "sm" : undefined} />
         {folding && <button type="button" aria-expanded={expanded} aria-label={expanded ? "Replier" : "Déplier"} onClick={() => toggle(row)} className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted"><ChevronDown className={`size-4 transition-transform ${expanded ? "" : "-rotate-90"}`} /></button>}
         {layout.compact
           ? <><ItemTitle row={row} look={look} color={color} nameOf={nameOf} onOpen={onOpen} inert={props.inert} truncate icon={<RowIcon layout={layout} row={row} valueOf={valueOf} color={color} />} badge={<RowBadge layout={layout} row={row} valueOf={valueOf} optionsOf={optionsOf} />} /><ItemFields fields={fields} row={row} look={look} valueOf={valueOf} optionsOf={optionsOf} compact /><RowGauge layout={layout} row={row} valueOf={valueOf} color={color} /></>
           : <div className={`grid min-w-0 flex-1 ${look.density === "compact" ? "gap-0.5" : "gap-1"} ${flipped ? "justify-items-end" : ""}`}><ItemTitle row={row} look={look} color={color} nameOf={nameOf} onOpen={onOpen} inert={props.inert} icon={<RowIcon layout={layout} row={row} valueOf={valueOf} color={color} />} badge={<RowBadge layout={layout} row={row} valueOf={valueOf} optionsOf={optionsOf} />} /><ItemFields fields={fields} row={row} look={look} valueOf={valueOf} optionsOf={optionsOf} /><RowGauge layout={layout} row={row} valueOf={valueOf} color={color} /></div>}
-      </div>
+      </div></WithRowHover>
       {expanded && <dl className="mt-2 grid gap-x-4 gap-y-1 rounded-lg bg-muted/30 p-2.5 pl-8 text-xs sm:grid-cols-2">{others.map((header) => { const value = plain(valueOf(row, header)); return value ? <div key={header} className="min-w-0"><dt className="font-semibold text-muted-foreground">{header}</dt><dd className="min-w-0 break-words"><TypedValue row={{ value: (column) => valueOf(row, column), spec: specOf }} column={header} accent={accentOf(look)} compact /></dd></div> : null })}</dl>}
       {chosenBelow && <div className="mt-2"><DetailPanel row={row} rows={rows} props={props} inline /></div>}
     </li>
@@ -601,7 +622,7 @@ function MasterDetailLayout(props: PresentationProps) {
         const rowTint = rowColor(layout, row, valueOf, optionsOf)
         const current = row === selected
         const frame = current ? { className: "" } : accentFrame(look, rowTint)
-        return <button key={row} type="button" aria-current={current} onClick={() => setChosen(row)} style={current ? { backgroundColor: accentOf(look), ...frame.style } : frame.style} className={`block w-full text-left ${look.surface === "boxed" ? `border ${current ? "border-transparent" : "bg-card"} ${boxClass(look)}` : "rounded-lg"} ${paddings[look.density ?? "compact"]} ${frame.className} ${current ? "text-white" : "hover:bg-muted"}`}>
+        return <WithRowHover key={row} row={row}><button type="button" aria-current={current} onClick={() => setChosen(row)} style={current ? { backgroundColor: accentOf(look), ...frame.style } : frame.style} className={`block w-full text-left ${look.surface === "boxed" ? `border ${current ? "border-transparent" : "bg-card"} ${boxClass(look)}` : "rounded-lg"} ${paddings[look.density ?? "compact"]} ${frame.className} ${current ? "text-white" : "hover:bg-muted"}`}>
           <span className="flex min-w-0 items-center gap-2">
             <RowIcon layout={layout} row={row} valueOf={valueOf} color={current ? undefined : rowTint} />
             <RowImage src={rowImage(layout, row, valueOf)} look={look} size={look.imageSize ?? "sm"} />
@@ -611,7 +632,7 @@ function MasterDetailLayout(props: PresentationProps) {
               <RowGauge layout={layout} row={row} valueOf={valueOf} color={rowTint} inverted={current} />
             </span>
           </span>
-        </button>
+        </button></WithRowHover>
       })}</div>} />
     </div>
     {selected
@@ -647,7 +668,7 @@ function CalendarEntry({ row, date, calendar, color, props, style: wanted }: { r
   const button = style === "dot" ? <button type="button" onClick={open} title={title} className={`${common} rounded px-1 py-0.5 hover:bg-muted`}><span aria-hidden className="size-2 shrink-0 rounded-full" style={{ backgroundColor: tint }} />{icon}{label}</button>
     : style === "bar" ? <button type="button" onClick={open} title={title} className={`${common} rounded-r border-l-[3px] bg-muted/60 px-1.5 py-0.5 hover:bg-muted`} style={{ borderLeftColor: tint }}>{icon}{label}</button>
       : <button type="button" onClick={open} title={title} className={`${common} rounded px-1.5 py-0.5 hover:brightness-95`} style={{ backgroundColor: `color-mix(in srgb, ${tint} 14%, transparent)`, color: tint }}>{icon}{label}</button>
-  return gauge ? <div className="grid gap-0.5">{button}{gauge}</div> : button
+  return <WithRowHover row={row}>{gauge ? <div className="grid gap-0.5">{button}{gauge}</div> : button}</WithRowHover>
 }
 
 type DatedRow = { row: string; date: CalendarDate }
@@ -942,10 +963,10 @@ function GalleryLayout(props: PresentationProps) {
         : <span className={`truncate font-semibold leading-tight ${look.titleFont === "sans" ? "" : "font-display"} ${titleSizes[look.titleSize ?? "sm"]} ${look.titleCaps ? "uppercase tracking-[0.12em]" : ""}`} style={look.accent === "title" && color ? { color } : undefined}>{nameOf(row) || "Sans nom"}</span>}
       <ItemFields fields={fields} row={row} look={{ ...look, fieldStyle: strip ? look.fieldStyle ?? "stacked" : look.fieldStyle }} valueOf={valueOf} optionsOf={optionsOf} compact={!strip && look.fieldStyle !== "stacked"} inverted={cabinet} />
     </span>
-    return <button key={row} type="button" onClick={() => onOpen(row)} title={nameOf(row)} className={`group grid min-w-0 content-start gap-1.5 text-left outline-offset-2 transition hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-primary motion-reduce:transition-none motion-reduce:hover:translate-y-0 ${below && circle ? "justify-items-center text-center" : ""} ${boxed && !cabinet ? `border bg-card p-2 pb-3 ${radii[look.radius ?? "md"]} ${look.shadow ? "shadow-md" : "shadow-sm"}` : ""} ${cabinet ? "p-3" : ""}`} style={sizes ? { width: `${widthOf(row)}rem`, maxWidth: "100%" } : undefined}>
+    return <WithRowHover key={row} row={row}><button type="button" onClick={() => onOpen(row)} title={nameOf(row)} className={`group grid min-w-0 content-start gap-1.5 text-left outline-offset-2 transition hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-primary motion-reduce:transition-none motion-reduce:hover:translate-y-0 ${below && circle ? "justify-items-center text-center" : ""} ${boxed && !cabinet ? `border bg-card p-2 pb-3 ${radii[look.radius ?? "md"]} ${look.shadow ? "shadow-md" : "shadow-sm"}` : ""} ${cabinet ? "p-3" : ""}`} style={sizes ? { width: `${widthOf(row)}rem`, maxWidth: "100%" } : undefined}>
       {picture}
       {caption}
-    </button>
+    </button></WithRowHover>
   }
   const gap = wall ? "gap-0" : look.density === "compact" ? "gap-2" : look.density === "airy" ? "gap-5" : "gap-3"
   const grid = (shown: string[]) => sizes
@@ -1223,7 +1244,7 @@ function TreeNode({ node, isOpen, toggle, card, prefix, mirrored = false, ...pro
   const drawn = boxed && card ? card(node.row) : null
   const rowLine = drawn
     ? <div className={`relative min-w-0 ${chosen ? "ring-2 ring-primary/50 rounded-xl" : ""} ${dimmed ? "opacity-50" : ""}`}>{drawn}{!leaf && <span className="absolute -right-2 -top-2 z-[1] flex items-center gap-1 rounded-full border bg-background px-1 shadow-sm">{caret}{count}{formula}</span>}</div>
-    : <div className={`group flex min-w-0 items-center gap-1.5 rounded-lg pr-2 hover:bg-muted/60 ${look.density === "compact" ? "py-0.5" : look.density === "airy" ? "py-1.5" : "py-1"} ${frame.className} ${chosen ? "bg-muted ring-1 ring-primary/40" : ""} ${dimmed ? "opacity-50 grayscale" : ""} ${mirrored ? "flex-row-reverse text-right" : ""}`} style={{ paddingLeft: boxed ? "0.25rem" : `${0.25 + node.depth * step}rem`, ...frame.style }}>
+    : <WithRowHover row={node.row}><div className={`group flex min-w-0 items-center gap-1.5 rounded-lg pr-2 hover:bg-muted/60 ${look.density === "compact" ? "py-0.5" : look.density === "airy" ? "py-1.5" : "py-1"} ${frame.className} ${chosen ? "bg-muted ring-1 ring-primary/40" : ""} ${dimmed ? "opacity-50 grayscale" : ""} ${mirrored ? "flex-row-reverse text-right" : ""}`} style={{ paddingLeft: boxed ? "0.25rem" : `${0.25 + node.depth * step}rem`, ...frame.style }}>
       {caret}
       {numberLabel}
       <RowImage src={rowImage(layout, node.row, valueOf)} look={look} size={look.imageSize ?? "sm"} />
@@ -1234,7 +1255,7 @@ function TreeNode({ node, isOpen, toggle, card, prefix, mirrored = false, ...pro
       </span>
       {count}{formula}
       <span className={`min-w-0 md:block ${mirrored ? "mr-auto" : "ml-auto"} hidden`}><ItemFields fields={(layout.fields ?? []).filter((field) => field !== layout.parentColumn && field !== layout.dateColumn && field !== layout.endColumn)} row={node.row} look={look} valueOf={valueOf} optionsOf={optionsOf} compact /></span>
-    </div>
+    </div></WithRowHover>
   const childPrefix = (index: number) => prefix ? `${prefix}${index + 1}.` : undefined
   const children = !leaf && open && <ul role="group" className={org ? `relative mt-4 flex justify-center gap-4 pt-4 before:absolute before:left-1/2 before:top-0 before:h-4 before:w-px before:-translate-x-1/2 before:bg-border` : boxed ? `grid ${gaps[look.density ?? "normal"]} pl-4 pt-1` : "relative"}>
     {!boxed && style === "lines" && <span aria-hidden className="absolute inset-y-0 w-px" style={{ left: `${0.25 + node.depth * step + 0.75}rem`, backgroundColor: color ? `color-mix(in srgb, ${color} 45%, transparent)` : "var(--border)" }} />}
@@ -1309,7 +1330,7 @@ function CodexLayout(props: PresentationProps) {
     // Une carte ou un formulaire comme élément : la fiche s'affiche ainsi (le sommaire la retrouve par son ancre).
     const drawn = card?.(row)
     if (drawn) return <div key={row} id={anchor(row)} className="scroll-mt-24">{drawn}</div>
-    return <article key={row} id={anchor(row)} className={`scroll-mt-24 overflow-hidden ${style === "plain" ? "" : radii[look.radius ?? "lg"]} ${shell.className} ${frame.className}`} style={{ ...shell.style, ...frame.style }}>
+    return <WithRowHover key={row} row={row}><article id={anchor(row)} className={`scroll-mt-24 overflow-hidden ${style === "plain" ? "" : radii[look.radius ?? "lg"]} ${shell.className} ${frame.className}`} style={{ ...shell.style, ...frame.style }}>
       {banner && <CoverImage src={src} className={style === "sketch" ? "mx-auto mt-5 max-h-72 w-auto max-w-[90%] rotate-[-1deg] border-8 border-white object-contain shadow-md" : "aspect-[21/8] w-full border-b object-cover"} />}
       <div className={style === "plain" ? "" : look.density === "compact" ? "p-4" : look.density === "airy" ? "p-7" : "p-5"}>
         <header className={`flex flex-wrap items-start justify-between gap-3 pb-3 ${paper ? "border-b border-[#d9c7a3]" : "border-b"}`}>
@@ -1336,7 +1357,7 @@ function CodexLayout(props: PresentationProps) {
           ? <button key={index} type="button" onClick={() => onOpen(link.target!)} title={link.field} className="rounded-full border px-2 py-0.5 font-medium underline-offset-2 hover:underline" style={{ borderColor: `color-mix(in srgb, ${color ?? accent} 45%, transparent)`, color: color ?? accent }}>{link.value}</button>
           : <span key={index} title={link.field} className={`rounded-full border px-2 py-0.5 ${muted}`}>{link.value}</span>)}</p>}
       </div>
-    </article>
+    </article></WithRowHover>
   }
   const tocBar = (row: string) => { const ratio = gaugeRatio(row); return ratio === null ? null : <span className="mt-0.5 block h-1 w-full overflow-hidden rounded-full bg-muted"><span className="block h-full rounded-full" style={{ width: `${Math.round(ratio * 100)}%`, backgroundColor: rowColor(layout, row, valueOf, optionsOf) ?? accent }} /></span> }
   const toc = layout.showToc && (layout.tocPosition === "top"
@@ -1497,7 +1518,13 @@ export function IndexPresentation(input: PresentationProps) {
       : panel ? (row: string) => setChosen((current) => current === row && click === "below" ? "" : row)
         : input.onOpen
   const props: PresentationProps = { ...input, rows: sortLayoutRows(input.rows, input.layout, input.valueOf), onOpen, openSheet, inert: click === "none", ...(panel ? { chosen: input.rows.includes(chosen) ? chosen : (click === "side" ? input.rows[0] ?? "" : ""), onChoose: setChosen } : {}) }
-  return <ViewSpecs.Provider value={input.specOf ?? noSpecs}><ViewLayoutBody props={props} click={click} /></ViewSpecs.Provider>
+  const { rowRef } = input
+  const hover = input.layout.hover
+  const wrap = useCallback<RowHoverWrap>((row, node, className) => {
+    const ref = hover === NO_ROW_HOVER ? null : rowRef?.(row)
+    return ref?.id ? <RowHover index={ref.index} id={ref.id} hover={hover} className={className}>{node}</RowHover> : node
+  }, [hover, rowRef])
+  return <ViewSpecs.Provider value={input.specOf ?? noSpecs}><RowHovers.Provider value={wrap}><ViewLayoutBody props={props} click={click} /></RowHovers.Provider></ViewSpecs.Provider>
 }
 
 const noSpecs = () => undefined
