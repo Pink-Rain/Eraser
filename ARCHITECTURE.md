@@ -100,7 +100,14 @@ Vocabulaire du code (chaque mot ne désigne qu’une chose) :
   (`lib/index-layouts.ts`), **stats** (`lib/index-stats.ts`) : sur le Worker
   (portées `index-cards`, `index-layouts`, `index-stats`).
 - **Bloc « Vue d’index »** d’une page (`ViewBlock`, `lib/custom-pages.ts`) :
-  le seul endroit qui réunit aujourd’hui filtre, tri et présentation.
+  réglé dans la page (onglet, présentation, forme, filtre, tri, clic), ou
+  montrant une vue enregistrée (`savedViewId`) : la vue règle alors tout cela,
+  la page garde son titre, sa hauteur, son nombre de lignes, sa page de ligne et
+  la recherche. Le bloc garde une copie de la vue (ce que la page montre si la
+  vue disparaît) ; « Détacher pour cette page » la lui laisse en propre. Le
+  serveur des pages lit la vue sur le Worker, jamais dans Google
+  (`linkedBlock`, `app/api/pages/block-data/route.ts`). L’ancien champ `viewId`
+  (onglet-fenêtre, alpha 206) n’est jamais relu d’office.
 - **Vue enregistrée** (`SavedView`, `lib/index-saved-views.ts`) : un filtre, un
   tri et une présentation sous un nom. Gardée sur le Worker (portée
   `index-saved-views`, une entrée par vue, `lib/index-saved-views-store.ts`) ;
@@ -108,7 +115,9 @@ Vocabulaire du code (chaque mot ne désigne qu’une chose) :
   vue enregistrée ne les remplace (même identifiant), jamais modifiés. Créée et
   réglée par le dialogue « Nouvelle vue » de l'index, choisie dans le groupe
   « Vues » du choix d'onglet, affichée sous sa présentation (tableau, cartes,
-  liste, kanban…, onglet stat). Voir la roadmap « Vues des index ».
+  liste, kanban…, onglet stat), réutilisable par les blocs de page ; le
+  dialogue nomme les pages qui la montrent avant de la modifier ou de la
+  supprimer (`savedViewUses`). Voir la roadmap « Vues des index ».
 
 Les clés déjà enregistrées ou échangées avec le serveur gardent leurs anciens
 noms et ne se renomment jamais : actions `save-view`, `delete-view`,

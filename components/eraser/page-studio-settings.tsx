@@ -7,10 +7,12 @@ import { IconPicker } from "@/components/eraser/index-gauge"
 import { PageIcon, calloutTones, formatWhen } from "@/components/eraser/custom-page-view"
 import { blockIcons } from "@/components/eraser/page-studio-icons"
 import { PresentationKindSettings } from "@/components/eraser/index-presentations-editor"
+import { useIndexSettings } from "@/components/eraser/index-windows"
+import { linkedBlockFields, newSavedViewId, savedViewFromBlock, type SavedView } from "@/lib/index-saved-views"
 import { isPresentationKind, PRESENTATION_VARIANT_PREFIX, type Presentation } from "@/lib/index-presentations"
 import { ALL_PINNED_STATS } from "@/lib/custom-pages-data"
 import { eraserModules, moduleSections } from "@/lib/eraser-modules"
-import { describeCondition, filterOperators, type FilterCondition } from "@/lib/index-windows"
+import { ALL_SOURCES, describeCondition, filterOperators, type FilterCondition } from "@/lib/index-windows"
 import { replaceModes, replaceableRoutes } from "@/lib/page-replacements"
 import {
   blockCatalog,
@@ -188,6 +190,84 @@ function WhereEditor({ where, columns, choices, rowPage, onChange }: { where?: V
   </div>
 }
 
+type ViewBlockSettings = Extract<PageBlock, { type: "view" }>
+
+/** Ce que montre une vue, en une ligne : sa présentation, son filtre, son tri. */
+function savedViewSummary(view: SavedView) {
+  const kind = viewBlockKinds.find((item) => item.value === view.kind)?.label ?? view.kind
+  const conditions = (view.filter?.conditions ?? []).filter((condition) => condition.column)
+  return [
+    view.source === ALL_SOURCES ? `${kind}, tous les onglets` : `${kind} de « ${view.source} »`,
+    conditions.length ? conditions.map(describeCondition).join(view.filter?.match === "une" ? " ou " : " et ") : "toutes les lignes",
+    view.sort ? `tri par ${view.sort.column}${view.sort.desc ? " (Z→A)" : ""}` : "",
+  ].filter(Boolean).join(" · ")
+}
+
+/**
+ * La vue enregistrée qu'un bloc montre (roadmap « Vues des index », D4 hybride) : choisie parmi
+ * celles de l'index, elle règle l'onglet, la présentation, la forme, la carte, le filtre, le tri
+ * et le clic, et ses changements dans l'index se voient ici. Le bloc garde son titre, sa
+ * hauteur, son nombre de lignes, sa page de ligne et la recherche. « Détacher pour cette page »
+ * en fait une copie propre au bloc ; un bloc réglé ici peut devenir une vue de l'index.
+ */
+function SavedViewChoice({ block, tabs, onChange }: { block: ViewBlockSettings; tabs: string[]; onChange: (patch: Partial<ViewBlockSettings>) => void }) {
+  const settings = useIndexSettings(block.index)
+  const [naming, setNaming] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState("")
+  // L'onglet stat n'est pas une vue qu'un bloc Vue peut montrer (c'est le bloc Statistiques).
+  const views = settings.savedViews.filter((view) => view.kind !== "stats")
+  const current = views.find((view) => view.id === block.savedViewId)
+  const legacy = block.viewId && !block.savedViewId ? views.find((view) => view.id === block.viewId) : undefined
+  const link = (view: SavedView) => onChange({ ...linkedBlockFields(block, view), savedViewId: view.id, viewId: undefined })
+  // Détacher : le bloc garde la vue telle qu'elle est aujourd'hui, puis ne la suit plus.
+  const detach = () => onChange({ ...(current ? linkedBlockFields(block, current) : {}), savedViewId: undefined })
+  async function saveAsView() {
+    const name = (naming ?? "").trim()
+    if (!name) return
+    setPending(true); setError("")
+    try {
+      const position = Math.max(-1, ...settings.savedViews.map((view) => view.position)) + 1
+      const saved = await settings.saveSavedView({ ...savedViewFromBlock(block), id: newSavedViewId(), name, position })
+      onChange({ savedViewId: saved.id, viewId: undefined })
+      setNaming(null)
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "La vue n’a pas pu être enregistrée.") }
+    setPending(false)
+  }
+  return <>
+    <Field label="Vue de l’index" error={error} hint={block.savedViewId
+      ? "Réglée dans l’index : ses changements se voient ici. Le titre, la hauteur et le nombre de lignes restent ceux de la page."
+      : settings.savedViewsUnavailable ? "Les vues se gardent sur le serveur partagé d’Eraser, qui ne répond pas : règle ce bloc ici."
+        : "Une vue réglée dans l’index, montrée telle quelle ; sinon, règle ce bloc ici."}>
+      <select className={fieldClass} value={block.savedViewId ?? ""} onChange={(event) => { const view = views.find((item) => item.id === event.target.value); if (view) link(view); else detach() }}>
+        <option value="">Aucune : réglée pour cette page</option>
+        {views.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}
+        {block.savedViewId && !current && <option value={block.savedViewId}>{settings.ready ? "Vue supprimée (la page garde sa dernière copie)" : "Lecture des vues…"}</option>}
+      </select>
+    </Field>
+    {current && <Hint>{savedViewSummary(current)}</Hint>}
+    {block.savedViewId && !current && settings.ready && <Hint>Cette vue n’existe plus dans l’index : la page montre la copie de son dernier réglage. Détache le bloc pour la régler ici.</Hint>}
+    {block.savedViewId && current?.source === ALL_SOURCES && <Field label="Onglet" hint="La vue cherche dans tous les onglets ; un bloc en montre un.">
+      <select className={fieldClass} value={block.tab} onChange={(event) => onChange({ tab: event.target.value })}>
+        <option value="">Choisir un onglet…</option>
+        {tabs.map((tab) => <option key={tab} value={tab}>{tab}</option>)}
+      </select>
+    </Field>}
+    {block.savedViewId && <button type="button" onClick={detach} className="justify-self-start text-xs font-medium text-primary hover:underline" title="Le bloc garde la vue telle qu’elle est aujourd’hui, puis ne la suit plus : tu la règles ici, pour cette page seulement">Détacher pour cette page</button>}
+    {legacy && <Hint>
+      Ce bloc portait sur l’onglet-fenêtre « {legacy.name} » (ancien réglage, plus lu).{" "}
+      <button type="button" className="font-medium text-primary hover:underline" onClick={() => link(legacy)}>Montrer la vue « {legacy.name} »</button>
+    </Hint>}
+    {!block.savedViewId && block.tab && !settings.savedViewsUnavailable && (naming === null
+      ? <button type="button" onClick={() => setNaming(block.heading || "")} className="justify-self-start text-xs font-medium text-primary hover:underline" title="La vue rejoint celles de l’index (groupe « Vues ») et ce bloc la montre : d’autres pages pourront la réutiliser">Enregistrer comme vue de l’index</button>
+      : <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-1.5">
+        <input className={fieldClass} value={naming} maxLength={60} placeholder="Nom de la vue" autoFocus aria-label="Nom de la nouvelle vue" onChange={(event) => setNaming(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void saveAsView(); if (event.key === "Escape") setNaming(null) }} />
+        <button type="button" disabled={pending || !naming.trim()} onClick={() => void saveAsView()} className="inline-flex h-8 items-center gap-1 rounded-lg bg-primary px-2.5 text-xs font-medium text-primary-foreground disabled:opacity-50">{pending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}Créer</button>
+        <button type="button" onClick={() => setNaming(null)} className="inline-flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted" aria-label="Annuler"><X className="size-3.5" /></button>
+      </div>)}
+  </>
+}
+
 function ViewSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { type: "view" }>; rowOf?: { index: string; tab?: string }; onChange: (patch: Partial<Extract<PageBlock, { type: "view" }>>) => void }) {
   const { details, loading, reload } = useIndexDetails(block.index)
   const tab = details?.tabs.find((item) => item.name === block.tab)
@@ -206,15 +286,18 @@ function ViewSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { 
     : value.startsWith("preset:") ? onChange({ presetId: value.slice("preset:".length), layout: undefined })
     : onChange({ presetId: undefined, layout: undefined })
   const where = block.where
+  // Un bloc qui montre une vue de l'index : la vue règle l'onglet, la forme, le filtre, le tri et le clic.
+  const linked = Boolean(block.savedViewId)
   return <>
-    <IndexPicker value={block.index} onChange={(index) => onChange({ index, tab: "", viewId: undefined, layout: undefined, presetId: undefined, cardId: undefined, where: undefined, sort: undefined })} />
-    {block.index && <Field label="Onglet">
+    <IndexPicker value={block.index} onChange={(index) => onChange({ index, tab: "", viewId: undefined, savedViewId: undefined, layout: undefined, presetId: undefined, cardId: undefined, where: undefined, sort: undefined })} />
+    {block.index && <SavedViewChoice block={block} tabs={(details?.tabs ?? []).map((item) => item.name)} onChange={onChange} />}
+    {block.index && !linked && <Field label="Onglet">
       <select className={fieldClass} value={block.tab} disabled={loading && !details} onChange={(event) => onChange({ tab: event.target.value, viewId: undefined, layout: undefined, cardId: undefined, where: undefined, sort: undefined })}>
         <option value="">{loading && !details ? "Lecture de l’index…" : "Choisir un onglet…"}</option>
         {(details?.tabs ?? []).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
       </select>
     </Field>}
-    {block.tab && <Field label="Présentation" hint="Tout ce que propose « Modifier » dans l’index. Un point : déjà réglée pour cet onglet.">
+    {block.tab && !linked && <Field label="Présentation" hint="Tout ce que propose « Modifier » dans l’index. Un point : déjà réglée pour cet onglet.">
       <div className="flex flex-wrap gap-1">
         {viewBlockKinds.map((kind) => {
           const Icon = blockIcons.views[kind.value]
@@ -224,14 +307,14 @@ function ViewSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { 
         })}
       </div>
     </Field>}
-    {block.tab && block.kind === "cards" && <Field label="Carte" hint={tab?.cardList?.length ? <>Les cartes de l’onglet (Modifier › Cartes). <RefreshLink onClick={reload} loading={loading} /></> : <>Cet onglet n’a pas encore de carte : Eraser en dessine une d’office. Crée les tiennes dans l’index (Modifier › Cartes). <RefreshLink onClick={reload} loading={loading} /></>}>
+    {block.tab && !linked && block.kind === "cards" && <Field label="Carte" hint={tab?.cardList?.length ? <>Les cartes de l’onglet (Modifier › Cartes). <RefreshLink onClick={reload} loading={loading} /></> : <>Cet onglet n’a pas encore de carte : Eraser en dessine une d’office. Crée les tiennes dans l’index (Modifier › Cartes). <RefreshLink onClick={reload} loading={loading} /></>}>
       <select className={fieldClass} value={block.cardId ?? ""} onChange={(event) => onChange({ cardId: event.target.value || undefined })}>
         <option value="">Celle à l’étoile (par défaut)</option>
         {(tab?.cardList ?? []).map((card) => <option key={card.id} value={card.id}>{card.name}</option>)}
         {block.cardId && !(tab?.cardList ?? []).some((card) => card.id === block.cardId) && <option value={block.cardId}>Carte supprimée (celle par défaut la remplace)</option>}
       </select>
     </Field>}
-    {block.tab && presentation && <Field label="Forme" hint={<>Les versions de l’onglet (Modifier › {kindLabel} › Nouveau) et les presets apparaissent ici. <RefreshLink onClick={reload} loading={loading} /></>}>
+    {block.tab && !linked && presentation && <Field label="Forme" hint={<>Les versions de l’onglet (Modifier › {kindLabel} › Nouveau) et les presets apparaissent ici. <RefreshLink onClick={reload} loading={loading} /></>}>
       <select className={fieldClass} value={form} onChange={(event) => pickForm(event.target.value)}>
         <option value="">{configured.includes(block.kind) ? `Celle à l’étoile de l’onglet (Modifier › ${kindLabel})` : `Celle de l’onglet (${kindLabel} par défaut)`}</option>
         {variants.length > 0 && <optgroup label="Les autres versions de l’onglet">{variants.map((item) => <option key={item.id} value={`preset:${PRESENTATION_VARIANT_PREFIX}${item.id}`}>{item.name}</option>)}</optgroup>}
@@ -241,15 +324,15 @@ function ViewSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { 
         <option value="own">Propre à cette page…</option>
       </select>
     </Field>}
-    {block.tab && presentation && block.layout && isPresentationKind(block.kind) && <PresentationKindSettings kind={block.kind} layout={block.layout} columns={columns} cards={tab?.cardList ?? []} onChange={(layout) => onChange({ layout: { ...layout, kind: block.kind } })} />}
-    {block.tab && <Field label="Seulement les lignes où…" hint={`Sans condition : toutes les lignes. « {Moi} » : le lecteur (« Joueur est {Moi} » : ses personnages ; « MJ est {Moi} » : ses campagnes).${rowOf?.index ? " « {Colonne} » prend la valeur de la ligne de la page, aussi dans un nom de colonne." : " Les colonnes masquées comptent aussi, sans jamais être montrées."}`}>
+    {block.tab && !linked && presentation && block.layout && isPresentationKind(block.kind) && <PresentationKindSettings kind={block.kind} layout={block.layout} columns={columns} cards={tab?.cardList ?? []} onChange={(layout) => onChange({ layout: { ...layout, kind: block.kind } })} />}
+    {block.tab && !linked && <Field label="Seulement les lignes où…" hint={`Sans condition : toutes les lignes. « {Moi} » : le lecteur (« Joueur est {Moi} » : ses personnages ; « MJ est {Moi} » : ses campagnes).${rowOf?.index ? " « {Colonne} » prend la valeur de la ligne de la page, aussi dans un nom de colonne." : " Les colonnes masquées comptent aussi, sans jamais être montrées."}`}>
       <WhereEditor where={where} columns={columns} choices={tab?.choices ?? {}} rowPage={Boolean(rowOf?.index)} onChange={(next) => onChange({ where: next })} />
     </Field>}
-    {block.viewId && <Hint>
+    {block.viewId && !linked && <Hint>
       Ce bloc portait sur un onglet-fenêtre de l’index (ancien réglage, plus utilisé : un onglet-fenêtre n’est que le tableau filtré de l’index). Mets ses conditions ci-dessus si tu en as besoin.{" "}
       <button type="button" className="font-medium text-primary hover:underline" onClick={() => onChange({ viewId: undefined })}>Retirer l’ancien réglage</button>
     </Hint>}
-    {block.tab && <Field label="Trier par" hint={presentation ? "Avant « Au plus » ; une forme qui a son propre tri le garde pour l’affichage." : undefined}>
+    {block.tab && !linked && <Field label="Trier par" hint={presentation ? "Avant « Au plus » ; une forme qui a son propre tri le garde pour l’affichage." : undefined}>
       <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-1.5">
         <select className={fieldClass} value={block.sort?.column ?? ""} onChange={(event) => onChange({ sort: event.target.value ? { column: event.target.value, desc: block.sort?.desc ?? false } : undefined })}>
           <option value="">L’ordre de l’onglet</option>
@@ -274,7 +357,7 @@ function ViewSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { 
         {columns.map((column) => <option key={column} value={column}>{column}</option>)}
       </select>
     </Field>}
-    {block.tab && <Field label="Au clic sur une ligne" hint={block.click && block.click !== "-" ? "« {ID} » et « {Colonne} » prennent les valeurs de la ligne. La page ouverte vérifie toujours qui peut la voir." : !block.click ? "Sa fiche : sa page de ligne s’il y en a une, sinon sa page d’Eraser (une classe…) ou l’index (MJ et admins)." : undefined}>
+    {block.tab && !linked && <Field label="Au clic sur une ligne" hint={block.click && block.click !== "-" ? "« {ID} » et « {Colonne} » prennent les valeurs de la ligne. La page ouverte vérifie toujours qui peut la voir." : !block.click ? "Sa fiche : sa page de ligne s’il y en a une, sinon sa page d’Eraser (une classe…) ou l’index (MJ et admins)." : undefined}>
       <select className={fieldClass} value={!block.click ? "" : block.click === "-" ? "-" : "href"} onChange={(event) => onChange({ click: event.target.value === "href" ? block.index === "campaigns" ? "/campagne/{ID}" : "/" : event.target.value || undefined })}>
         <option value="">Ouvrir sa fiche</option>
         <option value="href">Ouvrir une adresse…</option>

@@ -839,6 +839,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         index="objects"
         allowStats
         view={viewDialog.mode === "edit" ? activeView : null}
+        usedBy={viewDialog.mode === "edit" && activeView ? settings.savedViewPages[activeView.id] : undefined}
         draft={viewDialog.draft}
         notice={viewDialog.notice}
         sources={[{ value: ALL_SOURCES, label: "Tous les index d’items" }, ...tables.map((table) => ({ value: tableKey(table), label: tableLabel(table) }))]}

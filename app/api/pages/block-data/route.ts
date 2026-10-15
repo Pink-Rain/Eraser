@@ -11,6 +11,8 @@ import { readCustomPage } from "@/lib/custom-pages-store"
 import { backlinkSources, indexSourceOf, readOptions, rowTemplates, viewerFor } from "@/lib/custom-pages-server"
 import { listCustomIndexes } from "@/lib/custom-indexes"
 import { listIndexCards } from "@/lib/index-cards-store"
+import { linkedBlock, type SavedView } from "@/lib/index-saved-views"
+import { listStoredSavedViews } from "@/lib/index-saved-views-store"
 import { listIndexPresentations, listIndexStatsRecord, listViewPresets } from "@/lib/index-presentations-store"
 import { builtinPresentationPresets, namedPresentationsOf, presentationFor, presentationVariant, PRESENTATION_VARIANT_PREFIX, type PresentationKind } from "@/lib/index-presentations"
 import { rowOfRoute } from "@/lib/page-replacements"
@@ -59,8 +61,20 @@ function blockForRow(block: ViewBlock, row: RowContext | null): ViewBlock {
   return { ...block, where, sort, layout }
 }
 
+/**
+ * La vue enregistrée qu'un bloc montre (D4), lue sur le serveur partagé (copie de 30 s), jamais
+ * dans Google : une vue encore réduite à un onglet-fenêtre de la feuille, ou injoignable, laisse
+ * au bloc la copie prise à son dernier enregistrement.
+ */
+async function linkedViewOf(key: WorldIndexKey, block: ViewBlock): Promise<SavedView | null> {
+  if (!block.savedViewId) return null
+  const stored = await listStoredSavedViews(key).catch(() => [])
+  const found = stored.find((entry) => entry.id === block.savedViewId)
+  return found && !("removed" in found) ? found as SavedView : null
+}
+
 async function viewData(key: WorldIndexKey, raw: ViewBlock, match: Parameters<typeof viewBlockData>[1]["match"], row: RowContext | null, player: boolean, rowPageOf: RowPageOf, uid: string) {
-  const block = blockForRow(raw, row)
+  const block = blockForRow(linkedBlock(raw, await linkedViewOf(key, raw)), row)
   // « {Moi} » : les comptes du lecteur (lus seulement si une condition le demande).
   const me = block.where?.conditions.some(isMeCondition) ? await identityUidsForUser(uid).catch(() => [uid]) : undefined
   // Ce qu'une vue lit : l'index (copie en mémoire), les formes et les cartes de l'index (copies

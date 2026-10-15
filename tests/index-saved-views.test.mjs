@@ -152,3 +152,42 @@ test("les filtres personnels du tableau deviennent le filtre d'une vue, et ce qu
   assert.deepEqual(saved.filterFromGridFilters({}, headerOf), { skipped: [] });
   assert.match(saved.newSavedViewId(), /^vue-[a-z0-9]+$/);
 });
+
+test("un bloc de page qui montre une vue (D4) : la vue règle la forme, le filtre et le tri, la page garde le reste", () => {
+  const view = { id: "vue-boss", index: "creatures", name: "Les boss", source: "Bestiaire", kind: "kanban", shape: { from: "variant", id: "serre" }, filter: { match: "toutes", conditions: [{ column: "Type", operator: "est", value: "Boss" }] }, sort: { column: "Niveau", desc: true }, position: 2 };
+  // La copie gardée par le bloc (son dernier enregistrement) : un ancien tableau trié par nom, avec une carte.
+  const block = pages.cleanBlock({ id: "b1", type: "view", index: "creatures", tab: "Ancien onglet", kind: "cards", cardId: "c-1", sort: { column: "Nom", desc: false }, click: "-", limit: 6, height: "md", heading: "Boss du chapitre", rowMatch: "Lieu", ignoreSearch: true, savedViewId: "vue-boss" });
+  assert.equal(block.savedViewId, "vue-boss", "le lien se garde à l'enregistrement");
+  const shown = saved.linkedBlock(block, view);
+  assert.deepEqual({ tab: shown.tab, kind: shown.kind, presetId: shown.presetId, where: shown.where, sort: shown.sort, cardId: shown.cardId, click: shown.click }, { tab: "Bestiaire", kind: "kanban", presetId: "vue:serre", where: view.filter, sort: view.sort, cardId: undefined, click: undefined });
+  assert.deepEqual({ limit: shown.limit, height: shown.height, heading: shown.heading, rowMatch: shown.rowMatch, ignoreSearch: shown.ignoreSearch }, { limit: 6, height: "md", heading: "Boss du chapitre", rowMatch: "Lieu", ignoreSearch: true });
+  // Vue retirée, illisible, ou d'un autre identifiant : la copie du bloc, telle quelle.
+  assert.equal(saved.linkedBlock(block, null), block);
+  assert.equal(saved.linkedBlock(block, { ...view, id: "autre" }), block);
+  // L'onglet stat n'est pas une vue qu'un bloc montre.
+  assert.equal(saved.linkedBlock({ ...block, savedViewId: "s" }, { ...view, id: "s", kind: "stats" }).kind, "cards");
+  // Une vue de tous les onglets : l'onglet reste celui du bloc.
+  assert.equal(saved.linkedBlock(block, { ...view, source: "*" }).tab, "Ancien onglet");
+  // Détacher : la vue d'aujourd'hui devient la copie du bloc, qui se relit sans perte.
+  const detached = pages.cleanBlock({ ...block, ...saved.linkedBlockFields(block, view), savedViewId: undefined });
+  assert.equal(detached.savedViewId, undefined);
+  assert.deepEqual({ tab: detached.tab, kind: detached.kind, presetId: detached.presetId, where: detached.where, sort: detached.sort }, { tab: "Bestiaire", kind: "kanban", presetId: "vue:serre", where: view.filter, sort: view.sort });
+  // Une forme propre à la vue passe telle quelle.
+  const own = saved.linkedBlock(block, { ...view, shape: { from: "own", layout: { kind: "list", compact: true } }, kind: "list" });
+  assert.deepEqual([own.kind, own.layout, own.presetId], ["list", { kind: "list", compact: true }, undefined]);
+});
+
+test("les pages qui montrent une vue : version en cours et publiée, corbeille exclue, par index", () => {
+  const block = (id, savedViewId, index = "creatures") => ({ id, type: "view", vis: "tous", index, tab: "Bestiaire", kind: "table", limit: 0, height: "auto", heading: "", rowMatch: "", savedViewId });
+  const page = (id, sections, extra = {}) => ({ id, title: `Page ${id}`, slug: id, place: "wiki", campaignId: "", trashedAt: "", published: null, sections, ...extra });
+  const section = (...blocks) => [{ id: "s", cols: [blocks] }];
+  const uses = pages.savedViewUses([
+    page("a", section(block("1", "vue-boss"), block("2", "vue-boss"))),
+    page("b", section(), { published: { sections: section(block("3", "vue-boss")) } }),
+    page("c", section(block("4", "vue-boss")), { trashedAt: "2026-10-15" }),
+    page("d", section(block("5", "vue-boss", "places"), block("6", "vue-autre"))),
+  ], "creatures");
+  assert.deepEqual(Object.keys(uses).sort(), ["vue-autre", "vue-boss"]);
+  assert.deepEqual(uses["vue-boss"].map((entry) => entry.id), ["a", "b"]);
+  assert.ok(uses["vue-boss"][0].href);
+});

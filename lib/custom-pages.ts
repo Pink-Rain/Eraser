@@ -66,6 +66,14 @@ export type ViewBlock = Common & {
    * un onglet-fenêtre n'est que le tableau filtré de l'index. Les conditions du bloc le remplacent.
    */
   viewId?: string
+  /**
+   * Une vue enregistrée de l'index (roadmap « Vues des index », D4) : le bloc la montre telle
+   * qu'elle est réglée dans l'index (onglet, présentation, forme, carte, filtre, tri, clic) et ne
+   * garde à lui que son titre, sa hauteur, son nombre de lignes, sa page de ligne et la recherche.
+   * Ses autres champs sont la copie de la vue au dernier enregistrement : ce que la page montre si
+   * la vue disparaît, et ce qu'elle garde quand on la détache (lib/index-saved-views.ts).
+   */
+  savedViewId?: string
   /** La forme réglée pour cette page seulement (sinon : le preset choisi, ou celle de l'onglet). */
   layout?: Presentation
   /** Un preset de vue (« Kanban serré », un des tiens…) : sa forme, appliquée aux colonnes de l'onglet. */
@@ -396,12 +404,13 @@ export function cleanBlock(input: unknown): PageBlock | null {
       const layout = cleanPresentation(raw.layout)
       const ownLayout = layout && isPresentationKind(layout.kind) ? layout : undefined
       const viewId = text(raw.viewId, 60)
+      const savedViewId = text(raw.savedViewId, 80)
       const presetId = ownLayout ? "" : text(raw.presetId, 80)
       const cardId = text(raw.cardId, 60)
       const where = cleanViewWhere(raw.where)
       const sortRaw = raw.sort && typeof raw.sort === "object" ? raw.sort as Record<string, unknown> : null
       const sortColumn = sortRaw ? text(sortRaw.column, 120) : ""
-      return { ...common, type, index: text(raw.index, 90), tab: text(raw.tab, 120), kind: ownLayout ? ownLayout.kind as ViewBlockKind : oneOf(raw.kind, viewKindValues, "table"), limit: Number.isFinite(limit) ? Math.max(0, Math.min(500, Math.round(limit))) : 0, height: oneOf(raw.height, ["auto", "sm", "md", "lg"] as const, "auto"), heading: text(raw.heading, 160), rowMatch: text(raw.rowMatch, 120), ...(viewId ? { viewId } : {}), ...(ownLayout ? { layout: ownLayout } : {}), ...(presetId ? { presetId } : {}), ...(cardId ? { cardId } : {}), ...(where ? { where } : {}), ...(sortColumn ? { sort: { column: sortColumn, desc: sortRaw?.desc === true } } : {}), ...(raw.ignoreSearch === true ? { ignoreSearch: true } : {}), ...(cleanClick(raw.click) ? { click: cleanClick(raw.click) } : {}) }
+      return { ...common, type, index: text(raw.index, 90), tab: text(raw.tab, 120), kind: ownLayout ? ownLayout.kind as ViewBlockKind : oneOf(raw.kind, viewKindValues, "table"), limit: Number.isFinite(limit) ? Math.max(0, Math.min(500, Math.round(limit))) : 0, height: oneOf(raw.height, ["auto", "sm", "md", "lg"] as const, "auto"), heading: text(raw.heading, 160), rowMatch: text(raw.rowMatch, 120), ...(viewId ? { viewId } : {}), ...(savedViewId ? { savedViewId } : {}), ...(ownLayout ? { layout: ownLayout } : {}), ...(presetId ? { presetId } : {}), ...(cardId ? { cardId } : {}), ...(where ? { where } : {}), ...(sortColumn ? { sort: { column: sortColumn, desc: sortRaw?.desc === true } } : {}), ...(raw.ignoreSearch === true ? { ignoreSearch: true } : {}), ...(cleanClick(raw.click) ? { click: cleanClick(raw.click) } : {}) }
     }
     case "stat": return { ...common, type, index: text(raw.index, 90), statId: text(raw.statId, 60), heading: text(raw.heading, 160) }
     case "rowfields": return { ...common, type, columns: Array.isArray(raw.columns) ? raw.columns.flatMap((column) => { const clean = text(column, 120); return clean ? [clean] : [] }).slice(0, 40) : [], heading: text(raw.heading, 160), style: oneOf(raw.style, ["list", "grid", "form"] as const, "grid"), ...(text(raw.formId, 40) ? { formId: text(raw.formId, 40) } : {}) }
@@ -526,6 +535,21 @@ export function hasUnpublishedChanges(page: CustomPage) {
 
 export function allBlocks(content: Pick<PageContent, "sections">) {
   return content.sections.flatMap((section) => section.cols.flat())
+}
+
+/**
+ * Les pages (hors corbeille) dont un bloc Vue montre une vue enregistrée de cet index, version
+ * en cours ou version publiée : par identifiant de vue. L'index s'en sert pour avertir avant de
+ * modifier ou de supprimer une vue.
+ */
+export function savedViewUses(pages: CustomPage[], index: string) {
+  const uses: Record<string, Array<{ id: string; title: string; href: string }>> = {}
+  for (const page of pages) {
+    if (page.trashedAt) continue
+    const ids = new Set([...allBlocks(page), ...(page.published ? allBlocks(page.published) : [])].flatMap((block) => block.type === "view" && block.savedViewId && block.index === index ? [block.savedViewId] : []))
+    for (const id of ids) (uses[id] ??= []).push({ id: page.id, title: page.title, href: pageHref(page) })
+  }
+  return uses
 }
 
 export function findBlock(content: Pick<PageContent, "sections">, id: string) {

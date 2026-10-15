@@ -226,6 +226,31 @@ export function blockFieldsFromSavedView(view: SavedView): BlockViewFields | nul
   return fields
 }
 
+/** Les champs d'un bloc de page qui viennent de sa vue quand il en montre une (D4). */
+const LINKED_FIELDS = ["kind", "layout", "presetId", "cardId", "where", "sort", "click"] as const
+
+/**
+ * Ce qu'une vue donne à un bloc de page qui la montre : son onglet (celui du bloc pour une vue
+ * de tous les onglets, un bloc n'en montre qu'un), sa présentation, sa forme, sa carte, son
+ * filtre, son tri et son clic ; un champ absent de la vue efface celui du bloc. `null` pour
+ * l'onglet stat, qui n'est pas une vue d'index.
+ */
+export function linkedBlockFields(block: Pick<ViewBlock, "tab">, view: SavedView): (Required<Pick<ViewBlock, "tab">> & { [K in typeof LINKED_FIELDS[number]]: ViewBlock[K] | undefined }) | null {
+  const fields = blockFieldsFromSavedView(view)
+  if (!fields) return null
+  return { tab: view.source !== ALL_SOURCES ? view.source : block.tab, ...Object.fromEntries(LINKED_FIELDS.map((key) => [key, undefined])), ...fields } as never
+}
+
+/**
+ * Un bloc de page qui montre une vue enregistrée (`savedViewId`) : la vue telle qu'elle est
+ * réglée aujourd'hui. Sans la vue (retirée, illisible, ou serveur partagé injoignable), le bloc
+ * garde la copie prise au dernier enregistrement de la page : rien ne disparaît.
+ */
+export function linkedBlock<T extends ViewBlock>(block: T, view: SavedView | null | undefined): T {
+  const fields = view && block.savedViewId === view.id ? linkedBlockFields(block, view) : null
+  return fields ? { ...block, ...fields } : block
+}
+
 // ---------------------------------------------------------------------------
 // Les vues enregistrées et les onglets-fenêtres de la feuille, réunis
 // ---------------------------------------------------------------------------

@@ -1634,6 +1634,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         onOpenChange={(open) => { if (!open) setViewDialog(null) }}
         index={indexKey}
         view={viewDialog.mode === "edit" ? activeView : null}
+        usedBy={viewDialog.mode === "edit" && activeView ? settings.savedViewPages[activeView.id] : undefined}
         draft={viewDialog.draft}
         notice={viewDialog.notice}
         sources={[{ value: ALL_SOURCES, label: "Tous les onglets de l’index" }, ...tables.map((candidate) => ({ value: candidate.tabName, label: `L’onglet « ${candidate.tabName} »` }))]}

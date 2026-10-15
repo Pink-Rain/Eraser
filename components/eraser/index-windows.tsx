@@ -22,9 +22,12 @@ export const layoutIcons: Record<AllPresentationKind, LucideIcon> = { table: Tab
 
 
 
-type Settings = { views: IndexWindow[]; savedViews: SavedView[]; savedViewsUnavailable: boolean; presets: ColumnPreset[]; layouts: Record<string, TabLayouts>; layoutPresets: LayoutPreset[]; cards: Record<string, TabCards>; cardPresets: CardPreset[]; presentations: Record<string, TabPresentations>; viewPresets: PresentationPreset[]; stats: StatDefinition[]; statGroups: StatColumnGroup[]; locks: Record<string, TabLocks> }
+/** Une page qui montre une vue (pour prévenir avant de la changer). */
+export type SavedViewPage = { id: string; title: string; href: string }
 
-const emptySettings: Settings = { views: [], savedViews: [], savedViewsUnavailable: false, presets: [], layouts: {}, layoutPresets: [], cards: {}, cardPresets: [], presentations: {}, viewPresets: [], stats: [], statGroups: [], locks: {} }
+type Settings = { views: IndexWindow[]; savedViews: SavedView[]; savedViewsUnavailable: boolean; savedViewPages: Record<string, SavedViewPage[]>; presets: ColumnPreset[]; layouts: Record<string, TabLayouts>; layoutPresets: LayoutPreset[]; cards: Record<string, TabCards>; cardPresets: CardPreset[]; presentations: Record<string, TabPresentations>; viewPresets: PresentationPreset[]; stats: StatDefinition[]; statGroups: StatColumnGroup[]; locks: Record<string, TabLocks> }
+
+const emptySettings: Settings = { views: [], savedViews: [], savedViewsUnavailable: false, savedViewPages: {}, presets: [], layouts: {}, layoutPresets: [], cards: {}, cardPresets: [], presentations: {}, viewPresets: [], stats: [], statGroups: [], locks: {} }
 
 // Gardés d'un affichage à l'autre : revenir sur un index montre aussitôt ses fenêtres.
 const known = new Map<string, Settings>()
@@ -40,6 +43,8 @@ async function postSettings(body: Record<string, unknown>) {
 export function useIndexSettings(index: string) {
   const [settings, setSettings] = useState<Settings>(() => known.get(index) ?? emptySettings)
   const [error, setError] = useState("")
+  // Lus au moins une fois (pour dire « cette vue n'existe plus » sans attendre à tort).
+  const [ready, setReady] = useState(() => known.has(index))
   useEffect(() => {
     let active = true
     fetch(`/api/resources/index-settings?index=${encodeURIComponent(index)}`, { cache: "no-store" })
@@ -49,9 +54,10 @@ export function useIndexSettings(index: string) {
         if (!response.ok) { setError(payload.error || ""); return }
         // Les vues enregistrées (serveur partagé et onglets-fenêtres réunis) ; une route d'avant ne les
         // donne pas : les onglets-fenêtres en tiennent lieu.
-        const next = { views: payload.views ?? [], savedViews: payload.savedViews ?? (payload.views ?? []).map(savedViewFromWindow), savedViewsUnavailable: payload.savedViewsUnavailable === true, presets: payload.presets ?? [], layouts: payload.layouts ?? {}, layoutPresets: payload.layoutPresets ?? [], cards: payload.cards ?? {}, cardPresets: payload.cardPresets ?? [], presentations: payload.presentations ?? {}, viewPresets: payload.viewPresets ?? [], stats: payload.stats ?? [], statGroups: payload.statGroups ?? [], locks: payload.locks ?? {} }
+        const next = { views: payload.views ?? [], savedViews: payload.savedViews ?? (payload.views ?? []).map(savedViewFromWindow), savedViewsUnavailable: payload.savedViewsUnavailable === true, savedViewPages: payload.savedViewPages ?? {}, presets: payload.presets ?? [], layouts: payload.layouts ?? {}, layoutPresets: payload.layoutPresets ?? [], cards: payload.cards ?? {}, cardPresets: payload.cardPresets ?? [], presentations: payload.presentations ?? {}, viewPresets: payload.viewPresets ?? [], stats: payload.stats ?? [], statGroups: payload.statGroups ?? [], locks: payload.locks ?? {} }
         known.set(index, next)
         setSettings(next)
+        setReady(true)
       })
       .catch(() => { if (active) setError("Les onglets-fenêtres n’ont pas pu être chargés.") })
     return () => { active = false }
@@ -164,7 +170,7 @@ export function useIndexSettings(index: string) {
     const payload = await postSettings({ action: "delete-card-preset", id })
     if (payload.cardPresets) update({ cardPresets: payload.cardPresets })
   }, [update])
-  return { ...settings, error, saveView, deleteView, saveSavedView, removeSavedView, savePreset, deletePreset, saveLayouts, saveLayoutPreset, deleteLayoutPreset, saveCards, saveCardPreset, deleteCardPreset, savePresentations, saveViewPreset, deleteViewPreset, saveStats, saveLocks }
+  return { ...settings, ready, error, saveView, deleteView, saveSavedView, removeSavedView, savePreset, deletePreset, saveLayouts, saveLayoutPreset, deleteLayoutPreset, saveCards, saveCardPreset, deleteCardPreset, savePresentations, saveViewPreset, deleteViewPreset, saveStats, saveLocks }
 }
 
 const emptyCondition = (column: string): FilterCondition => ({ column, operator: "est", value: "" })
@@ -187,15 +193,16 @@ export function savedViewMark(kind: AllPresentationKind) {
  * sa présentation (tableau, cartes, liste, kanban… ou onglet stat), sa forme, son filtre et son
  * tri. Les lignes ne sont jamais copiées : une case modifiée dans la vue l'est à la source.
  * `draft` pré-remplit une vue nouvelle (« Enregistrer comme vue »), `notice` dit ce qui n'a pas
- * pu en être repris.
+ * pu en être repris, `usedBy` les pages qui montrent la vue (prévenues avant de la changer).
  */
-export function SavedViewDialog({ open, onOpenChange, index, view, draft, notice, sources, columnsOf, tabOf, presentations, presets, cards, cardsIndex, nextPosition, allowStats = false, onSave, onDelete }: {
+export function SavedViewDialog({ open, onOpenChange, index, view, draft, notice, usedBy = [], sources, columnsOf, tabOf, presentations, presets, cards, cardsIndex, nextPosition, allowStats = false, onSave, onDelete }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   index: string
   view?: SavedView | null
   draft?: Partial<SavedView> | null
   notice?: string
+  usedBy?: SavedViewPage[]
   /** Les sources possibles : la valeur (« * » ou un onglet) et son libellé. */
   sources: Array<{ value: string; label: string }>
   /** Les colonnes proposées pour les conditions et le tri, selon la source choisie. */
@@ -278,7 +285,8 @@ export function SavedViewDialog({ open, onOpenChange, index, view, draft, notice
   }
 
   async function remove() {
-    if (!view || !onDelete || !window.confirm(`Supprimer la vue « ${view.name} » ? Les lignes qu’elle affiche ne sont pas touchées.`)) return
+    const pages = usedBy.length ? `\n\nElle est montrée par ${usedBy.length > 1 ? `${usedBy.length} pages` : "une page"} (${usedBy.map((page) => `« ${page.title} »`).join(", ")}) : ${usedBy.length > 1 ? "elles garderont" : "elle gardera"} la copie de son dernier réglage.` : ""
+    if (!view || !onDelete || !window.confirm(`Supprimer la vue « ${view.name} » ? Les lignes qu’elle affiche ne sont pas touchées.${pages}`)) return
     setPending("delete"); setError("")
     try { await onDelete(view.id); onOpenChange(false) } catch (caught) { setError(caught instanceof Error ? caught.message : "Suppression impossible.") }
     setPending("")
@@ -291,6 +299,9 @@ export function SavedViewDialog({ open, onOpenChange, index, view, draft, notice
         <DialogDescription>Des lignes choisies, dans un ordre, sous une forme, pour tout le monde. Rien n’est copié : une case modifiée dans la vue l’est dans son onglet d’origine.</DialogDescription>
       </DialogHeader>
       {notice && <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">{notice}</p>}
+      {view && usedBy.length > 0 && <p className="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-xs">
+        Cette vue est montrée par {usedBy.length > 1 ? `${usedBy.length} pages` : "une page"} : {usedBy.map((page, at) => <span key={page.id}>{at > 0 && ", "}<a href={page.href} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">{page.title || "Sans titre"}</a></span>)}. Tes changements s’y verront aussitôt.
+      </p>}
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="grid gap-1.5 text-sm font-medium">Nom de la vue<Input value={name} onChange={(event) => setName(event.target.value)} maxLength={60} placeholder="Runes, PNJ par lieu, Chronologie du monde…" autoFocus /></label>
         <label className="grid gap-1.5 text-sm font-medium">Chercher les lignes dans

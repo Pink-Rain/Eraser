@@ -11,6 +11,8 @@ import { deleteViewPreset, listIndexPresentations, listIndexStatsRecord, listVie
 import { cleanPresentation, parseTabPresentations } from "@/lib/index-presentations"
 import { listIndexSavedViews, removeIndexSavedView, saveIndexSavedView } from "@/lib/index-saved-views-store"
 import type { PresetColumn } from "@/lib/index-presets"
+import { savedViewUses } from "@/lib/custom-pages"
+import { listCustomPages } from "@/lib/custom-pages-store"
 import type { FilterCondition } from "@/lib/index-windows"
 import { authorizedAccount } from "@/lib/server-auth"
 
@@ -60,13 +62,16 @@ export async function GET(request: Request) {
     // onglets-fenêtres déjà lus ci-dessus. Serveur injoignable : on le dit, sans repli silencieux.
     let savedViews: unknown[] = []
     let savedViewsUnavailable = false
+    // Les pages qui montrent chaque vue (serveur partagé, copie de 15 s) : l'index prévient avant de la changer.
+    let savedViewPages: ReturnType<typeof savedViewUses> = {}
     if (index) {
       try { savedViews = await listIndexSavedViews(index, views) } catch (error) {
         savedViewsUnavailable = true
         console.error("INDEX_SAVED_VIEWS_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
       }
+      savedViewPages = savedViewUses(await listCustomPages().catch(() => []), index)
     }
-    return NextResponse.json({ views, presets, layouts, layoutPresets, cards, cardPresets, presentations, viewPresets, stats: statsRecord.stats, statGroups: statsRecord.groups, locks, savedViews, ...(savedViewsUnavailable ? { savedViewsUnavailable: true } : {}) })
+    return NextResponse.json({ views, presets, layouts, layoutPresets, cards, cardPresets, presentations, viewPresets, stats: statsRecord.stats, statGroups: statsRecord.groups, locks, savedViews, savedViewPages, ...(savedViewsUnavailable ? { savedViewsUnavailable: true } : {}) })
   } catch (error) {
     console.error("INDEX_SETTINGS_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
     return NextResponse.json({ error: "Les onglets-fenêtres et les presets n’ont pas pu être chargés." }, { status: 503 })
