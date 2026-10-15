@@ -41,6 +41,7 @@ import {
 } from "@/lib/google-sheets"
 import { appendRawSchemaRows, readRawSchemaRows } from "@/lib/index-schema"
 import { remapIndexViewSources } from "@/lib/index-settings"
+import { remapIndexSavedViewSources } from "@/lib/index-saved-views-store"
 import {
   copyMismatches,
   MERGED_OBJECT_INDEX_NAME,
@@ -113,6 +114,12 @@ function regroupError(code: string, details: string[]) {
 
 /** Les onglets-fenêtres renvoyés vers d'autres onglets ; un échec est dit, jamais tu. */
 async function remapViews(mapping: Map<string, string>, warnings: string[]) {
+  // Les vues enregistrées sur le serveur partagé suivent aussi leurs tableaux (une vue reprise
+  // d'un onglet-fenêtre garde son identifiant : le nombre rendu reste celui des onglets-fenêtres).
+  await remapIndexSavedViewSources("objects", mapping).catch((error) => {
+    console.error("OBJECT_REGROUP_SAVED_VIEWS_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    warnings.push("Les vues enregistrées de l’index des items n’ont pas pu suivre : ouvre chacune d’elles et choisis de nouveau son tableau.")
+  })
   try {
     return await remapIndexViewSources("objects", mapping)
   } catch (error) {

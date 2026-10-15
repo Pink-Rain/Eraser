@@ -9,6 +9,7 @@ import { cleanTabLocks } from "@/lib/index-locks"
 import { listIndexLocks, saveIndexLocks } from "@/lib/index-locks-store"
 import { deleteViewPreset, listIndexPresentations, listIndexStatsRecord, listViewPresets, saveIndexPresentations, saveIndexStats, saveViewPreset } from "@/lib/index-presentations-store"
 import { cleanPresentation, parseTabPresentations } from "@/lib/index-presentations"
+import { listIndexSavedViews, removeIndexSavedView, saveIndexSavedView } from "@/lib/index-saved-views-store"
 import type { PresetColumn } from "@/lib/index-presets"
 import type { FilterCondition } from "@/lib/index-windows"
 import { authorizedAccount } from "@/lib/server-auth"
@@ -32,6 +33,9 @@ const messages: Record<string, string> = {
   INDEX_PRESENTATIONS_UNAVAILABLE: "Les vues se gardent sur le serveur partagé d’Eraser, qui n’est pas configuré ici.",
   INDEX_STATS_TOO_LARGE: "Trop de statistiques pour cet index : supprime-en une ou retire quelques conditions.",
   INDEX_PRESENTATIONS_TOO_LARGE: "Les vues de cet onglet sont trop grandes pour être enregistrées : retire quelques tuiles.",
+  INDEX_SAVED_VIEW_INVALID: "Cette vue n’a pas pu être lue.",
+  INDEX_SAVED_VIEWS_UNAVAILABLE: "Les vues se gardent sur le serveur partagé d’Eraser, qui n’est pas configuré ici.",
+  INDEX_SAVED_VIEW_TOO_LARGE: "Cette vue est trop grande pour être enregistrée : retire quelques conditions ou réglages de sa forme.",
 }
 
 /** Onglets-fenêtres, mises en page et cartes d'un index (`index`), et presets, pour les MJ et administrateurs. */
@@ -52,7 +56,17 @@ export async function GET(request: Request) {
       index ? listIndexStatsRecord(index).catch(() => ({ stats: [], groups: [] })) : Promise.resolve({ stats: [], groups: [] }),
       index ? listIndexLocks(index) : Promise.resolve({}),
     ])
-    return NextResponse.json({ views, presets, layouts, layoutPresets, cards, cardPresets, presentations, viewPresets, stats: statsRecord.stats, statGroups: statsRecord.groups, locks })
+    // Les vues enregistrées (roadmap « Vues des index ») : celles du serveur partagé, et les
+    // onglets-fenêtres déjà lus ci-dessus. Serveur injoignable : on le dit, sans repli silencieux.
+    let savedViews: unknown[] = []
+    let savedViewsUnavailable = false
+    if (index) {
+      try { savedViews = await listIndexSavedViews(index, views) } catch (error) {
+        savedViewsUnavailable = true
+        console.error("INDEX_SAVED_VIEWS_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+      }
+    }
+    return NextResponse.json({ views, presets, layouts, layoutPresets, cards, cardPresets, presentations, viewPresets, stats: statsRecord.stats, statGroups: statsRecord.groups, locks, savedViews, ...(savedViewsUnavailable ? { savedViewsUnavailable: true } : {}) })
   } catch (error) {
     console.error("INDEX_SETTINGS_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
     return NextResponse.json({ error: "Les onglets-fenêtres et les presets n’ont pas pu être chargés." }, { status: 503 })
@@ -64,6 +78,20 @@ export async function POST(request: Request) {
   if (!account) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
     const body = (await request.json()) as { action?: string; id?: string; index?: string; name?: string; source?: string; match?: string; conditions?: FilterCondition[]; layout?: unknown; description?: string; columns?: PresetColumn[]; changes?: Array<{ tab?: unknown; form?: unknown; hover?: unknown }> }
+    if (body.action === "save-saved-view" || body.action === "remove-saved-view") {
+      // Les vues enregistrées : sur le serveur partagé ; la feuille des onglets-fenêtres ne change pas.
+      try {
+        if (body.action === "remove-saved-view") {
+          await removeIndexSavedView(String(body.index ?? ""), String(body.id ?? ""))
+          return NextResponse.json({ removed: String(body.id ?? "") })
+        }
+        return NextResponse.json({ savedView: await saveIndexSavedView((body as { view?: unknown }).view) })
+      } catch (error) {
+        const code = error instanceof Error ? error.message : ""
+        console.error("INDEX_SAVED_VIEW_SAVE_FAILED", code)
+        return NextResponse.json({ error: messages[code] ?? "La vue n’a pas pu être enregistrée sur le serveur partagé d’Eraser." }, { status: 400 })
+      }
+    }
     if (body.action === "save-layouts") {
       // Mise en page de la fiche et du survol, onglet par onglet ; vide : l'affichage automatique.
       const changes = (Array.isArray(body.changes) ? body.changes : []).map((change) => ({ tab: String(change.tab ?? ""), form: parseIndexLayout(change.form), hover: parseIndexLayout(change.hover), forms: parseNamedLayouts((change as { forms?: unknown }).forms), hovers: parseNamedLayouts((change as { hovers?: unknown }).hovers) }))

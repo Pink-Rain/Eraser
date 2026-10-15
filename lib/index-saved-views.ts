@@ -225,3 +225,46 @@ export function blockFieldsFromSavedView(view: SavedView): BlockViewFields | nul
   if (view.click) fields.click = view.click
   return fields
 }
+
+// ---------------------------------------------------------------------------
+// Les vues enregistrées et les onglets-fenêtres de la feuille, réunis
+// ---------------------------------------------------------------------------
+
+/**
+ * Ce que garde le serveur partagé pour une vue : la vue, ou la marque d'une vue retirée (pour
+ * qu'un onglet-fenêtre du même identifiant, encore dans la feuille, ne revienne pas).
+ */
+export type StoredSavedView = { id: string; removed: true } | SavedView
+
+/** Une entrée lue sur le serveur partagé ; `null` si elle est illisible. */
+export function cleanStoredSavedView(input: unknown): StoredSavedView | null {
+  if (!input || typeof input !== "object") return null
+  const raw = input as Record<string, unknown>
+  if (raw.removed === true) {
+    const id = cleanId(raw.id)
+    return id ? { id, removed: true } : null
+  }
+  return cleanSavedView(raw)
+}
+
+/**
+ * Les vues d'un index : celles du serveur partagé, et les onglets-fenêtres de la feuille qui n'y
+ * sont pas encore (repris tels quels) ni retirés. Une vue enregistrée l'emporte sur l'onglet-fenêtre
+ * du même identifiant. Sans rien d'enregistré : exactement les onglets-fenêtres d'aujourd'hui.
+ *
+ * C'est ce qui rend le passage progressif et réversible : la feuille n'est jamais modifiée,
+ * un onglet-fenêtre créé par une installation pas encore à jour apparaît quand même, et
+ * effacer les entrées du serveur partagé ramène aux seuls onglets-fenêtres.
+ */
+export function mergeSavedViews(stored: StoredSavedView[], windows: IndexWindow[]): SavedView[] {
+  const known = new Map<string, StoredSavedView>()
+  for (const entry of stored) if (!known.has(entry.id)) known.set(entry.id, entry)
+  const fromWindows = windows.filter((tabWindow) => !known.has(tabWindow.id)).map(savedViewFromWindow)
+  const kept = [...known.values()].filter((entry): entry is SavedView => !("removed" in entry))
+  return [...kept, ...fromWindows].sort((left, right) => left.position - right.position || left.name.localeCompare(right.name, "fr"))
+}
+
+/** Les vues dont la source change (`ancienne → nouvelle`), comme les onglets-fenêtres au regroupement des index d'objets. */
+export function remapSavedViewSources(views: SavedView[], mapping: Map<string, string>): SavedView[] {
+  return views.flatMap((view) => mapping.has(view.source) ? [{ ...view, source: mapping.get(view.source) as string }] : [])
+}
