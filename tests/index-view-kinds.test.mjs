@@ -7,44 +7,44 @@ import { createServer } from "vite";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const vite = await createServer({ appType: "custom", configFile: false, root, resolve: { alias: { "@": root } }, server: { middlewareMode: true } });
 after(async () => { await vite.close(); });
-const views = await vite.ssrLoadModule("/lib/index-view-layouts.ts");
+const views = await vite.ssrLoadModule("/lib/index-presentations.ts");
 const calendars = await vite.ssrLoadModule("/lib/calendars.ts");
 
 test("les nouvelles vues et leurs réglages se relisent, rien d'autre", () => {
-  const gallery = views.cleanViewLayout({ kind: "gallery", imageColumn: "Portrait", galleryShape: "square", gallerySize: "lg", captionOnHover: true, itemCard: "*" });
+  const gallery = views.cleanPresentation({ kind: "gallery", imageColumn: "Portrait", galleryShape: "square", gallerySize: "lg", captionOnHover: true, itemCard: "*" });
   assert.deepEqual(gallery, { kind: "gallery", imageColumn: "Portrait", galleryShape: "square", gallerySize: "lg", captionOnHover: true, itemCard: "*" });
-  assert.deepEqual(views.cleanViewLayout({ kind: "timeline", dateColumn: "Date", timelineSide: "right" }), { kind: "timeline", dateColumn: "Date", timelineSide: "right" });
-  assert.deepEqual(views.cleanViewLayout({ kind: "tree", parentColumn: "Pays", collapsed: true }), { kind: "tree", collapsed: true, parentColumn: "Pays" });
-  assert.deepEqual(views.cleanViewLayout({ kind: "codex", showToc: true, detailFields: ["Description"] }), { kind: "codex", detailFields: ["Description"], showToc: true });
+  assert.deepEqual(views.cleanPresentation({ kind: "timeline", dateColumn: "Date", timelineSide: "right" }), { kind: "timeline", dateColumn: "Date", timelineSide: "right" });
+  assert.deepEqual(views.cleanPresentation({ kind: "tree", parentColumn: "Pays", collapsed: true }), { kind: "tree", collapsed: true, parentColumn: "Pays" });
+  assert.deepEqual(views.cleanPresentation({ kind: "codex", showToc: true, detailFields: ["Description"] }), { kind: "codex", detailFields: ["Description"], showToc: true });
   // Valeurs inconnues écartées.
-  assert.deepEqual(views.cleanViewLayout({ kind: "gallery", galleryShape: "ronde", gallerySize: 3, timelineSide: "haut" }), { kind: "gallery" });
+  assert.deepEqual(views.cleanPresentation({ kind: "gallery", galleryShape: "ronde", gallerySize: 3, timelineSide: "haut" }), { kind: "gallery" });
   // Les anciennes vues gardent exactement leur forme.
-  assert.deepEqual(views.cleanViewLayout({ kind: "list", compact: true, fields: ["Type"] }), { kind: "list", compact: true, fields: ["Type"] });
+  assert.deepEqual(views.cleanPresentation({ kind: "list", compact: true, fields: ["Type"] }), { kind: "list", compact: true, fields: ["Type"] });
   // Une liste de cartes : la carte choisie se garde.
-  assert.deepEqual(views.cleanViewLayout({ kind: "kanban", kanbanColumn: "État", itemCard: "CARTE-12" }), { kind: "kanban", kanbanColumn: "État", itemCard: "CARTE-12" });
+  assert.deepEqual(views.cleanPresentation({ kind: "kanban", kanbanColumn: "État", itemCard: "CARTE-12" }), { kind: "kanban", kanbanColumn: "État", itemCard: "CARTE-12" });
 });
 
 test("les nouvelles vues sont des vues de « Modifier », avec leurs presets", () => {
   for (const kind of ["gallery", "timeline", "tree", "codex"]) {
     assert.ok(views.isPresentationKind(kind), kind);
-    assert.ok(views.builtinViewPresets.some((preset) => preset.layout.kind === kind), kind);
+    assert.ok(views.builtinPresentationPresets.some((preset) => preset.layout.kind === kind), kind);
   }
-  for (const preset of views.builtinViewPresets) assert.ok(views.cleanViewPreset(preset), preset.id);
+  for (const preset of views.builtinPresentationPresets) assert.ok(views.cleanPresentationPreset(preset), preset.id);
   const parsed = views.parseTabPresentations({ tree: { parentColumn: "Région" }, gallery: { kind: "list", imageColumn: "Image" } });
   assert.deepEqual(parsed, { tree: { kind: "tree", parentColumn: "Région" }, gallery: { kind: "gallery", imageColumn: "Image" } });
   // Les autres versions d'une vue : gardées sous « named », sans doublon ni genre inconnu ; l'étoilée ne bouge pas.
   const versions = views.parseTabPresentations(JSON.stringify({ list: { compact: true }, named: [{ id: "court", name: "Liste courte", layout: { kind: "list", fields: ["Type"] } }, { id: "court", name: "doublon", layout: { kind: "list" } }, { id: "tableau", name: "Tableau", layout: { kind: "table" } }, { id: "k", name: "", layout: { kind: "kanban", kanbanColumn: "État" } }] }));
   assert.deepEqual(versions.list, { kind: "list", compact: true });
   assert.deepEqual(versions.named.map((item) => [item.id, item.name, item.layout.kind]), [["court", "Liste courte", "list"], ["k", "Vue", "kanban"]]);
-  assert.deepEqual(views.namedViewsOf(versions, "kanban").map((item) => item.id), ["k"]);
+  assert.deepEqual(views.namedPresentationsOf(versions, "kanban").map((item) => item.id), ["k"]);
   assert.deepEqual(views.presentationEntries(versions).map(([kind]) => kind), ["list"]);
   assert.deepEqual(views.presentationVariant({ Lieux: versions }, "lieux", "court"), { kind: "list", fields: ["Type"] });
   assert.equal(views.presentationVariant({ Lieux: versions }, "Lieux", "disparue"), null);
   // L'élément sur mesure d'une vue : une carte gardée dans la vue, relue comme une carte.
-  const own = views.cleanViewLayout({ kind: "list", itemCard: views.VIEW_ITEM_CARD, itemTemplate: { id: "c1", name: "Élément", blocks: [{ id: "b1", type: "title", column: "Nom" }, { id: "b2", type: "pirate" }] } });
+  const own = views.cleanPresentation({ kind: "list", itemCard: views.PRESENTATION_ITEM_CARD, itemTemplate: { id: "c1", name: "Élément", blocks: [{ id: "b1", type: "title", column: "Nom" }, { id: "b2", type: "pirate" }] } });
   assert.equal(own.itemCard, "@vue");
   assert.deepEqual(own.itemTemplate.blocks.map((block) => block.type), ["title"]);
-  assert.equal(views.cleanViewLayout({ kind: "list", itemTemplate: "illisible" }).itemTemplate, undefined);
+  assert.equal(views.cleanPresentation({ kind: "list", itemTemplate: "illisible" }).itemTemplate, undefined);
   // Un preset appliqué ailleurs : la colonne du parent suit si elle existe.
   assert.equal(views.fitLayoutToColumns({ kind: "tree", parentColumn: "pays" }, ["Nom", "Pays"]).parentColumn, "Pays");
   assert.equal(views.fitLayoutToColumns({ kind: "tree", parentColumn: "Pays" }, ["Nom"]).parentColumn, undefined);
@@ -91,47 +91,47 @@ test("la chronologie lit les dates du calendrier, puis les années seules", () =
 });
 
 test("les réglages propres à chaque vue se relisent (icônes, couleurs, colonnes du kanban, galerie libre, chronologie, arbre, codex)", () => {
-  const list = views.cleanViewLayout({ kind: "list", numbered: true, alphabet: true, iconColumn: "Icône", itemIcon: "skull", badgeColumn: "Rang", fields: ["A", "B", "C", "D", "E", "F", "G", "H", "I"], look: { surface: "zebra", color: "#397f88", sectionIcon: "flag", radius: "lg", shadow: true, titleCaps: true, fieldColor: "accent" } });
+  const list = views.cleanPresentation({ kind: "list", numbered: true, alphabet: true, iconColumn: "Icône", itemIcon: "skull", badgeColumn: "Rang", fields: ["A", "B", "C", "D", "E", "F", "G", "H", "I"], look: { surface: "zebra", color: "#397f88", sectionIcon: "flag", radius: "lg", shadow: true, titleCaps: true, fieldColor: "accent" } });
   assert.deepEqual(list, { kind: "list", fields: ["A", "B", "C", "D", "E", "F", "G", "H"], iconColumn: "Icône", itemIcon: "skull", badgeColumn: "Rang", numbered: true, alphabet: true, look: { surface: "zebra", radius: "lg", shadow: true, titleCaps: true, fieldColor: "accent", color: "#397f88", sectionIcon: "flag" } });
-  const kanban = views.cleanViewLayout({ kind: "kanban", kanbanColumn: "État", laneCollapse: true, lanes: [{ value: "En cours", label: "WIP", color: "#b3261e", icon: "⚔️", limit: 3 }, { value: "Fini", hidden: true }, { value: "" }, { value: "Rien" }] });
+  const kanban = views.cleanPresentation({ kind: "kanban", kanbanColumn: "État", laneCollapse: true, lanes: [{ value: "En cours", label: "WIP", color: "#b3261e", icon: "⚔️", limit: 3 }, { value: "Fini", hidden: true }, { value: "" }, { value: "Rien" }] });
   assert.deepEqual(kanban.lanes, [{ value: "En cours", label: "WIP", color: "#b3261e", icon: "⚔️", limit: 3 }, { value: "Fini", hidden: true }]);
   assert.equal(kanban.laneCollapse, true);
-  const master = views.cleanViewLayout({ kind: "master-detail", masterSide: "right", detailColumns: 3, detailImage: "banner" });
+  const master = views.cleanPresentation({ kind: "master-detail", masterSide: "right", detailColumns: 3, detailImage: "banner" });
   assert.deepEqual(master, { kind: "master-detail", masterSide: "right", detailColumns: 3, detailImage: "banner" });
-  const calendar = views.cleanViewLayout({ kind: "calendar", dateColumn: "Date", hideSeasons: true, monthStyle: "season", maxPerDay: 40 });
+  const calendar = views.cleanPresentation({ kind: "calendar", dateColumn: "Date", hideSeasons: true, monthStyle: "season", maxPerDay: 40 });
   assert.deepEqual(calendar, { kind: "calendar", dateColumn: "Date", hideSeasons: true, monthStyle: "season", maxPerDay: 12 });
-  const dashboard = views.cleanViewLayout({ kind: "dashboard", tileColumns: 6, tiles: [{ kind: "count", icon: "users", unit: "PNJ", size: "lg", note: "dans le monde", color: "#285f8f" }, { kind: "sum", column: "Prix", unit: "PO" }] });
+  const dashboard = views.cleanPresentation({ kind: "dashboard", tileColumns: 6, tiles: [{ kind: "count", icon: "users", unit: "PNJ", size: "lg", note: "dans le monde", color: "#285f8f" }, { kind: "sum", column: "Prix", unit: "PO" }] });
   assert.deepEqual(dashboard, { kind: "dashboard", tiles: [{ kind: "count", color: "#285f8f", icon: "users", unit: "PNJ", size: "lg", note: "dans le monde" }, { kind: "sum", column: "Prix", unit: "PO" }], tileColumns: 6 });
-  const gallery = views.cleanViewLayout({ kind: "gallery", imageColumn: "Portrait", galleryWidthRem: 11.25, galleryRatio: 1.333, galleryRadiusPx: 500, galleryFit: "contain", galleryStill: true, badgeColumn: "Rang" });
+  const gallery = views.cleanPresentation({ kind: "gallery", imageColumn: "Portrait", galleryWidthRem: 11.25, galleryRatio: 1.333, galleryRadiusPx: 500, galleryFit: "contain", galleryStill: true, badgeColumn: "Rang" });
   assert.deepEqual(gallery, { kind: "gallery", imageColumn: "Portrait", badgeColumn: "Rang", galleryWidthRem: 11.5, galleryRatio: 1.33, galleryRadiusPx: 200, galleryFit: "contain", galleryStill: true });
-  const timeline = views.cleanViewLayout({ kind: "timeline", dateColumn: "Année", timelineStyle: "chapters", milestoneEvery: 100, milestoneIcon: "hourglass", dateStyle: "badge" });
+  const timeline = views.cleanPresentation({ kind: "timeline", dateColumn: "Année", timelineStyle: "chapters", milestoneEvery: 100, milestoneIcon: "hourglass", dateStyle: "badge" });
   assert.deepEqual(timeline, { kind: "timeline", dateColumn: "Année", timelineStyle: "chapters", milestoneEvery: 100, milestoneIcon: "hourglass", dateStyle: "badge" });
-  const tree = views.cleanViewLayout({ kind: "tree", parentColumn: "Pays", treeStyle: "boxed", branchIcon: "trees", leafIcon: "leaf", depthColors: true, rootsAsSections: true });
+  const tree = views.cleanPresentation({ kind: "tree", parentColumn: "Pays", treeStyle: "boxed", branchIcon: "trees", leafIcon: "leaf", depthColors: true, rootsAsSections: true });
   assert.deepEqual(tree, { kind: "tree", parentColumn: "Pays", treeStyle: "boxed", branchIcon: "trees", leafIcon: "leaf", depthColors: true, rootsAsSections: true });
-  const codex = views.cleanViewLayout({ kind: "codex", codexStyle: "scroll", proseColumns: 2, chapterNumbers: true, tocPosition: "top", showToc: true });
+  const codex = views.cleanPresentation({ kind: "codex", codexStyle: "scroll", proseColumns: 2, chapterNumbers: true, tocPosition: "top", showToc: true });
   assert.deepEqual(codex, { kind: "codex", showToc: true, codexStyle: "scroll", proseColumns: 2, chapterNumbers: true, tocPosition: "top" });
   // Valeurs inconnues écartées, et un preset appliqué ailleurs garde icônes et pastilles seulement si leurs colonnes existent.
-  assert.deepEqual(views.cleanViewLayout({ kind: "tree", treeStyle: "ronde", milestoneEvery: 7, look: { color: "rouge", radius: "xl" } }), { kind: "tree" });
+  assert.deepEqual(views.cleanPresentation({ kind: "tree", treeStyle: "ronde", milestoneEvery: 7, look: { color: "rouge", radius: "xl" } }), { kind: "tree" });
   const fitted = views.fitLayoutToColumns({ kind: "list", iconColumn: "icône", badgeColumn: "Rang", itemIcon: "star" }, ["Nom", "Icône"]);
   assert.deepEqual(fitted, { kind: "list", iconColumn: "Icône", itemIcon: "star" });
-  for (const preset of views.builtinViewPresets) assert.deepEqual(views.cleanViewLayout(preset.layout), preset.layout, preset.id);
+  for (const preset of views.builtinPresentationPresets) assert.deepEqual(views.cleanPresentation(preset.layout), preset.layout, preset.id);
 });
 
 test("sections : la lettre en marge et le menu des sections se relisent", () => {
-  const glossary = views.cleanViewLayout({ kind: "list", alphabet: true, menu: "top", look: { sectionStyle: "letter" } });
+  const glossary = views.cleanPresentation({ kind: "list", alphabet: true, menu: "top", look: { sectionStyle: "letter" } });
   assert.deepEqual(glossary, { kind: "list", alphabet: true, menu: "top", look: { sectionStyle: "letter" } });
-  assert.equal(views.cleanViewLayout({ kind: "list", menu: "bottom" }).menu, undefined);
-  assert.equal(views.cleanViewLayout({ kind: "list", look: { sectionStyle: "huge" } }).look?.sectionStyle, undefined);
+  assert.equal(views.cleanPresentation({ kind: "list", menu: "bottom" }).menu, undefined);
+  assert.equal(views.cleanPresentation({ kind: "list", look: { sectionStyle: "huge" } }).look?.sectionStyle, undefined);
 });
 
 test("lot B : élément, au clic, détail, formule par groupe, jauge, onglets, zigzag se relisent et se bornent", async () => {
-  const starters = await vite.ssrLoadModule("/lib/index-view-starters.ts");
-  const layout = views.cleanViewLayout({ kind: "list", itemForm: "principal", click: "side", detail: { kind: "form", form: "court", width: "wide", nav: true }, groupFormula: { op: "sum", column: "Prix", target: 100, label: "Σ", style: "bar" }, gauge: { column: "Vie", style: "charges", max: 5, maxColumn: "Vie totale", label: "PV" }, menu: "tabs", look: { zigzag: true } });
+  const starters = await vite.ssrLoadModule("/lib/index-presentation-starters.ts");
+  const layout = views.cleanPresentation({ kind: "list", itemForm: "principal", click: "side", detail: { kind: "form", form: "court", width: "wide", nav: true }, groupFormula: { op: "sum", column: "Prix", target: 100, label: "Σ", style: "bar" }, gauge: { column: "Vie", style: "charges", max: 5, maxColumn: "Vie totale", label: "PV" }, menu: "tabs", look: { zigzag: true } });
   assert.deepEqual(layout, { kind: "list", menu: "tabs", itemForm: "principal", click: "side", detail: { kind: "form", form: "court", width: "wide", nav: true }, groupFormula: { op: "sum", column: "Prix", target: 100, label: "Σ", style: "bar" }, gauge: { column: "Vie", style: "charges", max: 5, maxColumn: "Vie totale", label: "PV" }, look: { zigzag: true } });
   // « Ouvrir la fiche » est l'office : rien n'est écrit ; une formule sans opération connue ou une jauge sans colonne disparaissent.
-  assert.equal(views.cleanViewLayout({ kind: "list", click: "sheet", groupFormula: { op: "median" }, gauge: { style: "bar" } }).click, undefined);
-  assert.equal(views.cleanViewLayout({ kind: "list", groupFormula: { op: "median" } }).groupFormula, undefined);
-  assert.equal(views.cleanViewLayout({ kind: "list", gauge: { style: "bar" } }).gauge, undefined);
+  assert.equal(views.cleanPresentation({ kind: "list", click: "sheet", groupFormula: { op: "median" }, gauge: { style: "bar" } }).click, undefined);
+  assert.equal(views.cleanPresentation({ kind: "list", groupFormula: { op: "median" } }).groupFormula, undefined);
+  assert.equal(views.cleanPresentation({ kind: "list", gauge: { style: "bar" } }).gauge, undefined);
   // Appliquée à un autre onglet : la formule et la jauge ne gardent que les colonnes connues.
   const fitted = views.fitLayoutToColumns(layout, ["Nom", "Vie"]);
   assert.equal(fitted.groupFormula, undefined);
@@ -143,35 +143,35 @@ test("lot B : élément, au clic, détail, formule par groupe, jauge, onglets, z
   assert.equal(views.groupFormulaValue({ op: "sum", column: "Prix" }, rows, valueOf), 35.5);
   assert.equal(views.groupFormulaValue({ op: "max", column: "Prix" }, rows, valueOf), 25.5);
   assert.equal(views.groupFormulaValue({ op: "avg", column: "Prix" }, rows, valueOf), 17.75);
-  assert.equal(views.formatViewNumber(17.75), "17,75");
+  assert.equal(views.formatPresentationNumber(17.75), "17,75");
   // Les formes de base de 4, 5 et 6, bâties sur les colonnes, passent telles quelles le nettoyage.
   const columns = [{ header: "Nom", spec: { kind: "name" } }, { header: "Portrait", spec: { kind: "file", file: { accept: "image" } } }, { header: "Type", spec: { kind: "choice", options: [{ value: "Arme" }] } }, { header: "Prix", spec: { kind: "number" } }, { header: "Vie", spec: { kind: "number" } }, { header: "Description", spec: { kind: "rich" } }, { header: "Lieu", spec: { kind: "linked-choice" } }];
   for (const kind of ["list", "kanban", "master-detail"]) {
-    const forms = starters.viewStartersFor(kind, columns);
+    const forms = starters.presentationStartersFor(kind, columns);
     assert.ok(forms.length >= 6, kind);
     for (const form of forms) {
-      const clean = views.cleanViewLayout(form.layout);
+      const clean = views.cleanPresentation(form.layout);
       assert.ok(clean, form.key);
       assert.equal(clean.kind, kind, form.key);
-      assert.deepEqual(views.cleanViewLayout(clean), clean, form.key);
+      assert.deepEqual(views.cleanPresentation(clean), clean, form.key);
     }
   }
-  const linked = starters.viewStartersFor("kanban", columns).find((form) => form.key === "kanban-linked");
+  const linked = starters.presentationStartersFor("kanban", columns).find((form) => form.key === "kanban-linked");
   assert.equal(linked.layout.kanbanColumn, "Lieu");
   assert.deepEqual(linked.layout.groupFormula, { op: "sum", column: "Prix" });
-  const gauge = starters.viewStartersFor("list", columns).find((form) => form.key === "list-gauge");
+  const gauge = starters.presentationStartersFor("list", columns).find((form) => form.key === "list-gauge");
   assert.deepEqual(gauge.layout.gauge, { column: "Prix", style: "bar", maxColumn: "Vie" });
-  assert.equal(starters.viewStartersFor("list", columns).find((form) => form.key === "list-zigzag").layout.imageColumn, "Portrait");
+  assert.equal(starters.presentationStartersFor("list", columns).find((form) => form.key === "list-zigzag").layout.imageColumn, "Portrait");
 });
 
 test("lot C : calendrier (échelles, formes, bannière) et tableau de bord (tuiles mixtes, sections) se relisent et se bornent", async () => {
-  const calendar = views.cleanViewLayout({ kind: "calendar", dateColumn: "Date", calendarScale: "week", calendarForms: { week: "table", month: "grid", day: "paragraphs", agenda: "bidon" }, calendarSwitcher: true, calendarStay: true, calendarBanner: "season", bannerImage: "https://x/y.png", bannerHeight: 900, hideEmptyDays: true });
+  const calendar = views.cleanPresentation({ kind: "calendar", dateColumn: "Date", calendarScale: "week", calendarForms: { week: "table", month: "grid", day: "paragraphs", agenda: "bidon" }, calendarSwitcher: true, calendarStay: true, calendarBanner: "season", bannerImage: "https://x/y.png", bannerHeight: 900, hideEmptyDays: true });
   assert.deepEqual(calendar, { kind: "calendar", dateColumn: "Date", calendarScale: "week", calendarForms: { week: "table", day: "paragraphs" }, calendarSwitcher: true, calendarStay: true, calendarBanner: "season", bannerImage: "https://x/y.png", bannerHeight: 400, hideEmptyDays: true });
   // L'ancien « Agenda » (apparence) reste une échelle ; une échelle réglée prend le pas.
   assert.equal(views.calendarScaleOf({ look: { calendarMode: "agenda" } }), "agenda");
   assert.equal(views.calendarScaleOf({ calendarScale: "year", look: { calendarMode: "agenda" } }), "year");
   assert.equal(views.calendarScaleOf({}), "month");
-  const dashboard = views.cleanViewLayout({ kind: "dashboard", collapsible: true, tiles: [
+  const dashboard = views.cleanPresentation({ kind: "dashboard", collapsible: true, tiles: [
     { kind: "gauge", measure: "sum", column: "Or", target: 100, style: "bar", section: "Groupe", full: true },
     { kind: "gauge", row: "Aldric", column: "Vie", maxColumn: "Vie max", style: "charges" },
     { kind: "stat", stat: "st-12" },
@@ -217,16 +217,16 @@ test("lot C : calendrier (échelles, formes, bannière) et tableau de bord (tuil
   assert.equal(segments[1].text, " membres, ");
 
   // Les formes de départ du lot C : dix-huit pour le calendrier, huit pour le tableau de bord, toutes propres.
-  const starters = await vite.ssrLoadModule("/lib/index-view-starters.ts");
+  const starters = await vite.ssrLoadModule("/lib/index-presentation-starters.ts");
   const columns = [{ header: "Nom" }, { header: "Date" }, { header: "Type", spec: { kind: "choice", options: [{ value: "A" }] } }, { header: "Or", spec: { kind: "number" } }, { header: "Personnage", spec: { kind: "linked" } }, { header: "Description" }];
-  const calendars = starters.viewStartersFor("calendar", columns);
-  const dashboards = starters.viewStartersFor("dashboard", columns);
+  const calendars = starters.presentationStartersFor("calendar", columns);
+  const dashboards = starters.presentationStartersFor("dashboard", columns);
   assert.equal(calendars.length, 18);
   assert.equal(dashboards.length, 8);
   for (const starter of [...calendars, ...dashboards]) {
-    const clean = views.cleanViewLayout(starter.layout);
+    const clean = views.cleanPresentation(starter.layout);
     assert.ok(clean, starter.key);
-    assert.deepEqual(views.cleanViewLayout(clean), clean, starter.key);
+    assert.deepEqual(views.cleanPresentation(clean), clean, starter.key);
   }
   assert.ok(calendars.every((starter) => starter.layout.dateColumn === "Date"));
   assert.ok(new Set(calendars.map((starter) => starter.layout.calendarScale ?? "month")).size === 6, "toutes les échelles sont proposées");
@@ -262,39 +262,39 @@ test("calendriers : jours comptés, semaines et images des mois (monde et réel)
 });
 
 test("lot D : galerie, chronologie, arborescence et codex — réglages nouveaux relus et bornés, formes de base propres", async () => {
-  const gallery = views.cleanViewLayout({ kind: "gallery", imageColumn: "Portrait", galleryStyle: "cabinet", gallerySizeColumn: "Taille", gauge: { column: "Vie", style: "charges", max: 3 } });
+  const gallery = views.cleanPresentation({ kind: "gallery", imageColumn: "Portrait", galleryStyle: "cabinet", gallerySizeColumn: "Taille", gauge: { column: "Vie", style: "charges", max: 3 } });
   assert.deepEqual(gallery, { kind: "gallery", imageColumn: "Portrait", gauge: { column: "Vie", style: "charges", max: 3 }, galleryStyle: "cabinet", gallerySizeColumn: "Taille" });
-  assert.equal(views.cleanViewLayout({ kind: "gallery", galleryStyle: "plain" }).galleryStyle, undefined);
-  const timeline = views.cleanViewLayout({ kind: "timeline", dateColumn: "Date", endColumn: "Fin", laneColumn: "Personnage", timelineStyle: "bars", timelineAxis: "horizontal", timelineSide: "groups", timelinePeriods: "scale", groupBy: "Ère" });
+  assert.equal(views.cleanPresentation({ kind: "gallery", galleryStyle: "plain" }).galleryStyle, undefined);
+  const timeline = views.cleanPresentation({ kind: "timeline", dateColumn: "Date", endColumn: "Fin", laneColumn: "Personnage", timelineStyle: "bars", timelineAxis: "horizontal", timelineSide: "groups", timelinePeriods: "scale", groupBy: "Ère" });
   assert.deepEqual(timeline, { kind: "timeline", groupBy: "Ère", dateColumn: "Date", timelineSide: "groups", timelineStyle: "bars", timelineAxis: "horizontal", timelinePeriods: "scale", endColumn: "Fin", laneColumn: "Personnage" });
-  assert.equal(views.cleanViewLayout({ kind: "timeline", timelineAxis: "vertical", timelinePeriods: "bidon" }).timelineAxis, undefined);
-  const tree = views.cleanViewLayout({ kind: "tree", parentColumn: "Parent", treeStyle: "mindmap", numbered: true, dimColumn: "Vivant", dateColumn: "Naissance", endColumn: "Mort", click: "side", detail: { kind: "children", width: "wide" } });
+  assert.equal(views.cleanPresentation({ kind: "timeline", timelineAxis: "vertical", timelinePeriods: "bidon" }).timelineAxis, undefined);
+  const tree = views.cleanPresentation({ kind: "tree", parentColumn: "Parent", treeStyle: "mindmap", numbered: true, dimColumn: "Vivant", dateColumn: "Naissance", endColumn: "Mort", click: "side", detail: { kind: "children", width: "wide" } });
   assert.deepEqual(tree, { kind: "tree", dateColumn: "Naissance", parentColumn: "Parent", numbered: true, click: "side", detail: { kind: "children", width: "wide" }, treeStyle: "mindmap", endColumn: "Mort", dimColumn: "Vivant" });
-  const codex = views.cleanViewLayout({ kind: "codex", codexStyle: "board", codexPages: true, codexTiles: ["PV", "CA", "", "Force", "Dex", "Con", "Int", "Sag"], codexLinks: ["Allié", "Ennemi"], codexRecto: "*", codexVerso: "CARTE-2", dateColumn: "Date" });
+  const codex = views.cleanPresentation({ kind: "codex", codexStyle: "board", codexPages: true, codexTiles: ["PV", "CA", "", "Force", "Dex", "Con", "Int", "Sag"], codexLinks: ["Allié", "Ennemi"], codexRecto: "*", codexVerso: "CARTE-2", dateColumn: "Date" });
   assert.deepEqual(codex, { kind: "codex", dateColumn: "Date", codexStyle: "board", codexPages: true, codexTiles: ["PV", "CA", "Force", "Dex", "Con", "Int"], codexLinks: ["Allié", "Ennemi"], codexRecto: "*", codexVerso: "CARTE-2" });
   // Appliqués à un autre onglet : les colonnes absentes s'effacent (fin, fil, grisé, taille, tuiles, renvois).
   const fitted = views.fitLayoutToColumns({ ...timeline, ...codex, kind: "timeline" }, ["Nom", "Date", "Ère", "PV"]);
   assert.deepEqual([fitted.endColumn, fitted.laneColumn, fitted.codexTiles, fitted.codexLinks, fitted.groupBy], [undefined, undefined, ["PV"], undefined, "Ère"]);
 
-  const starters = await vite.ssrLoadModule("/lib/index-view-starters.ts");
+  const starters = await vite.ssrLoadModule("/lib/index-presentation-starters.ts");
   const columns = [{ header: "Nom" }, { header: "Portrait", spec: { kind: "file", file: { accept: "image" } } }, { header: "Date" }, { header: "Date de fin" }, { header: "Type", spec: { kind: "choice", options: [{ value: "A" }] } }, { header: "Or", spec: { kind: "number" } }, { header: "Vie", spec: { kind: "number" } }, { header: "Personnage", spec: { kind: "linked" } }, { header: "Description" }];
   const counts = { gallery: 6, timeline: 11, tree: 9, codex: 10 };
   for (const [kind, expected] of Object.entries(counts)) {
-    const list = starters.viewStartersFor(kind, columns);
+    const list = starters.presentationStartersFor(kind, columns);
     assert.equal(list.length, expected, kind);
     for (const starter of list) {
-      const clean = views.cleanViewLayout(starter.layout);
+      const clean = views.cleanPresentation(starter.layout);
       assert.ok(clean, starter.key);
-      assert.deepEqual(views.cleanViewLayout(clean), clean, starter.key);
+      assert.deepEqual(views.cleanPresentation(clean), clean, starter.key);
       assert.equal(clean.kind, kind, starter.key);
     }
   }
-  const timelines = starters.viewStartersFor("timeline", columns);
+  const timelines = starters.presentationStartersFor("timeline", columns);
   assert.ok(timelines.every((starter) => starter.layout.dateColumn === "Date"));
   assert.equal(timelines.find((starter) => starter.key === "chr-bars").layout.endColumn, "Date de fin");
   assert.equal(timelines.find((starter) => starter.key === "chr-lanes").layout.laneColumn, "Personnage");
-  assert.ok(starters.viewStartersFor("tree", columns).every((starter) => starter.layout.parentColumn === "Personnage"));
-  assert.deepEqual(starters.viewStartersFor("codex", columns).find((starter) => starter.key === "cdx-bestiary").layout.codexTiles, ["Or", "Vie"]);
+  assert.ok(starters.presentationStartersFor("tree", columns).every((starter) => starter.layout.parentColumn === "Personnage"));
+  assert.deepEqual(starters.presentationStartersFor("codex", columns).find((starter) => starter.key === "cdx-bestiary").layout.codexTiles, ["Or", "Vie"]);
   // Toutes les formes de départ des douze vues, sur un onglet réduit au nom : jamais une forme cassée.
-  for (const kind of ["list", "kanban", "master-detail", "calendar", "dashboard", "gallery", "timeline", "tree", "codex"]) for (const starter of starters.viewStartersFor(kind, [{ header: "Nom" }])) assert.ok(views.cleanViewLayout(starter.layout), `${kind} ${starter.key}`);
+  for (const kind of ["list", "kanban", "master-detail", "calendar", "dashboard", "gallery", "timeline", "tree", "codex"]) for (const starter of starters.presentationStartersFor(kind, [{ header: "Nom" }])) assert.ok(views.cleanPresentation(starter.layout), `${kind} ${starter.key}`);
 });

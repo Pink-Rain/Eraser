@@ -22,7 +22,7 @@ const store = await vite.ssrLoadModule("/lib/custom-pages-store.ts");
 const blockData = await vite.ssrLoadModule("/lib/custom-pages-data.ts");
 const shared = await vite.ssrLoadModule("/tests/fakes/shared-store.ts");
 const blueprints = await vite.ssrLoadModule("/lib/eraser-page-blueprints.ts");
-const layouts = await vite.ssrLoadModule("/lib/index-view-layouts.ts");
+const layouts = await vite.ssrLoadModule("/lib/index-presentations.ts");
 
 beforeEach(() => { shared.reset(); store.forgetCustomPages(); });
 
@@ -422,8 +422,8 @@ test("Pages d'Eraser : chaque page modifiable a un contenu de départ propre, re
   const view = classes.find((block) => block.type === "view");
   assert.deepEqual([view.index, view.tab, view.kind, view.presetId], ["classes", "Classes", "list", "eraser:classes-par-famille"]);
   assert.equal(classes.find((block) => block.type === "link").vis, "mj");
-  const preset = layouts.builtinViewPresets.find((item) => item.id === "eraser:classes-par-famille");
-  assert.deepEqual(layouts.cleanViewLayout(preset.layout), preset.layout);
+  const preset = layouts.builtinPresentationPresets.find((item) => item.id === "eraser:classes-par-famille");
+  assert.deepEqual(layouts.cleanPresentation(preset.layout), preset.layout);
   assert.equal(preset.layout.itemCard, "eraser-classe-carte");
   // L'accueil : « Mes campagnes » et « Mes personnages » en vues filtrées sur le lecteur, le reste en modules.
   const home = blueprints.eraserPageBlueprint("/");

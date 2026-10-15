@@ -1,19 +1,23 @@
 /**
- * La présentation d'un onglet-fenêtre : ses lignes en tableau, en cartes, en liste compacte
- * ou repliable, rangées en sections, en kanban, en maître-détail, en calendrier ou en
- * tableau de bord. Elle s'enregistre avec la vue (classeur « Eraser · Réglages des index »),
- * dans « Modifier » de l'index ; le créateur de pages ne fait que l'afficher et la régler.
- * Règles pures : la page, le serveur et les tests s'en servent.
+ * Les présentations d'un onglet d'index : ses lignes en liste, kanban, maître-détail,
+ * calendrier, tableau de bord, galerie, chronologie, arborescence ou codex (et, pour les
+ * blocs de page, en tableau ou en cartes). Elles se règlent dans « Modifier », une par genre,
+ * avec des versions nommées, et s'enregistrent sur le serveur partagé d'Eraser
+ * (lib/index-presentations-store.ts) ; le créateur de pages les affiche et peut en régler une
+ * propre à la page. Règles pures : la page, le serveur et les tests s'en servent.
  *
- * L'onglet stat (« stats ») est une vue comme les autres : ses statistiques tiennent dans
- * la même case « Présentation (JSON) », sans nouvelle colonne ni nouvelle feuille.
+ * Vocabulaire (roadmap « Vues des index ») : une présentation est une forme ; un filtre est
+ * fait de conditions (lib/index-windows.ts) ; une vue réunira filtre, tri et présentation.
+ *
+ * L'onglet stat (genre « stats ») garde ses anciennes statistiques dans la case
+ * « Présentation (JSON) » de sa ligne d'onglet-fenêtre, sans nouvelle colonne ni feuille.
  */
 import { cellNumber, cellParts, cleanStats, type StatDefinition } from "@/lib/index-stats"
 import { parseCardTemplate, type CardTemplate } from "@/lib/index-cards"
 
 export { cellNumber }
 
-export type ViewLayoutKind = "table" | "cards" | "list" | "kanban" | "master-detail" | "calendar" | "dashboard" | "gallery" | "timeline" | "tree" | "codex" | "stats"
+export type AllPresentationKind = "table" | "cards" | "list" | "kanban" | "master-detail" | "calendar" | "dashboard" | "gallery" | "timeline" | "tree" | "codex" | "stats"
 
 /**
  * Les tuiles d'un tableau de bord : un chiffre (nombre de lignes, somme, moyenne… d'une colonne),
@@ -71,7 +75,7 @@ export type KanbanLane = { value: string; label?: string; color?: string; icon?:
  * cartes, mais pour la vue elle-même. Tout est facultatif : absent, la vue garde son
  * apparence d'avant.
  */
-export type ViewLook = {
+export type PresentationLook = {
   /** Espacement des éléments. */
   density?: "compact" | "normal" | "airy"
   /** Éléments encadrés un par un, ou lignes séparées d'un trait. */
@@ -124,8 +128,8 @@ export type ViewLook = {
   zigzag?: boolean
 }
 
-export type ViewLayout = {
-  kind: ViewLayoutKind
+export type Presentation = {
+  kind: AllPresentationKind
   /** Liste, cartes, maître-détail : les lignes rangées en sections, une par valeur de cette colonne. */
   groupBy?: string
   /** Les sections (ou les lignes d'une liste) se replient ; `collapsed` : repliées à l'ouverture. */
@@ -199,9 +203,9 @@ export type ViewLayout = {
    */
   itemForm?: string
   /** Au clic sur un élément : ouvrir la fiche (d'office), ouvrir la page de la ligne, afficher à côté, afficher dessous, rien. */
-  click?: ViewClick
+  click?: PresentationClick
   /** Le panneau de détail (à côté, dessous, et le maître-détail) : les colonnes, un formulaire en lecture, ou une carte ; sa largeur ; précédent / suivant. */
-  detail?: ViewDetail
+  detail?: PresentationDetail
   /** Une formule dans l'en-tête de chaque groupe (section, colonne du kanban) : compte, somme, moyenne, min, max d'une colonne, contre une cible. */
   groupFormula?: GroupFormula
   /** Une jauge sous chaque élément : une colonne nombre en barre ou en charges, sur un maximum (nombre ou colonne). */
@@ -274,7 +278,7 @@ export type ViewLayout = {
   /** Arborescence : une colonne grisant la ligne quand elle est vide ou « non » (lignée) ; les dates de début (`dateColumn`) et de fin (`endColumn`) sous le nom. */
   dimColumn?: string
   /** L'apparence des éléments (Modifier › la vue › Apparence). */
-  look?: ViewLook
+  look?: PresentationLook
 }
 
 export type CalendarScale = "year" | "month" | "week" | "day" | "agenda" | "seasons"
@@ -296,17 +300,17 @@ export const calendarFormChoices: { [K in CalendarScale]: ReadonlyArray<{ value:
   seasons: [{ value: "band", label: "Bande" }, { value: "panels", label: "Un panneau par saison" }],
 }
 /** L'échelle d'un calendrier : celle réglée, sinon l'ancien « Agenda », sinon le mois. */
-export const calendarScaleOf = (layout: Pick<ViewLayout, "calendarScale" | "look">): CalendarScale => layout.calendarScale ?? (layout.look?.calendarMode === "agenda" ? "agenda" : "month")
+export const calendarScaleOf = (layout: Pick<Presentation, "calendarScale" | "look">): CalendarScale => layout.calendarScale ?? (layout.look?.calendarMode === "agenda" ? "agenda" : "month")
 
-export type ViewClick = "sheet" | "page" | "side" | "below" | "none"
-export const viewClicks: Array<{ value: ViewClick; label: string; hint: string }> = [
+export type PresentationClick = "sheet" | "page" | "side" | "below" | "none"
+export const presentationClicks: Array<{ value: PresentationClick; label: string; hint: string }> = [
   { value: "sheet", label: "Ouvrir la fiche", hint: "Le formulaire étoilé de la ligne (d’office)." },
   { value: "page", label: "Ouvrir la page", hint: "La page de la ligne, si l’index en a une." },
   { value: "side", label: "Afficher à côté", hint: "La ligne choisie dans un panneau à côté : la vue devient un maître-détail." },
   { value: "below", label: "Afficher dessous", hint: "La ligne choisie se déplie sous l’élément (ou sous la vue)." },
   { value: "none", label: "Rien", hint: "Les éléments ne réagissent pas au clic." },
 ]
-export type ViewDetail = { kind?: "fields" | "form" | "card" | "children"; form?: string; card?: string; width?: "narrow" | "normal" | "wide"; nav?: boolean }
+export type PresentationDetail = { kind?: "fields" | "form" | "card" | "children"; form?: string; card?: string; width?: "narrow" | "normal" | "wide"; nav?: boolean }
 export type GroupFormulaOp = "count" | "sum" | "avg" | "min" | "max"
 export const groupFormulaOps: Array<{ value: GroupFormulaOp; label: string }> = [
   { value: "count", label: "Nombre de lignes" }, { value: "sum", label: "Somme" }, { value: "avg", label: "Moyenne" }, { value: "min", label: "Plus petite valeur" }, { value: "max", label: "Plus grande valeur" },
@@ -315,24 +319,24 @@ export type GroupFormula = { op: GroupFormulaOp; column?: string; target?: numbe
 export type RowGaugeSetting = { column: string; style?: "bar" | "charges"; max?: number; maxColumn?: string; label?: string }
 
 /** Les icônes et couleurs proposées dans les éditeurs de vues (les mêmes que les cartes). */
-export const viewPalette = ["#927640", "#682522", "#b3261e", "#c2410c", "#b7791f", "#4d7c0f", "#315b55", "#397f88", "#285f8f", "#1e3a8a", "#6b4c9a", "#9d174d", "#78716c"]
+export const presentationPalette = ["#927640", "#682522", "#b3261e", "#c2410c", "#b7791f", "#4d7c0f", "#315b55", "#397f88", "#285f8f", "#1e3a8a", "#6b4c9a", "#9d174d", "#78716c"]
 /** Les couleurs d'une arborescence « une couleur par profondeur ». */
 export const depthPalette = ["#927640", "#397f88", "#6b4c9a", "#4d7c0f", "#c2410c", "#285f8f"]
 
 /** La valeur d'`itemCard` qui veut dire « l'élément sur mesure de la vue » (`itemTemplate`). */
-export const VIEW_ITEM_CARD = "@vue"
+export const PRESENTATION_ITEM_CARD = "@vue"
 
 /** La valeur d'`itemCard` qui veut dire « la carte par défaut de l'onglet ». */
 export const DEFAULT_ITEM_CARD = "*"
 
 /** Une case de Google Sheets en tient 50 000 : la présentation d'une vue reste bien en deçà. */
-export const MAX_VIEW_LAYOUT_JSON = 40_000
+export const MAX_PRESENTATION_JSON = 40_000
 
-export function viewLayoutTooLarge(layout: ViewLayout | undefined) {
-  return Boolean(layout) && JSON.stringify(layout).length > MAX_VIEW_LAYOUT_JSON
+export function presentationTooLarge(layout: Presentation | undefined) {
+  return Boolean(layout) && JSON.stringify(layout).length > MAX_PRESENTATION_JSON
 }
 
-export const viewLayoutKinds: Array<{ value: ViewLayoutKind; label: string; hint: string }> = [
+export const allPresentationKinds: Array<{ value: AllPresentationKind; label: string; hint: string }> = [
   { value: "table", label: "Tableau", hint: "Les lignes et toutes leurs colonnes." },
   { value: "cards", label: "Cartes", hint: "Les cartes réglées dans « Modifier › Cartes »." },
   { value: "list", label: "Liste", hint: "Compacte ou repliable, rangée en sections si tu veux." },
@@ -363,7 +367,7 @@ export const dashboardTileKinds: Array<{ value: DashboardTileKind; label: string
 ]
 
 // « stats » n'est pas proposée parmi les présentations d'un onglet-fenêtre : c'est l'onglet stat.
-const kinds = new Set<string>([...viewLayoutKinds.map((kind) => kind.value), "stats"])
+const kinds = new Set<string>([...allPresentationKinds.map((kind) => kind.value), "stats"])
 const tileKinds = new Set<string>(dashboardTileKinds.map((kind) => kind.value))
 const text = (value: unknown, max = 120) => typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : ""
 
@@ -371,7 +375,7 @@ const isHexColor = (value: unknown): value is string => typeof value === "string
 const oneOf = <T extends string>(value: unknown, allowed: readonly T[]): T | undefined => allowed.includes(value as T) ? value as T : undefined
 const bounded = (value: unknown, min: number, max: number, step = 1) => typeof value === "number" && Number.isFinite(value) ? Math.max(min, Math.min(max, Math.round(value / step) * step)) : undefined
 
-const lookChoices: { [K in keyof ViewLook]-?: readonly unknown[] } = {
+const lookChoices: { [K in keyof PresentationLook]-?: readonly unknown[] } = {
   density: ["compact", "normal", "airy"],
   surface: ["boxed", "plain", "zebra"],
   accent: ["border", "tint", "dot", "title", "none"],
@@ -404,7 +408,7 @@ const lookChoices: { [K in keyof ViewLook]-?: readonly unknown[] } = {
 }
 
 /** L'apparence propre : seulement les choix connus ; `undefined` si rien n'est réglé. */
-export function cleanViewLook(value: unknown): ViewLook | undefined {
+export function cleanPresentationLook(value: unknown): PresentationLook | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
   const raw = value as Record<string, unknown>
   const look: Record<string, unknown> = {}
@@ -415,7 +419,7 @@ export function cleanViewLook(value: unknown): ViewLook | undefined {
   if (imageWidth) look.imageWidth = imageWidth
   const imageHeight = bounded(raw.imageHeight, 12, 240)
   if (imageHeight) look.imageHeight = imageHeight
-  return Object.keys(look).length ? look as ViewLook : undefined
+  return Object.keys(look).length ? look as PresentationLook : undefined
 }
 
 
@@ -436,7 +440,7 @@ function cleanLane(input: unknown): KanbanLane | null {
 }
 
 /** Une présentation propre (champs connus, longueurs bornées) ; `undefined` pour le tableau simple. */
-export function cleanViewLayout(value: unknown): ViewLayout | undefined {
+export function cleanPresentation(value: unknown): Presentation | undefined {
   if (!value || typeof value !== "object") return undefined
   const raw = value as Record<string, unknown>
   if (!kinds.has(String(raw.kind))) return undefined
@@ -444,7 +448,7 @@ export function cleanViewLayout(value: unknown): ViewLayout | undefined {
     const stats = cleanStats(raw.stats)
     return stats.length ? { kind: "stats", stats } : { kind: "stats" }
   }
-  const layout: ViewLayout = { kind: raw.kind as ViewLayoutKind }
+  const layout: Presentation = { kind: raw.kind as AllPresentationKind }
   if (text(raw.groupBy)) layout.groupBy = text(raw.groupBy)
   if (raw.collapsible === true) layout.collapsible = true
   if (raw.collapsed === true) layout.collapsed = true
@@ -535,7 +539,7 @@ export function cleanViewLayout(value: unknown): ViewLayout | undefined {
   if (click && click !== "sheet") layout.click = click
   if (raw.detail && typeof raw.detail === "object") {
     const input = raw.detail as Record<string, unknown>
-    const detail: ViewDetail = {}
+    const detail: PresentationDetail = {}
     const kind = oneOf(input.kind, ["fields", "form", "card", "children"] as const)
     if (kind && kind !== "fields") detail.kind = kind
     if (text(input.form, 40)) detail.form = text(input.form, 40)
@@ -644,14 +648,14 @@ export function cleanViewLayout(value: unknown): ViewLayout | undefined {
   if (raw.proseColumns === 2) layout.proseColumns = 2
   if (raw.chapterNumbers === true) layout.chapterNumbers = true
   if (raw.tocPosition === "top") layout.tocPosition = "top"
-  const look = cleanViewLook(raw.look)
+  const look = cleanPresentationLook(raw.look)
   if (look) layout.look = look
   return layout.kind === "table" && !layout.groupBy ? undefined : layout
 }
 
-export function parseViewLayout(raw: string | undefined) {
+export function parsePresentation(raw: string | undefined) {
   if (!raw?.trim()) return undefined
-  try { return cleanViewLayout(JSON.parse(raw)) } catch { return undefined }
+  try { return cleanPresentation(JSON.parse(raw)) } catch { return undefined }
 }
 
 /** Les sections d'une colonne : une par valeur (une case à plusieurs valeurs va dans chacune), « Sans valeur » à la fin. */
@@ -687,7 +691,7 @@ export function groupFormulaValue<T>(formula: GroupFormula, rows: T[], valueOf: 
 }
 
 /** Un nombre de vue écrit court (entier, sinon deux décimales). */
-export function formatViewNumber(value: number) {
+export function formatPresentationNumber(value: number) {
   return Number.isInteger(value) ? String(value) : value.toLocaleString("fr-FR", { maximumFractionDigits: 2 })
 }
 
@@ -745,7 +749,7 @@ export function textWithFormulas<T>(text: string, rows: T[], valueOf: (row: T, c
   const evaluate = (formula: string): string => {
     const inner = formula.trim()
     if (!inner) return ""
-    if (/^nombre$/i.test(inner)) return formatViewNumber(rows.length)
+    if (/^nombre$/i.test(inner)) return formatPresentationNumber(rows.length)
     const rowRef = inner.match(/^(.+?)\s+de\s+(.+)$/i)
     if (rowRef) {
       const target = column(rowRef[1])
@@ -755,10 +759,10 @@ export function textWithFormulas<T>(text: string, rows: T[], valueOf: (row: T, c
     const op = inner.match(/^(somme|moyenne|min|max|remplies)\s+(.+)$/i)
     if (op) {
       const target = column(op[2])
-      if (/^remplies$/i.test(op[1])) return formatViewNumber(rows.filter((row) => cellParts(valueOf(row, target)).length > 0).length)
-      return formatViewNumber(groupFormulaValue({ op: ops[op[1].toLocaleLowerCase("fr")], column: target }, rows, valueOf))
+      if (/^remplies$/i.test(op[1])) return formatPresentationNumber(rows.filter((row) => cellParts(valueOf(row, target)).length > 0).length)
+      return formatPresentationNumber(groupFormulaValue({ op: ops[op[1].toLocaleLowerCase("fr")], column: target }, rows, valueOf))
     }
-    return formatViewNumber(groupFormulaValue({ op: "sum", column: column(inner) }, rows, valueOf))
+    return formatPresentationNumber(groupFormulaValue({ op: "sum", column: column(inner) }, rows, valueOf))
   }
   const segments: TextSegment[] = []
   let at = 0
@@ -777,31 +781,31 @@ export function textWithFormulas<T>(text: string, rows: T[], valueOf: (row: T, c
 /* ---------- Vues d'un onglet (Modifier › Vues, à côté de Cartes) ---------- */
 
 /** Les vues réglées dans « Modifier », que les onglets-fenêtres affichent. */
-export type PresentationKind = Exclude<ViewLayoutKind, "table" | "cards" | "stats">
-export const presentationKinds = viewLayoutKinds.filter((kind): kind is (typeof viewLayoutKinds)[number] & { value: PresentationKind } => kind.value !== "table" && kind.value !== "cards")
+export type PresentationKind = Exclude<AllPresentationKind, "table" | "cards" | "stats">
+export const presentationKinds = allPresentationKinds.filter((kind): kind is (typeof allPresentationKinds)[number] & { value: PresentationKind } => kind.value !== "table" && kind.value !== "cards")
 export const isPresentationKind = (value: unknown): value is PresentationKind => presentationKinds.some((kind) => kind.value === value)
 
 /** Une version de plus d'une vue, sous son nom (« Liste courte », « Kanban par lieu ») : son genre est celui de sa forme. */
-export type NamedView = { id: string; name: string; layout: ViewLayout & { kind: PresentationKind } }
+export type NamedPresentation = { id: string; name: string; layout: Presentation & { kind: PresentationKind } }
 
 /**
  * Les réglages de chaque présentation d'un onglet (Modifier › Vues), enregistrés dans Eraser :
  * sous son genre, la version étoilée (celle que montrent les pages et le tableau de bord) ;
  * dans `named`, les autres versions, qu'un bloc de page peut choisir.
  */
-export type TabPresentations = Partial<Record<PresentationKind, ViewLayout>> & { named?: NamedView[] }
+export type TabPresentations = Partial<Record<PresentationKind, Presentation>> & { named?: NamedPresentation[] }
 
 /** Le choix « une autre version de la vue » d'un bloc de page, rangé avec les presets (`vue:<id>`). */
-export const VIEW_VARIANT_PREFIX = "vue:"
+export const PRESENTATION_VARIANT_PREFIX = "vue:"
 
-function parseNamedView(input: unknown): NamedView | null {
+function parseNamedView(input: unknown): NamedPresentation | null {
   if (!input || typeof input !== "object") return null
   const raw = input as Record<string, unknown>
   const id = (typeof raw.id === "string" ? raw.id : "").replace(/[^A-Za-z0-9-]/g, "").slice(0, 40)
-  const layout = cleanViewLayout(raw.layout)
+  const layout = cleanPresentation(raw.layout)
   if (!id || !layout || !isPresentationKind(layout.kind)) return null
   const name = (typeof raw.name === "string" ? raw.name : "").replace(/\s+/g, " ").trim().slice(0, 60)
-  return { id, name: name || "Vue", layout: layout as NamedView["layout"] }
+  return { id, name: name || "Vue", layout: layout as NamedPresentation["layout"] }
 }
 
 export function parseTabPresentations(input: unknown): TabPresentations | null {
@@ -813,41 +817,41 @@ export function parseTabPresentations(input: unknown): TabPresentations | null {
   const result: TabPresentations = {}
   for (const [key, layout] of Object.entries(value as Record<string, unknown>)) {
     if (!isPresentationKind(key) || !layout || typeof layout !== "object") continue
-    const clean = cleanViewLayout({ ...(layout as Record<string, unknown>), kind: key })
+    const clean = cleanPresentation({ ...(layout as Record<string, unknown>), kind: key })
     if (clean) result[key] = clean
   }
   const seen = new Set<string>()
-  const named = (Array.isArray((value as { named?: unknown }).named) ? (value as { named: unknown[] }).named : []).map(parseNamedView).filter((item): item is NamedView => Boolean(item) && !seen.has(item!.id) && Boolean(seen.add(item!.id))).slice(0, 60)
+  const named = (Array.isArray((value as { named?: unknown }).named) ? (value as { named: unknown[] }).named : []).map(parseNamedView).filter((item): item is NamedPresentation => Boolean(item) && !seen.has(item!.id) && Boolean(seen.add(item!.id))).slice(0, 60)
   if (named.length) result.named = named
   return result
 }
 
 /** Les autres versions d'une vue d'un onglet (toutes, sans genre). */
-export function namedViewsOf(entry: TabPresentations | null | undefined, kind?: PresentationKind): NamedView[] {
+export function namedPresentationsOf(entry: TabPresentations | null | undefined, kind?: PresentationKind): NamedPresentation[] {
   return (entry?.named ?? []).filter((item) => !kind || item.layout.kind === kind)
 }
 
 /** Les genres de vue réglés dans une entrée (la version étoilée), sans la liste des autres versions. */
-export function presentationEntries(entry: TabPresentations | null | undefined): Array<[PresentationKind, ViewLayout]> {
-  return Object.entries(entry ?? {}).filter((pair): pair is [PresentationKind, ViewLayout] => isPresentationKind(pair[0]) && Boolean(pair[1]))
+export function presentationEntries(entry: TabPresentations | null | undefined): Array<[PresentationKind, Presentation]> {
+  return Object.entries(entry ?? {}).filter((pair): pair is [PresentationKind, Presentation] => isPresentationKind(pair[0]) && Boolean(pair[1]))
 }
 
 /** Une autre version d'une vue d'un onglet, par son identifiant ; `null` si elle n'existe plus. */
-export function presentationVariant(stored: Record<string, TabPresentations> | null | undefined, tab: string, id: string): ViewLayout | null {
+export function presentationVariant(stored: Record<string, TabPresentations> | null | undefined, tab: string, id: string): Presentation | null {
   const fold = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").replace(/\s+/g, " ").trim()
   const entry = stored ? Object.entries(stored).find(([name]) => fold(name) === fold(tab))?.[1] : undefined
-  return namedViewsOf(entry).find((item) => item.id === id)?.layout ?? null
+  return namedPresentationsOf(entry).find((item) => item.id === id)?.layout ?? null
 }
 
 /** La présentation à montrer : celle réglée pour l'onglet, sinon ses réglages par défaut. */
-export function presentationFor(stored: Record<string, TabPresentations> | null | undefined, tab: string, kind: PresentationKind): ViewLayout {
+export function presentationFor(stored: Record<string, TabPresentations> | null | undefined, tab: string, kind: PresentationKind): Presentation {
   const fold = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("fr").replace(/\s+/g, " ").trim()
   const entry = stored ? Object.entries(stored).find(([name]) => fold(name) === fold(tab))?.[1] : undefined
   return entry?.[kind] ?? { kind }
 }
 
 /** Les lignes dans l'ordre de la vue (nombres comparés comme des nombres, sinon l'ordre alphabétique). */
-export function sortLayoutRows<T>(rows: T[], layout: Pick<ViewLayout, "sortBy" | "sortDesc">, valueOf: (row: T, column: string) => string) {
+export function sortLayoutRows<T>(rows: T[], layout: Pick<Presentation, "sortBy" | "sortDesc">, valueOf: (row: T, column: string) => string) {
   if (!layout.sortBy) return rows
   const key = (row: T) => valueOf(row, layout.sortBy!).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
   const sorted = [...rows].sort((left, right) => {
@@ -864,22 +868,22 @@ export function sortLayoutRows<T>(rows: T[], layout: Pick<ViewLayout, "sortBy" |
  * Une vue réglée appliquée à un autre onglet ou index : ses colonnes absentes de l'onglet
  * sont retirées (le preset garde le reste : sections repliables, densité, tuiles…).
  */
-export function fitLayoutToColumns(layout: ViewLayout, columns: string[]): ViewLayout {
+export function fitLayoutToColumns(layout: Presentation, columns: string[]): Presentation {
   const fold = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").trim()
   const known = new Map(columns.map((column) => [fold(column), column]))
   const one = (value?: string) => value ? known.get(fold(value)) : undefined
   const many = (values?: string[]) => (values ?? []).flatMap((value) => known.get(fold(value)) ?? [])
-  const next: ViewLayout = { ...layout, groupBy: one(layout.groupBy), kanbanColumn: one(layout.kanbanColumn), dateColumn: one(layout.dateColumn), sortBy: one(layout.sortBy), parentColumn: one(layout.parentColumn), colorBy: one(layout.colorBy), imageColumn: one(layout.imageColumn), iconColumn: one(layout.iconColumn), badgeColumn: one(layout.badgeColumn), endColumn: one(layout.endColumn), laneColumn: one(layout.laneColumn), dimColumn: one(layout.dimColumn), gallerySizeColumn: one(layout.gallerySizeColumn), fields: many(layout.fields), detailFields: many(layout.detailFields), codexTiles: many(layout.codexTiles), codexLinks: many(layout.codexLinks), tiles: layout.tiles?.flatMap((tile) => tile.column && !known.has(fold(tile.column)) ? [] : [{ ...tile, maxColumn: one(tile.maxColumn), formulas: tile.formulas?.filter((formula) => !formula.column || known.has(fold(formula.column))) }]),
+  const next: Presentation = { ...layout, groupBy: one(layout.groupBy), kanbanColumn: one(layout.kanbanColumn), dateColumn: one(layout.dateColumn), sortBy: one(layout.sortBy), parentColumn: one(layout.parentColumn), colorBy: one(layout.colorBy), imageColumn: one(layout.imageColumn), iconColumn: one(layout.iconColumn), badgeColumn: one(layout.badgeColumn), endColumn: one(layout.endColumn), laneColumn: one(layout.laneColumn), dimColumn: one(layout.dimColumn), gallerySizeColumn: one(layout.gallerySizeColumn), fields: many(layout.fields), detailFields: many(layout.detailFields), codexTiles: many(layout.codexTiles), codexLinks: many(layout.codexLinks), tiles: layout.tiles?.flatMap((tile) => tile.column && !known.has(fold(tile.column)) ? [] : [{ ...tile, maxColumn: one(tile.maxColumn), formulas: tile.formulas?.filter((formula) => !formula.column || known.has(fold(formula.column))) }]),
     groupFormula: layout.groupFormula && (!layout.groupFormula.column || known.has(fold(layout.groupFormula.column))) ? layout.groupFormula : undefined,
     gauge: layout.gauge && known.has(fold(layout.gauge.column)) ? { ...layout.gauge, maxColumn: one(layout.gauge.maxColumn) } : undefined }
-  return cleanViewLayout(next) ?? { kind: layout.kind }
+  return cleanPresentation(next) ?? { kind: layout.kind }
 }
 
 /** Un preset de vue : des réglages nommés, communs à tous les index. */
-export type ViewPreset = { id: string; name: string; layout: ViewLayout; builtin?: boolean; updatedAt?: string }
+export type PresentationPreset = { id: string; name: string; layout: Presentation; builtin?: boolean; updatedAt?: string }
 
 /** Les presets d'Eraser, sans colonne : ils se complètent avec celles de l'onglet. */
-export const builtinViewPresets: ViewPreset[] = [
+export const builtinPresentationPresets: PresentationPreset[] = [
   { id: "eraser:list-compact", name: "Liste compacte", builtin: true, layout: { kind: "list", compact: true } },
   { id: "eraser:list-folding", name: "Liste à lignes dépliables", builtin: true, layout: { kind: "list", collapsible: true } },
   { id: "eraser:list-two", name: "Liste sur deux colonnes", builtin: true, layout: { kind: "list", compact: true, listColumns: 2 } },
@@ -929,11 +933,11 @@ export const builtinViewPresets: ViewPreset[] = [
   { id: "eraser:codex-columns", name: "Codex sur deux colonnes", builtin: true, layout: { kind: "codex", proseColumns: 2, tocPosition: "top", showToc: true, look: { codexImage: "banner", density: "compact" } } },
 ]
 
-export function cleanViewPreset(value: unknown): ViewPreset | null {
+export function cleanPresentationPreset(value: unknown): PresentationPreset | null {
   if (!value || typeof value !== "object") return null
   const raw = value as Record<string, unknown>
   const name = text(raw.name, 60)
-  const layout = cleanViewLayout(raw.layout)
+  const layout = cleanPresentation(raw.layout)
   if (!name || !layout || !isPresentationKind(layout.kind)) return null
   return { id: text(raw.id, 80) || "", name, layout, ...(text(raw.updatedAt, 40) ? { updatedAt: text(raw.updatedAt, 40) } : {}) }
 }

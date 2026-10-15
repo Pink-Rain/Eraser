@@ -11,9 +11,9 @@ import { automaticLayoutFor, tabFormOrBuiltin } from "@/lib/index-layout-default
 import { DEFAULT_FORM_ID, type IndexLayout, type TabLayouts } from "@/lib/index-layouts"
 import { foldName, isComputedSpec, isIdHeader, isRichSpec, type IndexColumnSpec } from "@/lib/index-columns"
 import type { StatColumnGroup, StatDefinition } from "@/lib/index-stats"
-import { fitLayoutToColumns, isPresentationKind, presentationFor, sortLayoutRows, type TabPresentations, type ViewLayout } from "@/lib/index-view-layouts"
+import { fitLayoutToColumns, isPresentationKind, presentationFor, sortLayoutRows, type TabPresentations, type Presentation } from "@/lib/index-presentations"
 import { activeWhere, type ViewBlockKind, type ViewWhere } from "@/lib/custom-pages"
-import { matchesCondition, type ViewCondition } from "@/lib/index-views"
+import { matchesCondition, type FilterCondition } from "@/lib/index-windows"
 import { ownedBy } from "@/lib/ownership"
 
 /** Un index tel que le serveur le lit (un sous-ensemble de WorldIndexData). */
@@ -43,7 +43,7 @@ export type ViewBlockData = {
   specs: Record<string, IndexColumnSpec>
   rows: BlockRow[]
   total: number
-  layout?: ViewLayout
+  layout?: Presentation
   cards?: TabCards
   /** Les formulaires de l'onglet qu'un élément ou un détail « formulaire en lecture » dessine, par identifiant. */
   forms?: Record<string, IndexLayout>
@@ -152,9 +152,9 @@ export type ViewBlockInput = {
   /** Page de ligne : seulement les lignes dont cette colonne cite la ligne de la page. */
   match?: { column: string; index: string; id: string; name: string }
   /** La forme propre au bloc. */
-  layout?: ViewLayout
+  layout?: Presentation
   /** La forme d'un preset de vue choisi pour le bloc (déjà retrouvé). */
-  preset?: ViewLayout | null
+  preset?: Presentation | null
   /** Les cartes : laquelle montrer. */
   cardId?: string
   where?: ViewWhere
@@ -167,7 +167,7 @@ export type ViewBlockInput = {
 
 /** La valeur d'une condition qui désigne le lecteur : « Joueur est {Moi} », « MJ est {Moi} ». */
 export const ME_TOKEN = "{Moi}"
-export const isMeCondition = (condition: ViewCondition) => condition.value.trim().toLowerCase() === ME_TOKEN.toLowerCase()
+export const isMeCondition = (condition: FilterCondition) => condition.value.trim().toLowerCase() === ME_TOKEN.toLowerCase()
 
 /**
  * Une ligne remplit-elle les conditions du bloc ? « {Moi} » compare la case aux comptes du
@@ -214,7 +214,7 @@ export function viewBlockData(source: IndexSource, input: ViewBlockInput, settin
   if (input.kind === "cards") return { ...base, cards: cards() }
   // La forme : celle réglée pour la page, sinon le preset choisi, sinon celle de l'onglet (ou la
   // présentation par défaut). Les colonnes que le lecteur ne voit pas en sont retirées.
-  const same = (layout?: ViewLayout | null) => layout && isPresentationKind(layout.kind) && layout.kind === input.kind ? layout : null
+  const same = (layout?: Presentation | null) => layout && isPresentationKind(layout.kind) && layout.kind === input.kind ? layout : null
   const chosen = input.layout && isPresentationKind(input.layout.kind) ? input.layout
     : same(input.preset)
     ?? (isPresentationKind(input.kind) ? presentationFor(settings.presentations, table.tabName, input.kind) : null)

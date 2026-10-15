@@ -16,7 +16,7 @@ import { shownReferenceText } from "@/components/eraser/reference-store"
 import { htmlToRichText } from "@/lib/google-sheet-rich-text"
 import { OBJECT_REFERENCE_INDEX } from "@/lib/index-references"
 import type { EditorMode } from "@/components/eraser/index-editor"
-import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-views"
+import { IndexWindowDialog, useIndexSettings } from "@/components/eraser/index-windows"
 import { IndexCardGrid, IndexDisplayControls, NoCardsYet, isCardChoice, isIndexDisplay, type CardRowSource, type IndexDisplay } from "@/components/eraser/index-card"
 import { pickCard, tabCardsOf } from "@/lib/index-cards"
 import { ObjectViewGrid, specIn } from "@/components/eraser/object-view-grid"
@@ -42,8 +42,8 @@ import { isBuiltinWorldIndexKey, worldIndexDefinitions } from "@/lib/world-index
 import { numberCorrection } from "@/lib/index-numbers"
 import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
 import { findEntry, isTrashedEntry, objectHeaderIndex, type IndexEditorModel, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
-import { ALL_SOURCES, viewIdOfSelectKey, viewSelectKey } from "@/lib/index-views"
-import type { ViewLayout } from "@/lib/index-view-layouts"
+import { ALL_SOURCES, windowIdOfSelectKey, windowSelectKey } from "@/lib/index-windows"
+import type { Presentation } from "@/lib/index-presentations"
 import { layoutPlaces, tabLayout } from "@/lib/index-layouts"
 import { headerOccurrence, objectIndexRowRef } from "@/lib/object-index-refs"
 import { objectItemId, positionalObjectId } from "@/lib/object-item-id"
@@ -124,10 +124,10 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   const [viewDialog, setViewDialog] = useState<"new" | "edit" | null>(null)
   // Une case modifiée dans une fenêtre : en revenant à un tableau, il est relu.
   const editedInView = useRef(false)
-  const activeView = useMemo(() => { const id = viewIdOfSelectKey(selectedKey); return id ? settings.views.find((view) => view.id === id) ?? null : null }, [selectedKey, settings.views])
+  const activeView = useMemo(() => { const id = windowIdOfSelectKey(selectedKey); return id ? settings.views.find((view) => view.id === id) ?? null : null }, [selectedKey, settings.views])
   // Un onglet-fenêtre est le tableau filtré par ses conditions, ou un onglet stat : rien d'autre
   // (une présentation d'une version précédente est ignorée ; kanban, liste… se posent dans une page).
-  const activeLayout = useMemo((): ViewLayout | null => activeView?.layout?.kind === "stats" ? activeView.layout : null, [activeView])
+  const activeLayout = useMemo((): Presentation | null => activeView?.layout?.kind === "stats" ? activeView.layout : null, [activeView])
 
   // Les statistiques des items (Modifier › Stats), sur tous les tableaux ; un onglet stat montre les épinglées.
   const statKey = (table: ObjectIndexTable, rowNumber: number) => `${tableKey(table)}|${rowNumber}`
@@ -682,12 +682,12 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
           Onglet
           <span className="flex min-w-0 items-center gap-1 text-foreground">
             <IndexTabPicker
-              value={activeView ? viewSelectKey(activeView.id) : selected ? tableKey(selected) : ""}
+              value={activeView ? windowSelectKey(activeView.id) : selected ? tableKey(selected) : ""}
               options={[
                 ...tables.map((table) => ({ value: tableKey(table), label: tableLabel(table), detail: String(table.rows.length) })),
-                ...settings.views.map((view) => ({ value: viewSelectKey(view.id), label: `⧉ ${view.name}`, group: "Onglets-fenêtres" })),
+                ...settings.views.map((view) => ({ value: windowSelectKey(view.id), label: `⧉ ${view.name}`, group: "Onglets-fenêtres" })),
               ]}
-              onChange={(value) => { setSelectedKey(value); if (editedInView.current && !viewIdOfSelectKey(value)) { editedInView.current = false; void refresh(true) } }}
+              onChange={(value) => { setSelectedKey(value); if (editedInView.current && !windowIdOfSelectKey(value)) { editedInView.current = false; void refresh(true) } }}
               hrefOf={tabHref}
               tabLabel={(option) => `Objets · ${option.label.replace(/^⧉ /, "")}`}
               disabled={!tables.length || busy}
@@ -817,7 +817,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         // Le tableau remonte ses cases : il montre ce qui vient d'être écrit dans la fiche.
         onClose={() => { setDetails(null); setStatSheet(null); setSheetError(""); setVersion((current) => current + 1) }}
       />}
-      {viewDialog && <IndexViewDialog
+      {viewDialog && <IndexWindowDialog
         open
         onOpenChange={(open) => { if (!open) setViewDialog(null) }}
         index="objects"
@@ -825,7 +825,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         view={viewDialog === "edit" ? activeView : null}
         sources={[{ value: ALL_SOURCES, label: "Tous les index d’items" }, ...tables.map((table) => ({ value: tableKey(table), label: tableLabel(table) }))]}
         columnsOf={(source) => [...new Set((source === ALL_SOURCES ? tables : tables.filter((table) => tableKey(table) === source)).flatMap((table) => table.headers).filter((header) => header.trim() && !/^(id|colonne \d+)$/i.test(header)))]}
-        onSave={async (view) => { const id = await settings.saveView(view); setSelectedKey(viewSelectKey(id)); return id }}
+        onSave={async (view) => { const id = await settings.saveView(view); setSelectedKey(windowSelectKey(id)); return id }}
         onDelete={async (id) => { await settings.deleteView(id); setSelectedKey(tables[0] ? tableKey(tables[0]) : "") }}
       />}
       {guideOpen && <IndexGuide open onClose={() => setGuideOpen(false)} />}

@@ -12,7 +12,7 @@ import { backlinkSources, indexSourceOf, readOptions, rowTemplates, viewerFor } 
 import { listCustomIndexes } from "@/lib/custom-indexes"
 import { listIndexCards } from "@/lib/index-cards-store"
 import { listIndexPresentations, listIndexStatsRecord, listViewPresets } from "@/lib/index-presentations-store"
-import { builtinViewPresets, namedViewsOf, presentationFor, presentationVariant, VIEW_VARIANT_PREFIX, type PresentationKind } from "@/lib/index-view-layouts"
+import { builtinPresentationPresets, namedPresentationsOf, presentationFor, presentationVariant, PRESENTATION_VARIANT_PREFIX, type PresentationKind } from "@/lib/index-presentations"
 import { rowOfRoute } from "@/lib/page-replacements"
 import { virtualEraserPage } from "@/lib/eraser-page-blueprints"
 import { authorizedAccount } from "@/lib/server-auth"
@@ -32,8 +32,8 @@ type RowPageOf = BlockDataOptions["rowPageOf"]
 /** La forme d'un preset de vue (ceux d'Eraser, puis ceux enregistrés), lue seulement quand le bloc en désigne un. */
 async function presetLayout(presetId: string | undefined) {
   // Une autre version de la vue de l'onglet (« vue:… ») se lit avec les vues de l'index.
-  if (!presetId || presetId.startsWith(VIEW_VARIANT_PREFIX)) return null
-  const builtin = builtinViewPresets.find((preset) => preset.id === presetId)
+  if (!presetId || presetId.startsWith(PRESENTATION_VARIANT_PREFIX)) return null
+  const builtin = builtinPresentationPresets.find((preset) => preset.id === presetId)
   if (builtin) return builtin.layout
   return (await listViewPresets().catch(() => [])).find((preset) => preset.id === presetId)?.layout ?? null
 }
@@ -66,7 +66,7 @@ async function viewData(key: WorldIndexKey, raw: ViewBlock, match: Parameters<ty
   // Ce qu'une vue lit : l'index (copie en mémoire), les formes et les cartes de l'index (copies
   // du serveur partagé, relues toutes les 30 s) et, s'il est choisi, un preset. Jamais Google.
   const [source, presentations, cards, preset, layouts, stats] = await Promise.all([indexSourceOf(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), presetLayout(block.presetId), listIndexLayouts(key).catch(() => ({})), block.kind === "dashboard" ? listIndexStatsRecord(key).catch(() => ({ stats: [], groups: [] })) : undefined])
-  const variant = block.presetId?.startsWith(VIEW_VARIANT_PREFIX) ? presentationVariant(presentations, block.tab, block.presetId.slice(VIEW_VARIANT_PREFIX.length)) : null
+  const variant = block.presetId?.startsWith(PRESENTATION_VARIANT_PREFIX) ? presentationVariant(presentations, block.tab, block.presetId.slice(PRESENTATION_VARIANT_PREFIX.length)) : null
   const input = { tab: block.tab, kind: block.kind, limit: block.limit, match, layout: block.layout, preset: variant ?? preset, cardId: block.cardId, where: block.where, sort: block.sort, me, click: block.click }
   const data = viewBlockData(source, input, { presentations, cards, layouts, stats }, readOptions(key, player, rowPageOf))
   if (!data) return null
@@ -123,14 +123,14 @@ export async function GET(request: Request) {
           formList: tabFormsOf(tabLayoutsOf(layouts, table.tabName)).map((form) => ({ id: form.id, name: form.name })),
           cardList: cardsOf(table.tabName).map((card) => ({ id: card.id, name: card.name })),
           // Les autres versions des vues de l'onglet (Modifier › Liste, Kanban… › Nouveau) : un bloc en choisit une.
-          viewList: namedViewsOf(Object.entries(presentations).find(([name]) => name.toLocaleLowerCase("fr") === table.tabName.toLocaleLowerCase("fr"))?.[1]).map((item) => ({ id: item.id, name: item.name, kind: item.layout.kind })),
+          viewList: namedPresentationsOf(Object.entries(presentations).find(([name]) => name.toLocaleLowerCase("fr") === table.tabName.toLocaleLowerCase("fr"))?.[1]).map((item) => ({ id: item.id, name: item.name, kind: item.layout.kind })),
           columns: (data.columns[table.tabName] ?? []).map((column) => column.header).filter((header) => !/^id$/i.test(header)),
           // Les valeurs proposées des colonnes à liste : les conditions d'un bloc les suggèrent.
           choices: Object.fromEntries((data.columns[table.tabName] ?? []).flatMap((column) => column.spec.options?.length ? [[column.header, column.spec.options.map((option) => option.value).slice(0, 80)]] : [])),
         })),
         stats: record.stats.map((stat) => ({ id: stat.id, title: stat.title, pinned: Boolean(stat.pinned) })),
         // Les presets de vues (« Kanban serré », les tiens…) : autant de formes à choisir pour un bloc.
-        presets: [...presets, ...builtinViewPresets].map((preset) => ({ id: preset.id, name: preset.name, kind: preset.layout.kind, builtin: Boolean(preset.builtin) })),
+        presets: [...presets, ...builtinPresentationPresets].map((preset) => ({ id: preset.id, name: preset.name, kind: preset.layout.kind, builtin: Boolean(preset.builtin) })),
       })
     }
 

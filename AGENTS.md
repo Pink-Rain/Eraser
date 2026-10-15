@@ -84,6 +84,21 @@
   `jdrSheetDefinitions`, conserve les fichiers trouvés et ne crée que les
   feuilles réellement absentes.
 
+## Vues des index
+
+- Vocabulaire : une **présentation** est une forme (liste, kanban…,
+  `lib/index-presentations.ts`) ; un **filtre** est fait de conditions et un
+  **onglet-fenêtre** (`IndexWindow`, `lib/index-windows.ts`) affiche un filtre ;
+  **vue** est réservé à la future vue enregistrée (filtre + tri + présentation).
+  Détail dans `ARCHITECTURE.md`.
+- Ne jamais renommer une clé déjà enregistrée ou échangée avec le serveur
+  (`save-view`, `views`, `viewPresets`, portées du Worker, colonnes de la feuille
+  « Eraser · Réglages des index », `vue:`, `@vue`).
+- Les éditeurs enregistrent la valeur « par défaut » comme absente : vérifier que
+  l’affichage a bien le même défaut.
+- Le chantier en cours suit la roadmap « Eraser · Vues des index » (document
+  partagé du propriétaire) : la relire et la mettre à jour à chaque étape.
+
 ## Tabletop et Roll20
 
 - Le tabletop utilise notamment Leaflet et Trystero. Ses routes, composants et

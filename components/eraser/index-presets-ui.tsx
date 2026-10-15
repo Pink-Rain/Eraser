@@ -3,8 +3,8 @@
 import { useState } from "react"
 import { Bookmark, BookmarkPlus, Check, LayoutTemplate, LoaderCircle, MessageSquareQuote, Pencil, Replace, Settings2, Trash2 } from "lucide-react"
 
-import { useIndexSettings } from "@/components/eraser/index-views"
-import { CopyToTabsDialog, ManagePresetsDialog as ManageNamedPresetsDialog, NamePresetDialog, ViewVariantsPanel, type VariantOption } from "@/components/eraser/index-view-panel"
+import { useIndexSettings } from "@/components/eraser/index-windows"
+import { CopyToTabsDialog, ManagePresetsDialog as ManageNamedPresetsDialog, NamePresetDialog, VariantsPanel, type VariantOption } from "@/components/eraser/index-variants-panel"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -156,7 +156,7 @@ export function LayoutViewsPanel({ kind, tabName, items, selectedId, onSelect, o
   const form = kind === "form"
   const what = form ? "ce formulaire" : "ce survol"
   return <>
-    <ViewVariantsPanel
+    <VariantsPanel
       title={form ? "Formulaires" : "Survols"}
       icon={form ? LayoutTemplate : MessageSquareQuote}
       noun={form ? "formulaire" : "survol"}

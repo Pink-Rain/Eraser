@@ -12,7 +12,7 @@ import { foldName, isIdHeader } from "@/lib/index-columns"
 import type { IndexLayout } from "@/lib/index-layouts"
 import { parseReferenceHref } from "@/lib/index-references"
 import { cellCitesRow, columnSpecIn, shownColumns, type BlockDataOptions, type IndexSource } from "@/lib/custom-pages-data"
-import { matchesView } from "@/lib/index-views"
+import { matchesFilter } from "@/lib/index-windows"
 import { sanitizeRichText } from "@/lib/rich-text-sanitize"
 
 /** La ligne d'une page de ligne : ses valeurs lisibles par le lecteur. */
@@ -149,7 +149,7 @@ export function rowValuesOf(source: IndexSource, tab: string, id: string): ((col
  */
 export function blocksForRow<T extends Pick<PageView, "sections">>(view: T, valueOf: (column: string) => string): T {
   if (!view.sections.some((section) => section.cols.some((column) => column.some((block) => block.showIf)))) return view
-  return { ...view, sections: view.sections.map((section) => ({ ...section, cols: section.cols.map((column) => column.filter((block) => { const where = activeWhere(block.showIf); return !where || matchesView(where, valueOf) })) })) }
+  return { ...view, sections: view.sections.map((section) => ({ ...section, cols: section.cols.map((column) => column.filter((block) => { const where = activeWhere(block.showIf); return !where || matchesFilter(where, valueOf) })) })) }
 }
 
 /** La page de la ligne : le modèle (déjà filtré pour son lecteur) rempli avec les valeurs de la ligne. */

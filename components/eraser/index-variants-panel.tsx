@@ -30,7 +30,7 @@ function Tool({ icon: Icon, label, onClick, disabled, className }: { icon: Lucid
   return <Button type="button" variant="ghost" size="icon-sm" className={cn(iconButton, className)} disabled={disabled} onClick={onClick} title={label} aria-label={label}><Icon /></Button>
 }
 
-export function ViewVariantsPanel({ title, icon: Icon, noun, items, selectedId, starredId, onSelect, onStar, starHint, onRename, renameable = () => true, onMove, onNew, newHint, onDuplicate, onRemove, removable = () => true, full = false, empty, presets, onApplyPreset, onSavePreset, savePresetHint, onCopy, copyHint, onManagePresets, footer, disabled = false }: {
+export function VariantsPanel({ title, icon: Icon, noun, items, selectedId, starredId, onSelect, onStar, starHint, onRename, renameable = () => true, onMove, onNew, newHint, onDuplicate, onRemove, removable = () => true, full = false, empty, presets, onApplyPreset, onSavePreset, savePresetHint, onCopy, copyHint, onManagePresets, footer, disabled = false }: {
   /** « Formulaires », « Survols », « Cartes », « Listes »… */
   title: string
   icon: LucideIcon

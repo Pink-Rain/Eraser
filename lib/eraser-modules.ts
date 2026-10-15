@@ -5,7 +5,7 @@
  * quel bloc : c'est ainsi qu'une page d'Eraser devient modifiable sans rien perdre.
  *
  * Ce qui n'est qu'une vue d'un index (les cartes des classes…) n'est pas un module : c'est un
- * bloc Vue d'index, avec ses presets (lib/index-view-layouts.ts).
+ * bloc Vue d'index, avec ses presets (lib/index-presentations.ts).
  *
  * Règles pures (l'atelier, le serveur et les tests s'en servent) ; le rendu des modules est
  * dans components/eraser/eraser-modules.tsx, sur le serveur.

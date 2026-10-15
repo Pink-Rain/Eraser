@@ -46,9 +46,9 @@ import {
 } from "lucide-react"
 
 import { IndexCard, cardGridStyle, cardWidthRem, type CardRowSource } from "@/components/eraser/index-card"
-import { Choice, ImageBoxControls, SettingsRow, Tabs } from "@/components/eraser/view-editor-controls"
-import { useIndexSettings } from "@/components/eraser/index-views"
-import { CopyToTabsDialog, ManagePresetsDialog, NamePresetDialog, PreviewDialog, PreviewExpandButton, ViewVariantsPanel } from "@/components/eraser/index-view-panel"
+import { Choice, ImageBoxControls, SettingsRow, Tabs } from "@/components/eraser/editor-controls"
+import { useIndexSettings } from "@/components/eraser/index-windows"
+import { CopyToTabsDialog, ManagePresetsDialog, NamePresetDialog, PreviewDialog, PreviewExpandButton, VariantsPanel } from "@/components/eraser/index-variants-panel"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -944,7 +944,7 @@ export function CardsPanel({ tabName, columns, value, builtin, builtins, samples
     setCards(cards)
   }
   return <>
-    <ViewVariantsPanel
+    <VariantsPanel
       title={`Cartes de « ${tabName} »`}
       icon={LayoutGrid}
       noun="carte"

@@ -11,7 +11,7 @@ import { cardGridStyle, cardWidthRem, IndexCard, TypedValue, type CardRowSource 
 import type { CardTemplate } from "@/lib/index-cards"
 import { parseGlyphValue, type IndexColumnSpec } from "@/lib/index-columns"
 import { cellNumber, cellParts } from "@/lib/index-stats"
-import { calendarScaleOf, calendarScales, VIEW_ITEM_CARD, type ViewClick, dashboardTileKinds, dashboardTileValue, DEFAULT_ITEM_CARD, depthPalette, formatViewNumber, groupFormulaValue, groupRowsBy, linkedTiles, rowTree, sortLayoutRows, textWithFormulas, tileGaugeValue, timelineEntries, treeSize, viewLayoutKinds, viewPalette, type CalendarScale, type DashboardTile, type KanbanLane, type RowTreeNode, type TabPresentations, type ViewLayout, type ViewLook } from "@/lib/index-view-layouts"
+import { calendarScaleOf, calendarScales, PRESENTATION_ITEM_CARD, type PresentationClick, dashboardTileKinds, dashboardTileValue, DEFAULT_ITEM_CARD, depthPalette, formatPresentationNumber, groupFormulaValue, groupRowsBy, linkedTiles, rowTree, sortLayoutRows, textWithFormulas, tileGaugeValue, timelineEntries, treeSize, allPresentationKinds, presentationPalette, type CalendarScale, type DashboardTile, type KanbanLane, type RowTreeNode, type TabPresentations, type Presentation, type PresentationLook } from "@/lib/index-presentations"
 
 /**
  * Les présentations d'un onglet-fenêtre autres que le tableau et les cartes : liste,
@@ -21,8 +21,8 @@ import { calendarScaleOf, calendarScales, VIEW_ITEM_CARD, type ViewClick, dashbo
  * propres réglages (Modifier › la vue) : ce qu'elle montre, son dessin, ses couleurs et ses
  * icônes ; l'apparence commune est dans `layout.look`.
  */
-export type ViewLayoutProps = {
-  layout: ViewLayout
+export type PresentationProps = {
+  layout: Presentation
   rows: string[]
   /** Les colonnes de l'onglet, sans l'identifiant. */
   headers: string[]
@@ -61,7 +61,7 @@ export type ViewLayoutProps = {
 const ViewSpecs = createContext<(header: string) => IndexColumnSpec | undefined>(() => undefined)
 
 /** Une ligne vue comme une carte la voit : ses valeurs et le type de leur colonne. */
-function useRowSource(row: string, valueOf: ViewLayoutProps["valueOf"]): CardRowSource {
+function useRowSource(row: string, valueOf: PresentationProps["valueOf"]): CardRowSource {
   const specOf = useContext(ViewSpecs)
   return { value: (header) => valueOf(row, header), spec: specOf }
 }
@@ -71,16 +71,16 @@ function useRowSource(row: string, valueOf: ViewLayoutProps["valueOf"]): CardRow
  * « Modifier › Cartes » (si la page sait les dessiner). Le clic y suit « Au clic » de la vue.
  */
 /** La carte qui dessine l'élément d'une ligne : l'élément sur mesure de la vue, sinon une carte de l'onglet. */
-function itemTemplateOf(props: Pick<ViewLayoutProps, "layout" | "cardOf">, row: string): CardTemplate | null {
+function itemTemplateOf(props: Pick<PresentationProps, "layout" | "cardOf">, row: string): CardTemplate | null {
   const { itemCard, itemTemplate } = props.layout
-  if (itemCard === VIEW_ITEM_CARD) return itemTemplate ?? null
+  if (itemCard === PRESENTATION_ITEM_CARD) return itemTemplate ?? null
   return itemCard ? props.cardOf?.(row, itemCard) ?? null : null
 }
 
-function cardFor(props: Pick<ViewLayoutProps, "layout" | "renderCard" | "renderForm" | "onOpen" | "inert" | "cardOf" | "valueOf" | "specOf">, options: { fill?: boolean } = {}) {
+function cardFor(props: Pick<PresentationProps, "layout" | "renderCard" | "renderForm" | "onOpen" | "inert" | "cardOf" | "valueOf" | "specOf">, options: { fill?: boolean } = {}) {
   const { itemCard, itemForm, click } = props.layout
   // L'élément sur mesure : la vue le dessine elle-même avec le moteur des cartes ; son clic suit « Au clic ».
-  const template = itemCard === VIEW_ITEM_CARD ? props.layout.itemTemplate : undefined
+  const template = itemCard === PRESENTATION_ITEM_CARD ? props.layout.itemTemplate : undefined
   if (template && !itemForm) {
     const wide = template.width === "full" && !template.widthRem
     // eslint-disable-next-line react/display-name -- un rendu par ligne, pas un composant
@@ -108,7 +108,7 @@ function cardFor(props: Pick<ViewLayoutProps, "layout" | "renderCard" | "renderF
 }
 
 /** La jauge d'une ligne (« Jauge sous chaque élément ») : une colonne nombre en barre ou en charges, sur son maximum. */
-function RowGauge({ layout, row, valueOf, color, inverted = false }: { layout: ViewLayout; row: string; valueOf: ViewLayoutProps["valueOf"]; color?: string; inverted?: boolean }) {
+function RowGauge({ layout, row, valueOf, color, inverted = false }: { layout: Presentation; row: string; valueOf: PresentationProps["valueOf"]; color?: string; inverted?: boolean }) {
   const gauge = layout.gauge
   if (!gauge) return null
   const value = cellNumber(plain(valueOf(row, gauge.column)))
@@ -116,7 +116,7 @@ function RowGauge({ layout, row, valueOf, color, inverted = false }: { layout: V
   const max = gauge.maxColumn ? cellNumber(plain(valueOf(row, gauge.maxColumn))) : gauge.max ?? null
   const tint = inverted ? "#fff" : color ?? accentOf(layout.look ?? {})
   const label = gauge.label ?? gauge.column
-  const shown = max ? `${formatViewNumber(value)} / ${formatViewNumber(max)}` : formatViewNumber(value)
+  const shown = max ? `${formatPresentationNumber(value)} / ${formatPresentationNumber(max)}` : formatPresentationNumber(value)
   if (gauge.style === "charges") {
     const total = Math.max(1, Math.min(20, Math.round(max ?? value)))
     const filled = Math.max(0, Math.min(total, Math.round(value)))
@@ -134,12 +134,12 @@ function RowGauge({ layout, row, valueOf, color, inverted = false }: { layout: V
 }
 
 /** La formule d'un groupe (en-tête de section, de colonne du kanban) : son nombre, contre sa cible en barre si elle en a une. */
-function GroupFormulaBadge({ layout, rows, valueOf, color, inverted = false }: { layout: ViewLayout; rows: string[]; valueOf: ViewLayoutProps["valueOf"]; color?: string; inverted?: boolean }) {
+function GroupFormulaBadge({ layout, rows, valueOf, color, inverted = false }: { layout: Presentation; rows: string[]; valueOf: PresentationProps["valueOf"]; color?: string; inverted?: boolean }) {
   const formula = layout.groupFormula
   if (!formula) return null
   const value = groupFormulaValue(formula, rows, valueOf)
   const tint = inverted ? "#fff" : color ?? accentOf(layout.look ?? {})
-  const text = `${formula.label ? `${formula.label} ` : ""}${formatViewNumber(value)}${formula.target ? ` / ${formatViewNumber(formula.target)}` : ""}`
+  const text = `${formula.label ? `${formula.label} ` : ""}${formatPresentationNumber(value)}${formula.target ? ` / ${formatPresentationNumber(formula.target)}` : ""}`
   const over = formula.target !== undefined && value > formula.target
   if (formula.style === "bar" && formula.target) return <span className="flex min-w-24 items-center gap-1.5 text-[10px] font-semibold normal-case tracking-normal" title={text}>
     <span className="block h-1.5 w-16 overflow-hidden rounded-full" style={{ backgroundColor: inverted ? "rgb(255 255 255 / .3)" : `color-mix(in srgb, ${tint} 18%, var(--muted))` }}><span className="block h-full rounded-full" style={{ width: `${Math.round(Math.min(1, value / formula.target) * 100)}%`, backgroundColor: over ? "var(--destructive)" : tint }} /></span>
@@ -155,14 +155,14 @@ function plain(value: string) {
 const fold = (value: string) => value.toLocaleLowerCase("fr")
 
 /** La couleur d'accent de la vue (Modifier › la vue › Couleurs), sinon l'or d'Eraser. */
-const accentOf = (look: ViewLook) => look.color ?? "var(--primary)"
+const accentOf = (look: PresentationLook) => look.color ?? "var(--primary)"
 
 /**
  * La couleur d'une ligne : celle du choix de la colonne « Couleur des lignes selon » ; sinon
  * la couleur d'accent réglée pour la vue, qui marque alors chaque élément de la même façon
  * (liseré, teinte, point, nom coloré). Sans l'une ni l'autre : rien.
  */
-function rowColor(layout: ViewLayout, row: string, valueOf: ViewLayoutProps["valueOf"], optionsOf?: ViewLayoutProps["optionsOf"]) {
+function rowColor(layout: Presentation, row: string, valueOf: PresentationProps["valueOf"], optionsOf?: PresentationProps["optionsOf"]) {
   const fallback = layout.look?.color
   if (!layout.colorBy) return fallback
   const raw = (plain(valueOf(row, layout.colorBy)).split(/\s*[,;]\s*/)[0] ?? "").trim()
@@ -174,7 +174,7 @@ function rowColor(layout: ViewLayout, row: string, valueOf: ViewLayoutProps["val
 }
 
 /** L'image d'une ligne (première adresse trouvée dans la case choisie). */
-function rowImage(layout: ViewLayout, row: string, valueOf: ViewLayoutProps["valueOf"]) {
+function rowImage(layout: Presentation, row: string, valueOf: PresentationProps["valueOf"]) {
   if (!layout.imageColumn) return ""
   const raw = valueOf(row, layout.imageColumn)
   const address = raw.match(/(https:\/\/[^\s"'<>]+|\/api\/[^\s"'<>]+)/)?.[0]
@@ -185,14 +185,14 @@ function rowImage(layout: ViewLayout, row: string, valueOf: ViewLayoutProps["val
 }
 
 /** L'icône d'une ligne : celle écrite dans la colonne icône, sinon l'icône fixe de la vue. */
-function rowGlyph(layout: ViewLayout, row: string, valueOf: ViewLayoutProps["valueOf"], fallback = layout.itemIcon) {
+function rowGlyph(layout: Presentation, row: string, valueOf: PresentationProps["valueOf"], fallback = layout.itemIcon) {
   const written = layout.iconColumn ? plain(valueOf(row, layout.iconColumn)) : ""
   const value = written || fallback || ""
   return value ? parseGlyphValue(value) : null
 }
 
 /** L'icône devant un nom (colonne icône ou icône fixe), à la couleur voulue. */
-function RowIcon({ layout, row, valueOf, color, className = "size-4", fallback }: { layout: ViewLayout; row: string; valueOf: ViewLayoutProps["valueOf"]; color?: string; className?: string; fallback?: string }) {
+function RowIcon({ layout, row, valueOf, color, className = "size-4", fallback }: { layout: Presentation; row: string; valueOf: PresentationProps["valueOf"]; color?: string; className?: string; fallback?: string }) {
   const glyph = rowGlyph(layout, row, valueOf, fallback ?? layout.itemIcon)
   if (!glyph) return null
   return <span className="inline-flex shrink-0" style={color ? { color } : undefined}><IndexIconGlyph icon={glyph.icon} emoji={glyph.emoji} className={className} /></span>
@@ -206,7 +206,7 @@ function Glyph({ value, className = "size-3.5", color }: { value: string | undef
 }
 
 /** La pastille à droite du nom (« Pastille à droite du nom, prise dans »), à la couleur du choix. */
-function RowBadge({ layout, row, valueOf, optionsOf, inverted = false }: { layout: ViewLayout; row: string; valueOf: ViewLayoutProps["valueOf"]; optionsOf?: ViewLayoutProps["optionsOf"]; inverted?: boolean }) {
+function RowBadge({ layout, row, valueOf, optionsOf, inverted = false }: { layout: Presentation; row: string; valueOf: PresentationProps["valueOf"]; optionsOf?: PresentationProps["optionsOf"]; inverted?: boolean }) {
   if (!layout.badgeColumn) return null
   const value = plain(valueOf(row, layout.badgeColumn)).split(/\s*[,;]\s*/)[0] ?? ""
   if (!value) return null
@@ -231,10 +231,10 @@ const gaps = { compact: "gap-1", normal: "gap-2", airy: "gap-3" } as const
 const radii = { sm: "rounded-lg", md: "rounded-xl", lg: "rounded-2xl" } as const
 
 /** Le cadre d'un élément encadré : ses coins, son ombre. */
-const boxClass = (look: ViewLook) => `${radii[look.radius ?? "md"]} ${look.shadow ? "shadow-md" : "shadow-sm"}`
+const boxClass = (look: PresentationLook) => `${radii[look.radius ?? "md"]} ${look.shadow ? "shadow-md" : "shadow-sm"}`
 
 /** L'image à côté du nom : une adresse donne une image, un nom d'icône ou un émoji donne une icône ; taille en pixels si réglée. */
-function RowImage({ src, look, size }: { src: string; look: ViewLook; size?: keyof typeof imageSizes }) {
+function RowImage({ src, look, size }: { src: string; look: PresentationLook; size?: keyof typeof imageSizes }) {
   const [failed, setFailed] = useState("")
   const sized = look.imageWidth || look.imageHeight ? "" : imageSizes[size ?? look.imageSize ?? "md"]
   const style: CSSProperties | undefined = look.imageWidth || look.imageHeight ? { width: look.imageWidth ?? look.imageHeight, height: look.imageHeight ?? look.imageWidth } : undefined
@@ -249,7 +249,7 @@ function RowImage({ src, look, size }: { src: string; look: ViewLook; size?: key
 }
 
 /** Le cadre d'un élément selon « la couleur marque l'élément par… » (liseré par défaut). */
-function accentFrame(look: ViewLook, color: string | undefined): { className: string; style?: CSSProperties } {
+function accentFrame(look: PresentationLook, color: string | undefined): { className: string; style?: CSSProperties } {
   if (!color) return { className: "" }
   switch (look.accent ?? "border") {
     case "border": return { className: "border-l-4", style: { borderLeftColor: color } }
@@ -259,7 +259,7 @@ function accentFrame(look: ViewLook, color: string | undefined): { className: st
 }
 
 /** Le nom d'un élément : police, taille, capitales, icône, couleur ou pastille selon l'apparence. */
-function ItemTitle({ row, look, color, nameOf, onOpen, truncate = false, size, icon, badge, inert = false }: { row: string; look: ViewLook; color?: string; nameOf: ViewLayoutProps["nameOf"]; onOpen: (row: string) => void; truncate?: boolean; size?: keyof typeof titleSizes; icon?: ReactNode; badge?: ReactNode; /** « Au clic : rien » : le nom n'est pas un bouton. */ inert?: boolean }) {
+function ItemTitle({ row, look, color, nameOf, onOpen, truncate = false, size, icon, badge, inert = false }: { row: string; look: PresentationLook; color?: string; nameOf: PresentationProps["nameOf"]; onOpen: (row: string) => void; truncate?: boolean; size?: keyof typeof titleSizes; icon?: ReactNode; badge?: ReactNode; /** « Au clic : rien » : le nom n'est pas un bouton. */ inert?: boolean }) {
   const accent = look.accent ?? "border"
   const inner = <>
     {accent === "dot" && color && <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />}
@@ -274,7 +274,7 @@ function ItemTitle({ row, look, color, nameOf, onOpen, truncate = false, size, i
 }
 
 /** Les colonnes montrées sous le nom : texte en ligne, libellés, pastilles colorées ou lignes empilées. */
-function ItemFields({ fields, row, look, valueOf, optionsOf, compact = false, inverted = false }: { fields: string[]; row: string; look: ViewLook; valueOf: ViewLayoutProps["valueOf"]; optionsOf?: ViewLayoutProps["optionsOf"]; compact?: boolean; inverted?: boolean }) {
+function ItemFields({ fields, row, look, valueOf, optionsOf, compact = false, inverted = false }: { fields: string[]; row: string; look: PresentationLook; valueOf: PresentationProps["valueOf"]; optionsOf?: PresentationProps["optionsOf"]; compact?: boolean; inverted?: boolean }) {
   const source = useRowSource(row, valueOf)
   const shown = fields.map((field) => ({ field, value: plain(valueOf(row, field)) })).filter((entry) => entry.value)
   if (!shown.length) return null
@@ -296,7 +296,7 @@ function ItemFields({ fields, row, look, valueOf, optionsOf, compact = false, in
 }
 
 /** Un élément complet (icône, image, nom, pastille, colonnes), encadré ou non : liste, kanban, chronologie, repli des cartes. */
-function Item({ row, props, fields, framed, extra, className = "", lead }: { row: string; props: ViewLayoutProps; fields?: string[]; framed: boolean; extra?: ReactNode; className?: string; lead?: ReactNode }) {
+function Item({ row, props, fields, framed, extra, className = "", lead }: { row: string; props: PresentationProps; fields?: string[]; framed: boolean; extra?: ReactNode; className?: string; lead?: ReactNode }) {
   const { layout, nameOf, valueOf, optionsOf, onOpen } = props
   const look = layout.look ?? {}
   const color = rowColor(layout, row, valueOf, optionsOf)
@@ -360,7 +360,7 @@ function SectionMenu({ names, accent, side }: { names: string[]; accent?: string
 }
 
 /** Les sections en onglets (« Menu des sections : onglets ») : une section à la fois, son nombre et sa formule dans l'onglet. */
-function SectionTabs({ groups, layout, valueOf, accent, render }: { groups: Array<{ name: string; rows: string[]; color?: string }>; layout: ViewLayout; valueOf: ViewLayoutProps["valueOf"]; accent?: string; render: (rows: string[]) => ReactNode }) {
+function SectionTabs({ groups, layout, valueOf, accent, render }: { groups: Array<{ name: string; rows: string[]; color?: string }>; layout: Presentation; valueOf: PresentationProps["valueOf"]; accent?: string; render: (rows: string[]) => ReactNode }) {
   const [active, setActive] = useState(groups[0]?.name ?? "")
   const current = groups.find((group) => group.name === active) ?? groups[0]
   return <div className="grid gap-4">
@@ -373,7 +373,7 @@ function SectionTabs({ groups, layout, valueOf, accent, render }: { groups: Arra
   </div>
 }
 
-function Sections({ layout, rows, valueOf, nameOf, optionsOf, render }: { layout: ViewLayout; rows: string[]; valueOf: ViewLayoutProps["valueOf"]; nameOf?: ViewLayoutProps["nameOf"]; optionsOf?: ViewLayoutProps["optionsOf"]; render: (rows: string[]) => ReactNode }) {
+function Sections({ layout, rows, valueOf, nameOf, optionsOf, render }: { layout: Presentation; rows: string[]; valueOf: PresentationProps["valueOf"]; nameOf?: PresentationProps["nameOf"]; optionsOf?: PresentationProps["optionsOf"]; render: (rows: string[]) => ReactNode }) {
   const look = layout.look ?? {}
   const heading = look.sectionStyle === "heading"
   const letter = look.sectionStyle === "letter"
@@ -412,7 +412,7 @@ function Paged({ rows, render }: { rows: string[]; render: (rows: string[]) => R
 // Plusieurs colonnes seulement sur un écran assez large : une à deux sur téléphone.
 const listColumnClasses: Record<number, string> = { 1: "", 2: "md:grid-cols-2", 3: "sm:grid-cols-2 xl:grid-cols-3", 4: "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4", 5: "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5" }
 
-function ListLayout(props: ViewLayoutProps) {
+function ListLayout(props: PresentationProps) {
   const { layout, rows, headers, nameOf, valueOf, optionsOf, onOpen } = props
   const look = layout.look ?? {}
   const fields = layout.fields ?? []
@@ -459,7 +459,7 @@ function ListLayout(props: ViewLayoutProps) {
 
 /* ---------- Kanban ---------- */
 
-function KanbanLayout(props: ViewLayoutProps) {
+function KanbanLayout(props: PresentationProps) {
   const { layout, rows, valueOf, optionsOf, onCommit } = props
   const look = layout.look ?? {}
   const card = cardFor(props)
@@ -526,7 +526,7 @@ const masterWidthsRight = { narrow: "md:grid-cols-[minmax(0,1fr)_minmax(11rem,15
 const detailGrids = { 1: "", 2: "sm:grid-cols-2", 3: "sm:grid-cols-2 lg:grid-cols-3" } as const
 
 /** Les colonnes d'une ligne (« le détail montre les colonnes ») : nom, image, pastille, puis les colonnes choisies. */
-function DetailFields({ row, props }: { row: string; props: ViewLayoutProps }) {
+function DetailFields({ row, props }: { row: string; props: PresentationProps }) {
   const { layout, headers, nameOf, valueOf, optionsOf } = props
   const source = useRowSource(row, valueOf)
   const look = layout.look ?? {}
@@ -548,7 +548,7 @@ function DetailFields({ row, props }: { row: string; props: ViewLayoutProps }) {
  * formulaire en lecture, une carte), « Ouvrir la fiche », et précédent / suivant si la vue le
  * veut. Il sert au maître-détail, à « afficher à côté » et à « afficher dessous » (en place).
  */
-function DetailPanel({ row, rows, props, inline = false }: { row: string; rows: string[]; props: ViewLayoutProps; inline?: boolean }) {
+function DetailPanel({ row, rows, props, inline = false }: { row: string; rows: string[]; props: PresentationProps; inline?: boolean }) {
   const { layout, renderCard, renderForm, onChoose } = props
   const look = layout.look ?? {}
   const detail = layout.detail ?? {}
@@ -562,10 +562,10 @@ function DetailPanel({ row, rows, props, inline = false }: { row: string; rows: 
     <Button type="button" size="sm" variant="ghost" className="h-7" disabled={at < 0 || at >= rows.length - 1} onClick={() => onChoose(rows[at + 1])}>Suivant<ChevronRight /></Button>
   </div> : null
   // Le détail en carte : celle choisie, sinon l'élément de la vue (son élément sur mesure, ou sa carte).
-  const ownCard = kind === "card" && !detail.card && layout.itemCard === VIEW_ITEM_CARD && layout.itemTemplate ? layout.itemTemplate : null
+  const ownCard = kind === "card" && !detail.card && layout.itemCard === PRESENTATION_ITEM_CARD && layout.itemTemplate ? layout.itemTemplate : null
   const drawn = kind === "form" && renderForm ? renderForm(row, detail.form || "principal")
     : ownCard ? <IndexCard card={ownCard} row={{ value: (header) => props.valueOf(row, header), spec: props.specOf ?? noSpecs }} />
-    : kind === "card" && renderCard ? renderCard(row, detail.card || (layout.itemCard === VIEW_ITEM_CARD ? "*" : layout.itemCard) || "*") : null
+    : kind === "card" && renderCard ? renderCard(row, detail.card || (layout.itemCard === PRESENTATION_ITEM_CARD ? "*" : layout.itemCard) || "*") : null
   const body = drawn
     ? <div className={inline ? "p-2" : look.density === "compact" ? "p-3" : "p-4"}>{kind === "card" ? <div className="mx-auto w-full max-w-xl">{drawn}</div> : drawn}</div>
     : <DetailFields row={row} props={props} />
@@ -579,7 +579,7 @@ function DetailPanel({ row, rows, props, inline = false }: { row: string; rows: 
 
 const detailWidths = { narrow: "md:grid-cols-[minmax(0,1fr)_minmax(14rem,18rem)]", normal: "md:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)]", wide: "md:grid-cols-[minmax(0,1fr)_minmax(22rem,32rem)]" } as const
 
-function MasterDetailLayout(props: ViewLayoutProps) {
+function MasterDetailLayout(props: PresentationProps) {
   const { layout, rows, nameOf, valueOf, optionsOf, onOpen } = props
   const look = layout.look ?? {}
   const [chosen, setChosen] = useState("")
@@ -625,7 +625,7 @@ function useCalendars() {
 }
 
 /** Une entrée du calendrier : pastille, point de couleur ou barre, avec son icône ; sa jauge dessous si la vue en a une. */
-function CalendarEntry({ row, date, calendar, color, props, style: wanted }: { row: string; date: CalendarDate; calendar: CalendarDefinition; color?: string; props: ViewLayoutProps; style?: ViewLook["entryStyle"] }) {
+function CalendarEntry({ row, date, calendar, color, props, style: wanted }: { row: string; date: CalendarDate; calendar: CalendarDefinition; color?: string; props: PresentationProps; style?: PresentationLook["entryStyle"] }) {
   const look = props.layout.look ?? {}
   const style = wanted ?? look.entryStyle ?? "pill"
   const tint = color ?? accentOf(look)
@@ -650,7 +650,7 @@ type DatedRow = { row: string; date: CalendarDate }
  * barre des échelles passe de l'une à l'autre. L'élément, le clic, la formule des groupes et la
  * jauge des lignes sont ceux de toutes les vues.
  */
-function CalendarLayout(props: ViewLayoutProps) {
+function CalendarLayout(props: PresentationProps) {
   const { layout, rows, nameOf, valueOf, optionsOf, onOpen } = props
   const look = layout.look ?? {}
   const calendars = useCalendars()
@@ -876,7 +876,7 @@ const galleryRadius = { square: 6, rounded: 12, circle: 999 } as const
  * une colonne nombre ; le nom posé sur l'image ou dessous ; la jauge de la ligne sur la vignette
  * (barre en bas, charges dans un coin) ; les sections et leur formule.
  */
-function GalleryLayout(props: ViewLayoutProps) {
+function GalleryLayout(props: PresentationProps) {
   const { layout, rows, nameOf, valueOf, optionsOf, onOpen } = props
   const look = layout.look ?? {}
   const [slide, setSlide] = useState(0)
@@ -967,7 +967,7 @@ function yearPosition(date: { year: number; month: number; day: number }, months
  * groupe ; les périodes (les groupes) en bandes ou en échelle ; des barres de durée (début, fin) ;
  * un fil par valeur d'une colonne liée. Formule par période, jauge sous chaque événement.
  */
-function TimelineLayout(props: ViewLayoutProps) {
+function TimelineLayout(props: PresentationProps) {
   const { layout, rows, nameOf, valueOf, optionsOf, onOpen } = props
   const look = layout.look ?? {}
   const card = cardFor(props)
@@ -1116,7 +1116,7 @@ function descendantsOf(node: RowTreeNode<string>): string[] {
  * l'élément en carte ; au clic « afficher à côté » avec « les enfants » : le nœud choisi déplie
  * ses enfants dans le panneau.
  */
-function TreeLayout(props: ViewLayoutProps) {
+function TreeLayout(props: PresentationProps) {
   const { layout, rows, nameOf, valueOf, optionsOf } = props
   const look = layout.look ?? {}
   const parentColumn = layout.parentColumn
@@ -1178,7 +1178,7 @@ function TreeLayout(props: ViewLayoutProps) {
   return body
 }
 
-function TreeNode({ node, isOpen, toggle, card, prefix, mirrored = false, ...props }: ViewLayoutProps & { node: RowTreeNode<string>; isOpen: (row: string) => boolean; toggle: (row: string) => void; card: ((row: string) => ReactNode) | null; prefix?: string; mirrored?: boolean }) {
+function TreeNode({ node, isOpen, toggle, card, prefix, mirrored = false, ...props }: PresentationProps & { node: RowTreeNode<string>; isOpen: (row: string) => boolean; toggle: (row: string) => void; card: ((row: string) => ReactNode) | null; prefix?: string; mirrored?: boolean }) {
   const { layout, nameOf, valueOf, optionsOf, onOpen } = props
   const look = layout.look ?? {}
   const open = isOpen(node.row)
@@ -1190,7 +1190,7 @@ function TreeNode({ node, isOpen, toggle, card, prefix, mirrored = false, ...pro
   const boxed = style === "boxed" || style === "org" || style === "mindmap"
   const org = style === "org"
   const step = look.density === "airy" ? 1.6 : look.density === "compact" ? 1 : 1.25
-  const titleLook: ViewLook = { ...look, titleSize: node.depth === 0 ? look.titleSize ?? "md" : look.titleSize === "lg" ? "md" : "sm", titleFont: node.depth === 0 ? look.titleFont ?? "display" : look.titleFont, accent: look.accent === "border" || !look.accent ? (leaf ? "dot" : "title") : look.accent }
+  const titleLook: PresentationLook = { ...look, titleSize: node.depth === 0 ? look.titleSize ?? "md" : look.titleSize === "lg" ? "md" : "sm", titleFont: node.depth === 0 ? look.titleFont ?? "display" : look.titleFont, accent: look.accent === "border" || !look.accent ? (leaf ? "dot" : "title") : look.accent }
   const frame = look.accent === "tint" ? accentFrame(look, color) : { className: "" }
   const fallbackIcon = leaf ? layout.leafIcon : layout.branchIcon
   const icon = <RowIcon layout={layout} row={node.row} valueOf={valueOf} color={color} fallback={layout.itemIcon ?? fallbackIcon} />
@@ -1242,7 +1242,7 @@ const codexTitles = { sm: "text-xl", md: "text-2xl", lg: "text-3xl" } as const
  * vers les fiches citées ; deux fiches face à face feuilletées ; recto et verso (deux cartes,
  * retournées au clic) ; la jauge de la fiche en en-tête et en barre dans le sommaire.
  */
-function CodexLayout(props: ViewLayoutProps) {
+function CodexLayout(props: PresentationProps) {
   const { layout, rows, headers, nameOf, valueOf, optionsOf, onOpen, renderCard } = props
   const look = layout.look ?? {}
   const [flipped, setFlipped] = useState<Set<string>>(() => new Set())
@@ -1359,12 +1359,12 @@ function Ring({ ratio, color, size = 56, children }: { ratio: number; color: str
 }
 
 /** La jauge d'une tuile (une formule ou une ligne précise, contre une cible) : anneau, barre ou charges. */
-function TileGauge({ tile, rows, props, color }: { tile: DashboardTile; rows: string[]; props: ViewLayoutProps; color: string }) {
+function TileGauge({ tile, rows, props, color }: { tile: DashboardTile; rows: string[]; props: PresentationProps; color: string }) {
   const { value, max, row } = tileGaugeValue(tile, rows, props.valueOf, props.nameOf)
   const ratio = max ? value / max : Math.max(0, Math.min(1, value / 100))
   const over = max !== null && value > max
   const tint = over ? "var(--destructive)" : color
-  const shown = `${formatViewNumber(value)}${max ? ` / ${formatViewNumber(max)}` : ""}${tile.unit ? ` ${tile.unit}` : ""}`
+  const shown = `${formatPresentationNumber(value)}${max ? ` / ${formatPresentationNumber(max)}` : ""}${tile.unit ? ` ${tile.unit}` : ""}`
   const name = row ? <button type="button" onClick={() => props.onOpen(row)} className="text-left text-sm font-semibold hover:underline">{props.nameOf(row)}</button> : null
   if (tile.style === "charges") {
     const total = Math.max(1, Math.min(30, Math.round(max ?? value)))
@@ -1372,7 +1372,7 @@ function TileGauge({ tile, rows, props, color }: { tile: DashboardTile; rows: st
     return <div className="mt-2 grid gap-1.5">{name}<span className="flex flex-wrap gap-1">{Array.from({ length: total }, (_, at) => <span key={at} aria-hidden className="size-3.5 rounded-full border-2" style={{ borderColor: tint, backgroundColor: at < filled ? tint : "transparent" }} />)}</span><span className="text-xs tabular-nums text-muted-foreground">{shown}</span></div>
   }
   if (tile.style === "bar") return <div className="mt-2 grid gap-1.5">{name}<span className="block h-2.5 overflow-hidden rounded-full" style={{ backgroundColor: `color-mix(in srgb, ${tint} 18%, var(--muted))` }}><span className="block h-full rounded-full transition-[width]" style={{ width: `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%`, backgroundColor: tint }} /></span><span className={`text-xs tabular-nums ${over ? "text-destructive" : "text-muted-foreground"}`}>{shown}</span></div>
-  return <div className="mt-2 flex items-center gap-3"><Ring ratio={ratio} color={tint}>{max ? `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)} %` : formatViewNumber(value)}</Ring><span className="grid gap-0.5">{name}<span className={`text-sm tabular-nums ${over ? "text-destructive" : "text-muted-foreground"}`}>{shown}</span></span></div>
+  return <div className="mt-2 flex items-center gap-3"><Ring ratio={ratio} color={tint}>{max ? `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)} %` : formatPresentationNumber(value)}</Ring><span className="grid gap-0.5">{name}<span className={`text-sm tabular-nums ${over ? "text-destructive" : "text-muted-foreground"}`}>{shown}</span></span></div>
 }
 
 /**
@@ -1380,7 +1380,7 @@ function TileGauge({ tile, rows, props, color }: { tile: DashboardTile; rows: st
  * veut). Un chiffre, une répartition, une jauge, une statistique de l'index, une autre vue de
  * l'onglet, une ligne en carte ou en formulaire, un texte à formules, une tuile par ligne liée.
  */
-function DashboardLayout(props: ViewLayoutProps) {
+function DashboardLayout(props: PresentationProps) {
   const { layout, rows, valueOf, nameOf, headers, renderCard, renderForm, renderStat, presentations } = props
   const look = layout.look ?? {}
   const tiles = layout.tiles?.length ? layout.tiles : [{ kind: "count" as const }]
@@ -1396,7 +1396,7 @@ function DashboardLayout(props: ViewLayoutProps) {
     const color = tile.color ?? accent
     const style: CSSProperties = tileStyle === "tinted" ? { backgroundColor: `color-mix(in srgb, ${color} 10%, var(--card))`, borderColor: `color-mix(in srgb, ${color} 35%, var(--border))` } : tileStyle === "accent" ? { borderTop: `4px solid ${color}` } : {}
     const glyph = tile.icon ? parseGlyphValue(tile.icon) : null
-    const label = tile.label || (tile.kind === "count" || tile.kind === "text" || tile.kind === "stat" || tile.kind === "card" ? (tile.kind === "count" ? kindLabel(tile) : "") : tile.kind === "view" ? (tile.view ? viewLayoutKinds.find((kind) => kind.value === tile.view)?.label ?? "" : "Vue") : `${kindLabel(tile)}${tile.column ? ` · ${tile.column}` : ""}`)
+    const label = tile.label || (tile.kind === "count" || tile.kind === "text" || tile.kind === "stat" || tile.kind === "card" ? (tile.kind === "count" ? kindLabel(tile) : "") : tile.kind === "view" ? (tile.view ? allPresentationKinds.find((kind) => kind.value === tile.view)?.label ?? "" : "Vue") : `${kindLabel(tile)}${tile.column ? ` · ${tile.column}` : ""}`)
     const frame = (children: ReactNode, extra = "") => <article key={index} style={style} className={`relative min-w-0 border bg-card/80 ${boxClass(look)} ${padding} ${span(tile)} ${extra}`}>
       {glyph && <span className="absolute right-3 top-3 grid size-9 place-items-center rounded-full" style={{ backgroundColor: `color-mix(in srgb, ${color} 14%, transparent)`, color }}><IndexIconGlyph icon={glyph.icon} emoji={glyph.emoji} className="size-5" /></span>}
       {label && <p className="pr-10 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{label}</p>}
@@ -1410,9 +1410,9 @@ function DashboardLayout(props: ViewLayoutProps) {
         return <div key={index} className={`min-w-0 ${span(tile)}`}>{drawn ?? frame(<p className="mt-2 text-xs text-muted-foreground">{tile.stat ? "Cette statistique se dessine dans l’index et dans les pages." : "Choisis une statistique de l’index dans les réglages de la tuile."}</p>)}</div>
       }
       case "view": {
-        const nested: ViewLayout = tile.view && tile.view !== "dashboard" ? presentations?.[tile.view] ?? { kind: tile.view } : { kind: "list" }
+        const nested: Presentation = tile.view && tile.view !== "dashboard" ? presentations?.[tile.view] ?? { kind: tile.view } : { kind: "list" }
         const shown = sortLayoutRows(rows, nested, valueOf).slice(0, tile.limit ?? 10)
-        return frame(<div className="mt-2 min-w-0"><IndexViewLayout {...props} layout={nested} rows={shown} presentations={undefined} empty="Aucune ligne." /></div>, tile.wide || tile.full ? "" : "sm:col-span-2 xl:col-span-1")
+        return frame(<div className="mt-2 min-w-0"><IndexPresentation {...props} layout={nested} rows={shown} presentations={undefined} empty="Aucune ligne." /></div>, tile.wide || tile.full ? "" : "sm:col-span-2 xl:col-span-1")
       }
       case "card": {
         const row = findRow(tile.row)
@@ -1422,14 +1422,14 @@ function DashboardLayout(props: ViewLayoutProps) {
       }
       case "text": {
         const segments = textWithFormulas(tile.text ?? "", rows, valueOf, nameOf, headers)
-        return frame(<p className={`mt-2 whitespace-pre-line text-sm leading-7 ${look.titleFont === "sans" ? "" : "font-display"}`}>{segments.map((segment, at) => "text" in segment ? <span key={at}>{segment.text}</span> : <b key={at} title={segment.formula} className="rounded px-1 font-semibold tabular-nums" style={{ backgroundColor: `color-mix(in srgb, ${tile.color ?? viewPalette[segment.at % viewPalette.length]} 20%, transparent)`, color: tile.color ?? viewPalette[segment.at % viewPalette.length] }}>{segment.value}</b>)}</p>)
+        return frame(<p className={`mt-2 whitespace-pre-line text-sm leading-7 ${look.titleFont === "sans" ? "" : "font-display"}`}>{segments.map((segment, at) => "text" in segment ? <span key={at}>{segment.text}</span> : <b key={at} title={segment.formula} className="rounded px-1 font-semibold tabular-nums" style={{ backgroundColor: `color-mix(in srgb, ${tile.color ?? presentationPalette[segment.at % presentationPalette.length]} 20%, transparent)`, color: tile.color ?? presentationPalette[segment.at % presentationPalette.length] }}>{segment.value}</b>)}</p>)
       }
       case "linked": {
         const linked = linkedTiles(tile, rows, valueOf)
         return frame(linked.length
           ? <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{linked.map((entry) => <div key={entry.name} className={`min-w-0 border bg-background/60 p-2.5 ${radii[look.radius ?? "md"]}`}>
             <p className="truncate text-sm font-semibold">{entry.name}</p>
-            <dl className="mt-1 grid gap-0.5">{entry.values.map((item, at) => <div key={at} className="flex items-baseline justify-between gap-2 text-xs"><dt className="truncate text-muted-foreground">{item.label}</dt><dd className={`font-semibold tabular-nums ${look.titleFont === "sans" ? "" : "font-display"} text-base`} style={{ color }}>{formatViewNumber(item.value)}{item.unit && <span className="ml-0.5 text-[10px] font-normal text-muted-foreground">{item.unit}</span>}</dd></div>)}</dl>
+            <dl className="mt-1 grid gap-0.5">{entry.values.map((item, at) => <div key={at} className="flex items-baseline justify-between gap-2 text-xs"><dt className="truncate text-muted-foreground">{item.label}</dt><dd className={`font-semibold tabular-nums ${look.titleFont === "sans" ? "" : "font-display"} text-base`} style={{ color }}>{formatPresentationNumber(item.value)}{item.unit && <span className="ml-0.5 text-[10px] font-normal text-muted-foreground">{item.unit}</span>}</dd></div>)}</dl>
           </div>)}</div>
           : <p className="mt-2 text-xs text-muted-foreground">{tile.column ? "Aucune ligne ne cite cette colonne." : "Choisis la colonne liée (personnage, lieu…) dans les réglages de la tuile."}</p>, "sm:col-span-2")
       }
@@ -1438,7 +1438,7 @@ function DashboardLayout(props: ViewLayoutProps) {
         const top = Math.max(1, ...result.breakdown.map((entry) => entry.count))
         return frame(tile.kind === "breakdown"
           ? <ul className="mt-3 space-y-1.5">{result.breakdown.map((entry) => <li key={entry.name} className="grid grid-cols-[minmax(0,8rem)_minmax(0,1fr)_2.5rem] items-center gap-2 text-xs"><span className="truncate">{entry.name}</span><span className="h-2 overflow-hidden rounded-full bg-muted"><span className="block h-full rounded-full" style={{ width: `${(entry.count / top) * 100}%`, backgroundColor: color }} /></span><span className="text-right tabular-nums text-muted-foreground">{entry.count}</span></li>)}</ul>
-          : <p className={`mt-2 font-semibold tabular-nums ${look.titleFont === "sans" ? "" : "font-display"} ${tileNumbers[tile.size ?? (look.titleSize === "sm" ? "sm" : look.titleSize === "lg" ? "lg" : "md")]}`} style={tileStyle !== "plain" || tile.color || look.color ? { color } : undefined}>{formatViewNumber(result.number)}{tile.unit && <span className="ml-1 text-base font-normal text-muted-foreground">{tile.unit}</span>}</p>)
+          : <p className={`mt-2 font-semibold tabular-nums ${look.titleFont === "sans" ? "" : "font-display"} ${tileNumbers[tile.size ?? (look.titleSize === "sm" ? "sm" : look.titleSize === "lg" ? "lg" : "md")]}`} style={tileStyle !== "plain" || tile.color || look.color ? { color } : undefined}>{formatPresentationNumber(result.number)}{tile.unit && <span className="ml-1 text-base font-normal text-muted-foreground">{tile.unit}</span>}</p>)
       }
     }
   }
@@ -1465,7 +1465,7 @@ function DashboardLayout(props: ViewLayoutProps) {
  * « Au clic » se décide ici, pour toutes les vues : ouvrir la fiche (d'office), ouvrir la page,
  * afficher à côté (la vue devient un maître-détail), afficher dessous, rien.
  */
-export function IndexViewLayout(input: ViewLayoutProps) {
+export function IndexPresentation(input: PresentationProps) {
   const [chosen, setChosen] = useState("")
   const click = input.layout.click ?? "sheet"
   const panel = click === "side" || click === "below"
@@ -1474,13 +1474,13 @@ export function IndexViewLayout(input: ViewLayoutProps) {
     : click === "page" ? (input.onOpenPage ?? input.onOpen)
       : panel ? (row: string) => setChosen((current) => current === row && click === "below" ? "" : row)
         : input.onOpen
-  const props: ViewLayoutProps = { ...input, rows: sortLayoutRows(input.rows, input.layout, input.valueOf), onOpen, openSheet, inert: click === "none", ...(panel ? { chosen: input.rows.includes(chosen) ? chosen : (click === "side" ? input.rows[0] ?? "" : ""), onChoose: setChosen } : {}) }
+  const props: PresentationProps = { ...input, rows: sortLayoutRows(input.rows, input.layout, input.valueOf), onOpen, openSheet, inert: click === "none", ...(panel ? { chosen: input.rows.includes(chosen) ? chosen : (click === "side" ? input.rows[0] ?? "" : ""), onChoose: setChosen } : {}) }
   return <ViewSpecs.Provider value={input.specOf ?? noSpecs}><ViewLayoutBody props={props} click={click} /></ViewSpecs.Provider>
 }
 
 const noSpecs = () => undefined
 
-function ViewLayoutBody({ props, click }: { props: ViewLayoutProps; click: ViewClick }) {
+function ViewLayoutBody({ props, click }: { props: PresentationProps; click: PresentationClick }) {
   if (!props.rows.length && props.layout.kind !== "dashboard") return <div className="rounded-xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">{props.empty}</div>
   const body = viewBody(props)
   // L'arborescence « à côté › les enfants » dessine elle-même son panneau.
@@ -1496,7 +1496,7 @@ function ViewLayoutBody({ props, click }: { props: ViewLayoutProps; click: ViewC
   return body
 }
 
-function viewBody(props: ViewLayoutProps) {
+function viewBody(props: PresentationProps) {
   switch (props.layout.kind) {
     case "list": return <ListLayout {...props} />
     case "kanban": return <KanbanLayout {...props} />

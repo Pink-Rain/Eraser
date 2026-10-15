@@ -8,13 +8,13 @@
  * et les tests s'en servent.
  */
 import { classSpellCategory } from "@/lib/class-spell-utils"
-import type { ViewLayout } from "@/lib/index-view-layouts"
+import type { Presentation } from "@/lib/index-presentations"
 
-export type ViewOperator = "est" | "n-est-pas" | "contient" | "ne-contient-pas" | "commence" | "vide" | "non-vide" | "superieur" | "inferieur" | "categorie-sort"
+export type FilterOperator = "est" | "n-est-pas" | "contient" | "ne-contient-pas" | "commence" | "vide" | "non-vide" | "superieur" | "inferieur" | "categorie-sort"
 
-export type ViewCondition = { column: string; operator: ViewOperator; value: string }
+export type FilterCondition = { column: string; operator: FilterOperator; value: string }
 
-export type IndexView = {
+export type IndexWindow = {
   id: string
   /** L'index : une clé d'index du monde (« places », « perso-… ») ou « objects ». */
   index: string
@@ -23,17 +23,21 @@ export type IndexView = {
   source: string
   /** « toutes » : chaque condition doit être vraie ; « une » : il suffit d'une. */
   match: "toutes" | "une"
-  conditions: ViewCondition[]
+  conditions: FilterCondition[]
   position: number
   /** Prévu par Eraser (défini dans le code, jamais écrit) : il ne se modifie ni ne se supprime. */
   builtin?: boolean
-  /** Sa présentation (liste, kanban, calendrier…) ; absente : le tableau. */
-  layout?: ViewLayout
+  /**
+   * Seul `{ kind: "stats" }` compte encore : il fait de la fenêtre un onglet stat. Une autre
+   * présentation (kanban, liste…), écrite par une version précédente, est relue mais
+   * ignorée, et part quand l'onglet est enregistré ; ces présentations se posent dans une page.
+   */
+  layout?: Presentation
 }
 
 export const ALL_SOURCES = "*"
 
-export const viewOperators: Array<{ value: ViewOperator; label: string; needsValue: boolean }> = [
+export const filterOperators: Array<{ value: FilterOperator; label: string; needsValue: boolean }> = [
   { value: "est", label: "est", needsValue: true },
   { value: "n-est-pas", label: "n’est pas", needsValue: true },
   { value: "contient", label: "contient", needsValue: true },
@@ -45,8 +49,8 @@ export const viewOperators: Array<{ value: ViewOperator; label: string; needsVal
   { value: "inferieur", label: "est inférieur à", needsValue: true },
 ]
 
-export function isViewOperator(value: unknown): value is ViewOperator {
-  return typeof value === "string" && viewOperators.some((operator) => operator.value === value)
+export function isFilterOperator(value: unknown): value is FilterOperator {
+  return typeof value === "string" && filterOperators.some((operator) => operator.value === value)
 }
 
 function fold(value: string) {
@@ -63,7 +67,7 @@ function parts(value: string) {
   return fold(value).split(/\s*[,;]\s*/).filter(Boolean)
 }
 
-export function matchesCondition(condition: ViewCondition, cell: string) {
+export function matchesCondition(condition: FilterCondition, cell: string) {
   const value = fold(cell)
   const wanted = fold(condition.value)
   switch (condition.operator) {
@@ -85,28 +89,28 @@ export function matchesCondition(condition: ViewCondition, cell: string) {
  * Une ligne entre-t-elle dans la fenêtre ? `cell` donne la valeur d'une colonne de la
  * ligne (vide si la colonne n'existe pas dans son onglet). Sans condition : toutes.
  */
-export function matchesView(view: Pick<IndexView, "match" | "conditions">, cell: (column: string) => string) {
+export function matchesFilter(view: Pick<IndexWindow, "match" | "conditions">, cell: (column: string) => string) {
   const conditions = view.conditions.filter((condition) => condition.column.trim())
   if (!conditions.length) return true
   const results = conditions.map((condition) => matchesCondition(condition, cell(condition.column)))
   return view.match === "une" ? results.some(Boolean) : results.every(Boolean)
 }
 
-export function describeCondition(condition: ViewCondition) {
-  const operator = viewOperators.find((candidate) => candidate.value === condition.operator)
+export function describeCondition(condition: FilterCondition) {
+  const operator = filterOperators.find((candidate) => candidate.value === condition.operator)
   if (condition.operator === "categorie-sort") return `${condition.column} : ${condition.value.startsWith("!") ? `tout sauf ${condition.value.slice(1)}` : condition.value}`
   return `${condition.column} ${operator?.label ?? condition.operator}${operator?.needsValue ? ` « ${condition.value} »` : ""}`
 }
 
 /** Les conditions lues dans la feuille (JSON) : une entrée abîmée est ignorée, jamais bloquante. */
-export function parseViewConditions(raw: string): ViewCondition[] {
+export function parseFilterConditions(raw: string): FilterCondition[] {
   try {
     const parsed = JSON.parse(raw) as unknown
     if (!Array.isArray(parsed)) return []
     return parsed.flatMap((entry) => {
       if (!entry || typeof entry !== "object") return []
       const { column, operator, value } = entry as Record<string, unknown>
-      return typeof column === "string" && column.trim() && isViewOperator(operator) ? [{ column: column.trim().slice(0, 120), operator, value: typeof value === "string" ? value.slice(0, 300) : "" }] : []
+      return typeof column === "string" && column.trim() && isFilterOperator(operator) ? [{ column: column.trim().slice(0, 120), operator, value: typeof value === "string" ? value.slice(0, 300) : "" }] : []
     }).slice(0, 20)
   } catch {
     return []
@@ -114,5 +118,5 @@ export function parseViewConditions(raw: string): ViewCondition[] {
 }
 
 /** La clé d'un onglet-fenêtre dans le choix d'onglet d'un index. */
-export const viewSelectKey = (id: string) => `fenetre:${id}`
-export const viewIdOfSelectKey = (key: string) => key.startsWith("fenetre:") ? key.slice("fenetre:".length) : null
+export const windowSelectKey = (id: string) => `fenetre:${id}`
+export const windowIdOfSelectKey = (key: string) => key.startsWith("fenetre:") ? key.slice("fenetre:".length) : null

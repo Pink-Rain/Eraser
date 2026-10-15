@@ -239,7 +239,7 @@ test("Emplacements des items : liste liée à Environnement et Magasin, « - » 
 
 test("Calendriers et présentations de vue : dates du monde, sections, tableau de bord, réglages propres", async () => {
   const calendars = await vite.ssrLoadModule("/lib/calendars.ts");
-  const layouts = await vite.ssrLoadModule("/lib/index-view-layouts.ts");
+  const layouts = await vite.ssrLoadModule("/lib/index-presentations.ts");
   const tables = [
     { tabName: "Calendriers", headers: ["Nom", "Ère", "Description", "ID"], rows: [{ values: ["Calendrier d’Ysmir", "AR", "", "CAL-1"] }] },
     { tabName: "Mois", headers: ["Nom", "Calendrier", "Ordre", "Nombre de jours", "Saison", "ID"], rows: [
@@ -265,11 +265,11 @@ test("Calendriers et présentations de vue : dates du monde, sections, tableau d
   assert.deepEqual(calendars.parseCalendarDate("29 février 2024", calendars.realCalendar), { year: 2024, month: 1, day: 29 });
   assert.equal(calendars.parseCalendarDate("29 février 2023", calendars.realCalendar), null);
 
-  assert.equal(layouts.cleanViewLayout({ kind: "table" }), undefined);
+  assert.equal(layouts.cleanPresentation({ kind: "table" }), undefined);
   // Huit colonnes au plus sous le nom (chaque vue règle les siennes) ; un champ inconnu est écarté.
-  assert.deepEqual(layouts.cleanViewLayout({ kind: "kanban", kanbanColumn: "Statut", fields: ["A", "B", "C", "D", "E", "F", "G", "H", "I"], evil: "x" }), { kind: "kanban", kanbanColumn: "Statut", fields: ["A", "B", "C", "D", "E", "F", "G", "H"] });
-  assert.equal(layouts.cleanViewLayout({ kind: "inconnu" }), undefined);
-  assert.equal(layouts.parseViewLayout("pas du json"), undefined);
+  assert.deepEqual(layouts.cleanPresentation({ kind: "kanban", kanbanColumn: "Statut", fields: ["A", "B", "C", "D", "E", "F", "G", "H", "I"], evil: "x" }), { kind: "kanban", kanbanColumn: "Statut", fields: ["A", "B", "C", "D", "E", "F", "G", "H"] });
+  assert.equal(layouts.cleanPresentation({ kind: "inconnu" }), undefined);
+  assert.equal(layouts.parsePresentation("pas du json"), undefined);
   const rows = [{ t: "Arme", p: "10 PO" }, { t: "Arme, Rune", p: "1 250,5 PO" }, { t: "", p: "abc" }];
   assert.deepEqual(layouts.groupRowsBy(rows, (row) => row.t).map((group) => [group.name, group.rows.length]), [["Arme", 2], ["Rune", 1], ["", 1]]);
   assert.equal(layouts.dashboardTileValue({ kind: "sum", column: "p" }, rows, (row, column) => row[column]).number, 1260.5);
@@ -1328,20 +1328,20 @@ test("reads achievements and who obtained them from the index", async () => {
 });
 
 test("shows existing rows in a view tab when they meet its conditions", async () => {
-  const { matchesView, parseViewConditions, describeCondition } = await vite.ssrLoadModule("/lib/index-views.ts");
+  const { matchesFilter, parseFilterConditions, describeCondition } = await vite.ssrLoadModule("/lib/index-windows.ts");
   const row = { Nom: "Épée runique", Type: "Arme, Rune", "Sous-type": "Épée", Prix: "120 PO", Note: "" };
   const cell = (column) => row[column] ?? "";
   // « est » vaut pour l'une des valeurs d'une case multiple, sans tenir compte des accents ni de la casse.
-  assert.equal(matchesView({ match: "toutes", conditions: [{ column: "Type", operator: "est", value: "rune" }] }, cell), true);
-  assert.equal(matchesView({ match: "toutes", conditions: [{ column: "Nom", operator: "contient", value: "epee" }, { column: "Prix", operator: "superieur", value: "100" }] }, cell), true);
-  assert.equal(matchesView({ match: "toutes", conditions: [{ column: "Type", operator: "est", value: "Armure" }, { column: "Note", operator: "vide", value: "" }] }, cell), false);
-  assert.equal(matchesView({ match: "une", conditions: [{ column: "Type", operator: "est", value: "Armure" }, { column: "Note", operator: "vide", value: "" }] }, cell), true);
+  assert.equal(matchesFilter({ match: "toutes", conditions: [{ column: "Type", operator: "est", value: "rune" }] }, cell), true);
+  assert.equal(matchesFilter({ match: "toutes", conditions: [{ column: "Nom", operator: "contient", value: "epee" }, { column: "Prix", operator: "superieur", value: "100" }] }, cell), true);
+  assert.equal(matchesFilter({ match: "toutes", conditions: [{ column: "Type", operator: "est", value: "Armure" }, { column: "Note", operator: "vide", value: "" }] }, cell), false);
+  assert.equal(matchesFilter({ match: "une", conditions: [{ column: "Type", operator: "est", value: "Armure" }, { column: "Note", operator: "vide", value: "" }] }, cell), true);
   // Une colonne absente de l'onglet vaut une case vide ; sans condition, tout passe.
-  assert.equal(matchesView({ match: "toutes", conditions: [{ column: "Élément", operator: "non-vide", value: "" }] }, cell), false);
-  assert.equal(matchesView({ match: "toutes", conditions: [] }, cell), true);
+  assert.equal(matchesFilter({ match: "toutes", conditions: [{ column: "Élément", operator: "non-vide", value: "" }] }, cell), false);
+  assert.equal(matchesFilter({ match: "toutes", conditions: [] }, cell), true);
   // Des conditions abîmées dans la feuille sont ignorées, sans rien bloquer.
-  assert.deepEqual(parseViewConditions('[{"column":"Type","operator":"est","value":"Rune"},{"column":"","operator":"est"},{"column":"Nom","operator":"inconnu"}]'), [{ column: "Type", operator: "est", value: "Rune" }]);
-  assert.deepEqual(parseViewConditions("pas du json"), []);
+  assert.deepEqual(parseFilterConditions('[{"column":"Type","operator":"est","value":"Rune"},{"column":"","operator":"est"},{"column":"Nom","operator":"inconnu"}]'), [{ column: "Type", operator: "est", value: "Rune" }]);
+  assert.deepEqual(parseFilterConditions("pas du json"), []);
   assert.equal(describeCondition({ column: "Type", operator: "est", value: "Rune" }), "Type est « Rune »");
 });
 
@@ -1445,7 +1445,7 @@ test("Notes de session : nettoyage, droits, « Mon perso » et quêtes en boucle
 });
 
 test("Modifier › Vues : réglages par onglet, presets adaptés aux colonnes, tri et nouvelles tuiles", async () => {
-  const views = await vite.ssrLoadModule("/lib/index-view-layouts.ts");
+  const views = await vite.ssrLoadModule("/lib/index-presentations.ts");
   // Un réglage inconnu, une vue « table » ou « stats » ne passent pas ; le kind suit la clé.
   const parsed = views.parseTabPresentations(JSON.stringify({ kanban: { kind: "list", kanbanColumn: "État", laneWidth: "wide", pirate: 1 }, table: { kind: "table" }, stats: { kind: "stats" }, list: { compact: true, listColumns: 7 } }));
   assert.deepEqual(parsed, { kanban: { kind: "kanban", kanbanColumn: "État", laneWidth: "wide" }, list: { kind: "list", compact: true } });
@@ -1463,8 +1463,8 @@ test("Modifier › Vues : réglages par onglet, presets adaptés aux colonnes, t
   assert.equal(views.dashboardTileValue({ kind: "min", column: "p" }, rows, value).number, 2);
   assert.equal(views.dashboardTileValue({ kind: "filled", column: "p" }, rows, value).number, 3);
   // Un preset : nom et vue réglable obligatoires.
-  assert.equal(views.cleanViewPreset({ name: "", layout: { kind: "list" } }), null);
-  assert.equal(views.cleanViewPreset({ name: "Stats", layout: { kind: "stats" } }), null);
-  assert.equal(views.cleanViewPreset({ name: "Mon kanban", layout: { kind: "kanban", laneWidth: "narrow" } }).layout.laneWidth, "narrow");
-  assert.ok(views.builtinViewPresets.every((preset) => views.cleanViewPreset(preset)));
+  assert.equal(views.cleanPresentationPreset({ name: "", layout: { kind: "list" } }), null);
+  assert.equal(views.cleanPresentationPreset({ name: "Stats", layout: { kind: "stats" } }), null);
+  assert.equal(views.cleanPresentationPreset({ name: "Mon kanban", layout: { kind: "kanban", laneWidth: "narrow" } }).layout.laneWidth, "narrow");
+  assert.ok(views.builtinPresentationPresets.every((preset) => views.cleanPresentationPreset(preset)));
 });

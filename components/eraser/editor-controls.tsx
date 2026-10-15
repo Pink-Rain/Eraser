@@ -12,7 +12,7 @@ import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { parseGlyphValue } from "@/lib/index-columns"
-import { viewPalette } from "@/lib/index-view-layouts"
+import { presentationPalette } from "@/lib/index-presentations"
 import { cn } from "@/lib/utils"
 
 export const fieldLabel = "grid gap-1 text-[11px] font-semibold text-muted-foreground"
@@ -62,10 +62,10 @@ export const fr = (value: number, digits = 2) => value.toLocaleString("fr-FR", {
 
 /** Une couleur : aucune (l'accent d'Eraser ou celle de la ligne), une pastille de la palette, ou une couleur libre. */
 export function ColorSwatches({ value, onChange, disabled, none = "Aucune", ariaLabel }: { value: string | undefined; onChange: (value: string | undefined) => void; disabled?: boolean; none?: string | null; ariaLabel: string }) {
-  const custom = value && !viewPalette.includes(value) ? value : undefined
+  const custom = value && !presentationPalette.includes(value) ? value : undefined
   return <span className="flex flex-wrap items-center gap-1" role="group" aria-label={ariaLabel}>
     {none !== null && <button type="button" disabled={disabled} aria-pressed={!value} onClick={() => onChange(undefined)} className={cn("h-5 rounded-full border px-1.5 text-[10px]", !value ? "border-primary bg-primary/10 text-foreground" : "text-muted-foreground hover:bg-muted")}>{none}</button>}
-    {viewPalette.map((color) => <button key={color} type="button" disabled={disabled} aria-label={color} aria-pressed={value === color} onClick={() => onChange(color)} className={cn("size-5 rounded-full border", value === color && "ring-2 ring-primary ring-offset-1")} style={{ backgroundColor: color }} />)}
+    {presentationPalette.map((color) => <button key={color} type="button" disabled={disabled} aria-label={color} aria-pressed={value === color} onClick={() => onChange(color)} className={cn("size-5 rounded-full border", value === color && "ring-2 ring-primary ring-offset-1")} style={{ backgroundColor: color }} />)}
     <label title="Une couleur libre" className={cn("relative grid size-6 cursor-pointer place-items-center overflow-hidden rounded-full border", custom && "ring-2 ring-primary ring-offset-1", disabled && "pointer-events-none opacity-50")} style={{ background: custom ?? "conic-gradient(#e11d48,#f59e0b,#84cc16,#06b6d4,#6366f1,#d946ef,#e11d48)" }}>
       <span className="sr-only">Couleur libre</span>
       <input type="color" disabled={disabled} value={custom ?? "#927640"} onChange={(event) => onChange(event.target.value)} className="absolute inset-0 size-full cursor-pointer opacity-0" />

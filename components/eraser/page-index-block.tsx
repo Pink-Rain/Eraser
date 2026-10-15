@@ -9,14 +9,14 @@ import { IndexCard, IndexCardGrid, type CardRowSource } from "@/components/erase
 import { IndexFormView } from "@/components/eraser/index-form-view"
 import { primeWorldIndexData } from "@/components/eraser/index-cells"
 import { IndexStats } from "@/components/eraser/index-stats"
-import { IndexViewLayout } from "@/components/eraser/index-view-layouts"
+import { IndexPresentation } from "@/components/eraser/index-presentation"
 import type { BacklinksBlock, SearchBlock, StatBlock, ViewBlock } from "@/lib/custom-pages"
 import type { Backlink } from "@/lib/custom-pages-rows"
 import { viewHeights } from "@/lib/custom-pages"
 import { ALL_PINNED_STATS, type StatBlockData, type ViewBlockData } from "@/lib/custom-pages-data"
 import { pickCard } from "@/lib/index-cards"
 import { foldName } from "@/lib/index-columns"
-import { DEFAULT_ITEM_CARD, isPresentationKind } from "@/lib/index-view-layouts"
+import { DEFAULT_ITEM_CARD, isPresentationKind } from "@/lib/index-presentations"
 
 /**
  * Les blocs d'une page qui montrent un index : une vue (tableau, cartes, liste, kanban,
@@ -163,7 +163,7 @@ function ViewContent({ data, block, searching = false }: { data: ViewData; block
   if (data.view === "cards") return card
     ? <IndexCardGrid card={card} rows={data.rows} rowSource={rowSource} onOpen={openRow} hrefOf={hrefOf} empty={empty} />
     : <Placeholder>Cet onglet n’a pas encore de cartes : elles se règlent dans l’index (Modifier › Cartes).</Placeholder>
-  if (data.layout && isPresentationKind(data.layout.kind)) return <IndexViewLayout
+  if (data.layout && isPresentationKind(data.layout.kind)) return <IndexPresentation
     layout={data.layout}
     rows={data.rows.map((row) => row.key)}
     headers={data.headers}

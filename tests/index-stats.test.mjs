@@ -8,7 +8,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const vite = await createServer({ appType: "custom", configFile: false, root, resolve: { alias: { "@": root } }, server: { middlewareMode: true } });
 after(async () => { await vite.close(); });
 const stats = await vite.ssrLoadModule("/lib/index-stats.ts");
-const layouts = await vite.ssrLoadModule("/lib/index-view-layouts.ts");
+const layouts = await vite.ssrLoadModule("/lib/index-presentations.ts");
 
 // Un petit index : chaque ligne est un objet { onglet, colonnes… }.
 const rows = [
@@ -54,15 +54,15 @@ test("les statistiques d'un onglet : 24 au plus, identifiants uniques", () => {
   assert.equal(stats.cleanStat({ id: "w", where, by: [], form: "number" }).where.length, stats.STAT_LIMITS.conditions);
 });
 
-test("cleanViewLayout garde un onglet stat valide et rejette les champs inconnus", () => {
-  const layout = layouts.cleanViewLayout({ kind: "stats", groupBy: "Type", tiles: [{ kind: "count" }], evil: "x", stats: [{ id: "st-1", title: "Raretés", measure: "count", by: ["Rareté"], form: "donut", hack: true }, "abîmée"] });
+test("cleanPresentation garde un onglet stat valide et rejette les champs inconnus", () => {
+  const layout = layouts.cleanPresentation({ kind: "stats", groupBy: "Type", tiles: [{ kind: "count" }], evil: "x", stats: [{ id: "st-1", title: "Raretés", measure: "count", by: ["Rareté"], form: "donut", hack: true }, "abîmée"] });
   assert.deepEqual(layout, { kind: "stats", stats: [{ id: "st-1", title: "Raretés", measure: "count", by: ["Rareté"], form: "donut" }] });
-  assert.deepEqual(layouts.cleanViewLayout({ kind: "stats" }), { kind: "stats" });
-  assert.deepEqual(layouts.parseViewLayout(JSON.stringify(layout)), layout);
+  assert.deepEqual(layouts.cleanPresentation({ kind: "stats" }), { kind: "stats" });
+  assert.deepEqual(layouts.parsePresentation(JSON.stringify(layout)), layout);
   // « stats » n'est pas une présentation proposée pour un onglet-fenêtre ordinaire.
-  assert.ok(!layouts.viewLayoutKinds.some((kind) => kind.value === "stats"));
+  assert.ok(!layouts.allPresentationKinds.some((kind) => kind.value === "stats"));
   // Les autres présentations ne bougent pas.
-  assert.deepEqual(layouts.cleanViewLayout({ kind: "kanban", kanbanColumn: "Statut", stats: [{ id: "x" }] }), { kind: "kanban", kanbanColumn: "Statut" });
+  assert.deepEqual(layouts.cleanPresentation({ kind: "kanban", kanbanColumn: "Statut", stats: [{ id: "x" }] }), { kind: "kanban", kanbanColumn: "Statut" });
 });
 
 test("une présentation trop longue pour une case Sheets est repérée", () => {
@@ -72,12 +72,12 @@ test("une présentation trop longue pour une case Sheets est repérée", () => {
     where: Array.from({ length: 6 }, () => ({ column: long, operator: "contient", value: long })),
     by: [`${long}1`, `${long}2`, `${long}3`], cols: [`${long}4`, `${long}5`], form: "table",
   }));
-  const big = layouts.cleanViewLayout({ kind: "stats", stats: heavy });
+  const big = layouts.cleanPresentation({ kind: "stats", stats: heavy });
   assert.equal(big.stats.length, 24);
-  assert.ok(JSON.stringify(big).length > layouts.MAX_VIEW_LAYOUT_JSON);
-  assert.equal(layouts.viewLayoutTooLarge(big), true);
-  assert.equal(layouts.viewLayoutTooLarge(layouts.cleanViewLayout({ kind: "stats", stats: heavy.slice(0, 2) })), false);
-  assert.equal(layouts.viewLayoutTooLarge(undefined), false);
+  assert.ok(JSON.stringify(big).length > layouts.MAX_PRESENTATION_JSON);
+  assert.equal(layouts.presentationTooLarge(big), true);
+  assert.equal(layouts.presentationTooLarge(layouts.cleanPresentation({ kind: "stats", stats: heavy.slice(0, 2) })), false);
+  assert.equal(layouts.presentationTooLarge(undefined), false);
 });
 
 test("formes permises et ajustement de la phrase", () => {
@@ -219,7 +219,7 @@ test("une ancienne statistique se relit à l'identique ; les nouveaux réglages 
   assert.equal(stats.cleanStat({ id: "c", by: ["Type"], form: "bars", compare: "filter", compareWhere: [] }).compare, undefined);
   assert.equal(stats.cleanStat({ id: "c", by: ["Type"], form: "ranking", compare: "rest" }).compare, undefined);
   // Les anciennes statistiques gardées dans un onglet stat (alpha 197) aussi.
-  assert.deepEqual(layouts.cleanViewLayout({ kind: "stats", stats: [old] }).stats, [old]);
+  assert.deepEqual(layouts.cleanPresentation({ kind: "stats", stats: [old] }).stats, [old]);
 });
 
 test("l'enregistrement d'un index : les anciennes entrées sans groupes se lisent, les groupes se nettoient", () => {

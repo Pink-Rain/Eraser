@@ -10,7 +10,7 @@
  *
  * Règles pures : la page, le serveur (nettoyage) et les tests s'en servent.
  */
-import { describeCondition, isViewOperator, matchesCondition, viewOperators, type ViewCondition, type ViewOperator } from "@/lib/index-views"
+import { describeCondition, isFilterOperator, matchesCondition, filterOperators, type FilterCondition, type FilterOperator } from "@/lib/index-windows"
 
 /* ---------- Les cases ---------- */
 
@@ -36,7 +36,7 @@ export type StatMeasure = "count" | "sum" | "average" | "max" | "min"
 export type StatForm = "number" | "gauge" | "bars" | "columns" | "ranking" | "donut" | "treemap" | "stacked" | "stacked100" | "grouped" | "cross" | "table" | "sankey" | "histogram" | "scatter"
 export type StatPercent = "none" | "total" | "row" | "column" | "parent"
 /** Les comparaisons des onglets-fenêtres, plus « au moins » et « au plus » (nombres, listes ordonnées). */
-export type StatOperator = ViewOperator | "au-moins" | "au-plus"
+export type StatOperator = FilterOperator | "au-moins" | "au-plus"
 export type StatLeaf = { column: string; operator: StatOperator; value: string }
 /** Une condition ; `or` : d'autres conditions dont une seule suffit (« Attributs contient Poison ou Saignante »). */
 export type StatCondition = StatLeaf & { or?: StatLeaf[] }
@@ -155,10 +155,10 @@ export const statForms: Array<{ value: StatForm; label: string }> = [
 ]
 
 export const statOperators: Array<{ value: StatOperator; label: string; needsValue: boolean }> = [
-  ...viewOperators.slice(0, 2),
+  ...filterOperators.slice(0, 2),
   { value: "au-moins", label: "est au moins", needsValue: true },
   { value: "au-plus", label: "est au plus", needsValue: true },
-  ...viewOperators.slice(2),
+  ...filterOperators.slice(2),
 ]
 
 export const tableTopChoices = [0, 3, 4, 5, 6, 8, 10] as const
@@ -177,7 +177,7 @@ const text = (value: unknown, max = 120) => typeof value === "string" ? value.re
 const fold = (value: string) => value.toLocaleLowerCase("fr")
 const hexColor = (value: unknown) => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value.trim()) ? value.trim().toLowerCase() : ""
 
-export const isStatOperator = (value: unknown): value is StatOperator => value === "au-moins" || value === "au-plus" || isViewOperator(value)
+export const isStatOperator = (value: unknown): value is StatOperator => value === "au-moins" || value === "au-plus" || isFilterOperator(value)
 
 const additive = (stat: Pick<StatDefinition, "measure">) => stat.measure === "count" || stat.measure === "sum"
 
@@ -270,7 +270,7 @@ export function describeStatCondition(condition: StatCondition, labelOf: (column
   const one = (leaf: StatLeaf) => {
     const column = labelOf(leaf.column)
     if (leaf.operator === "au-moins" || leaf.operator === "au-plus") return `${column} ${leaf.operator === "au-moins" ? "est au moins" : "est au plus"} « ${leaf.value} »`
-    return describeCondition({ ...leaf, column } as ViewCondition)
+    return describeCondition({ ...leaf, column } as FilterCondition)
   }
   const leaves = [condition, ...(condition.or ?? [])]
   return leaves.length > 1 ? `(${leaves.map(one).join(" ou ")})` : one(condition)
@@ -589,12 +589,12 @@ export function matchStatCondition(condition: StatLeaf, cell: string, order: str
       const ranks = cellParts(cell).map((part) => rankIn(order, part)).filter((rank) => rank >= 0)
       return ranks.some((rank) => operator === "au-moins" ? rank >= wanted : operator === "au-plus" ? rank <= wanted : operator === "superieur" ? rank > wanted : rank < wanted)
     }
-    if (operator === "superieur" || operator === "inferieur") return matchesCondition(condition as ViewCondition, cell)
+    if (operator === "superieur" || operator === "inferieur") return matchesCondition(condition as FilterCondition, cell)
     const left = cellNumber(cell)
     const right = cellNumber(condition.value)
     return left !== null && right !== null && (operator === "au-moins" ? left >= right : left <= right)
   }
-  return matchesCondition(condition as ViewCondition, cell)
+  return matchesCondition(condition as FilterCondition, cell)
 }
 
 /** Toutes les conditions sont vraies ; dans chacune, une de ses branches « ou » suffit. */

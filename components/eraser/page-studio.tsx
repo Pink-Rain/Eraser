@@ -14,7 +14,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { BlockView, CalloutFrame, ImageView, ModulePlaceholder, PageHeader, PageIcon, PageSections, SeparatorView, calloutTones, layoutGrid, type BlockContext, type PageLinkTarget } from "@/components/eraser/custom-page-view"
 import { PageSearchBlock, PageSearchProvider, PageStatBlock, PageViewBlock } from "@/components/eraser/page-index-block"
-import { describeCondition } from "@/lib/index-views"
+import { describeCondition } from "@/lib/index-windows"
 import { rowOfRoute } from "@/lib/page-replacements"
 import { blockIcons } from "@/components/eraser/page-studio-icons"
 import { BlockSettings, PageSettings, Segmented, VisibilityPill, roleDot } from "@/components/eraser/page-studio-settings"

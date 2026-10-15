@@ -106,11 +106,11 @@ test("cadrage du token : le visage choisi recadre les avatars rognés, et resser
 });
 
 test("onglets-fenêtres prévus par Eraser : Actifs, Passifs et Bonus rangent les sorts comme les pages de classe", async () => {
-  const defaults = await vite.ssrLoadModule("/lib/index-view-defaults.ts");
-  const views = await vite.ssrLoadModule("/lib/index-views.ts");
+  const defaults = await vite.ssrLoadModule("/lib/index-window-defaults.ts");
+  const views = await vite.ssrLoadModule("/lib/index-windows.ts");
   const spells = await vite.ssrLoadModule("/lib/class-spell-utils.ts");
   const types = [...spells.classSpellTypeSuggestions, "", "Actif - bonus de dégâts", "Passif bonus", "Réaction", "BONUS", "passif", "<b>Passif</b>"];
-  const inView = (index, id, type) => views.matchesView(defaults.builtinViewsFor(index).find((view) => view.id === `eraser-${id}`), (column) => column === "Type" ? type : "");
+  const inView = (index, id, type) => views.matchesFilter(defaults.builtinWindowsFor(index).find((view) => view.id === `eraser-${id}`), (column) => column === "Type" ? type : "");
   for (const type of types) {
     const category = spells.classSpellCategory(type.replace(/<[^>]+>/g, ""));
     // Sorts des classes : exactement l'ancien filtre de la page.
@@ -121,18 +121,18 @@ test("onglets-fenêtres prévus par Eraser : Actifs, Passifs et Bonus rangent le
     assert.equal(inView("creature-spells", "actifs", type), category !== "passif", type);
     assert.equal(inView("creature-spells", "passifs", type), category === "passif", type);
   }
-  assert.deepEqual(defaults.builtinViewsFor("places"), []);
+  assert.deepEqual(defaults.builtinWindowsFor("places"), []);
   // Ajouter depuis Passifs ou Bonus donne son Type à la ligne (vide, elle serait un actif et quitterait la vue).
-  const view = (index, id) => defaults.builtinViewsFor(index).find((item) => item.id === `eraser-${id}`);
-  assert.deepEqual(defaults.viewAddDefaults(view("class-spells", "passifs")), { Type: "Passif" });
-  assert.deepEqual(defaults.viewAddDefaults(view("class-spells", "bonus")), { Type: "Bonus" });
-  assert.deepEqual(defaults.viewAddDefaults(view("class-spells", "actifs")), {});
-  assert.deepEqual(defaults.viewAddDefaults(view("creature-spells", "actifs")), {});
-  assert.deepEqual(defaults.viewAddDefaults(null), {});
-  assert.ok(defaults.builtinViewsFor("class-spells").every((view) => view.builtin));
+  const view = (index, id) => defaults.builtinWindowsFor(index).find((item) => item.id === `eraser-${id}`);
+  assert.deepEqual(defaults.windowAddDefaults(view("class-spells", "passifs")), { Type: "Passif" });
+  assert.deepEqual(defaults.windowAddDefaults(view("class-spells", "bonus")), { Type: "Bonus" });
+  assert.deepEqual(defaults.windowAddDefaults(view("class-spells", "actifs")), {});
+  assert.deepEqual(defaults.windowAddDefaults(view("creature-spells", "actifs")), {});
+  assert.deepEqual(defaults.windowAddDefaults(null), {});
+  assert.ok(defaults.builtinWindowsFor("class-spells").every((view) => view.builtin));
   // Jamais proposée dans la fenêtre « Modifier un onglet-fenêtre », ni relue dans les réglages.
-  assert.ok(!views.viewOperators.some((operator) => operator.value === "categorie-sort"));
-  assert.deepEqual(views.parseViewConditions(JSON.stringify([{ column: "Type", operator: "categorie-sort", value: "actif" }])), []);
+  assert.ok(!views.filterOperators.some((operator) => operator.value === "categorie-sort"));
+  assert.deepEqual(views.parseFilterConditions(JSON.stringify([{ column: "Type", operator: "categorie-sort", value: "actif" }])), []);
 });
 
 test("blocs, allure des sections, formulaires nommés : lus et réécrits tels quels, bornés", () => {
@@ -255,7 +255,7 @@ test("le médaillon d'un survol et la taille libre des images se relisent", asyn
 
 test("lot A : image sans fond, bannière et onglets du survol, taille liée de la carte, formes de base de la fiche et du survol", async () => {
   const cards = await vite.ssrLoadModule("/lib/index-cards.ts");
-  const views = await vite.ssrLoadModule("/lib/index-view-layouts.ts");
+  const views = await vite.ssrLoadModule("/lib/index-presentations.ts");
   const defaults = await vite.ssrLoadModule("/lib/index-layout-defaults.ts");
   // Le médaillon sans fond, la bannière, les sections en onglets se relisent et se renomment.
   const parsed = layouts.parseIndexLayout({ aside: [], sections: [{ id: "a", title: "Identité", rows: [{ fields: [{ column: "Nom" }] }] }, { id: "b", title: "Lore", rows: [{ fields: [{ column: "Histoire" }] }] }], rest: "hide", medallion: { size: 44, bare: true }, banner: { column: "Portrait", height: 9999 }, tabs: true });
@@ -273,7 +273,7 @@ test("lot A : image sans fond, bannière et onglets du survol, taille liée de l
   assert.equal(card.media.bare, true);
   assert.equal(card.blocks[0].bare, true);
   assert.equal(card.sizeLinked, true);
-  assert.equal(views.cleanViewLayout({ kind: "list", look: { imageBare: true } }).look.imageBare, true);
+  assert.equal(views.cleanPresentation({ kind: "list", look: { imageBare: true } }).look.imageBare, true);
   // Les formes de base de la fiche et du survol, bâties sur les colonnes de l'onglet.
   const columns = [
     { header: "Nom", spec: { kind: "name" } }, { header: "Portrait", spec: { kind: "file", file: { accept: "image" } } }, { header: "Type", spec: { kind: "choice", options: [{ value: "Bête" }] } },

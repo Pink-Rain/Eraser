@@ -5,7 +5,7 @@
  * tableau de bord, la galerie, la chronologie, l'arborescence et le codex. Chaque vue a son
  * propre éditeur, avec ses pages et ses réglages (pas les mêmes partout) : ce qu'elle montre,
  * son dessin, ses couleurs et ses icônes. Sous les onglets, le panneau des presets et de la
- * gestion (`ViewsPanel`) ; au centre, les réglages (`ViewKindSettings`) ; à droite, l'aperçu
+ * gestion (`PresentationsPanel`) ; au centre, les réglages (`PresentationKindSettings`) ; à droite, l'aperçu
  * sur les vraies lignes. Les onglets-fenêtres et les pages qui choisissent une de ces vues la
  * montrent avec ces réglages.
  */
@@ -16,10 +16,10 @@ import { IndexCard } from "@/components/eraser/index-card"
 import { NewCardDialog, SingleCardEditor } from "@/components/eraser/index-card-editor"
 import { IndexFormView } from "@/components/eraser/index-form-view"
 import { IndexStats } from "@/components/eraser/index-stats"
-import { IndexViewLayout } from "@/components/eraser/index-view-layouts"
-import { layoutIcons, useIndexSettings } from "@/components/eraser/index-views"
-import { CopyToTabsDialog, ManagePresetsDialog, NamePresetDialog, PreviewDialog, PreviewExpandButton, ViewVariantsPanel } from "@/components/eraser/index-view-panel"
-import { accentOptions, Choice, ColorSwatches, ColumnField, ColumnsPicker, densityOptions, fieldLabel, fieldStyleOptions, hintText, IconPick, ImageBoxControls, imageShapeOptions, radiusOptions, Range, Segmented, settingsGroup, settingsTitle, SettingsRow, sizeOptions, Tabs, Toggle } from "@/components/eraser/view-editor-controls"
+import { IndexPresentation } from "@/components/eraser/index-presentation"
+import { layoutIcons, useIndexSettings } from "@/components/eraser/index-windows"
+import { CopyToTabsDialog, ManagePresetsDialog, NamePresetDialog, PreviewDialog, PreviewExpandButton, VariantsPanel } from "@/components/eraser/index-variants-panel"
+import { accentOptions, Choice, ColorSwatches, ColumnField, ColumnsPicker, densityOptions, fieldLabel, fieldStyleOptions, hintText, IconPick, ImageBoxControls, imageShapeOptions, radiusOptions, Range, Segmented, settingsGroup, settingsTitle, SettingsRow, sizeOptions, Tabs, Toggle } from "@/components/eraser/editor-controls"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -30,8 +30,8 @@ import { pickCard, type CardColumn, type CardTemplate } from "@/lib/index-cards"
 import { foldName } from "@/lib/index-columns"
 import type { StatDefinition } from "@/lib/index-stats"
 import type { NamedLayout } from "@/lib/index-layouts"
-import { builtinViewPresets, calendarFormChoices, calendarScaleOf, calendarScales, dashboardTileKinds, DEFAULT_ITEM_CARD, VIEW_ITEM_CARD, fitLayoutToColumns, groupFormulaOps, namedViewsOf, presentationKinds, viewClicks, type CalendarForms, type CalendarScale, type DashboardTile, type KanbanLane, type NamedView, type PresentationKind, type TabPresentations, type TileFormula, type ViewLayout, type ViewLook, type ViewPreset } from "@/lib/index-view-layouts"
-import { viewStartersFor } from "@/lib/index-view-starters"
+import { builtinPresentationPresets, calendarFormChoices, calendarScaleOf, calendarScales, dashboardTileKinds, DEFAULT_ITEM_CARD, PRESENTATION_ITEM_CARD, fitLayoutToColumns, groupFormulaOps, namedPresentationsOf, presentationKinds, presentationClicks, type CalendarForms, type CalendarScale, type DashboardTile, type KanbanLane, type NamedPresentation, type PresentationKind, type TabPresentations, type TileFormula, type Presentation, type PresentationLook, type PresentationPreset } from "@/lib/index-presentations"
+import { presentationStartersFor } from "@/lib/index-presentation-starters"
 import { cn } from "@/lib/utils"
 import { useEffect } from "react"
 
@@ -53,11 +53,11 @@ function useCalendarNames(active: boolean) {
 
 type Ctx = {
   kind: PresentationKind
-  layout: ViewLayout
+  layout: Presentation
   columns: string[]
-  set: (changes: Partial<ViewLayout>) => void
-  setLook: (changes: Partial<ViewLook>) => void
-  look: ViewLook
+  set: (changes: Partial<Presentation>) => void
+  setLook: (changes: Partial<PresentationLook>) => void
+  look: PresentationLook
   cards: Array<{ id: string; name: string }>
   /** Les formulaires de l'onglet (« principal » : l'étoilé), pour l'élément et le détail. */
   forms: Array<{ id: string; name: string }>
@@ -77,11 +77,11 @@ export type ElementSource = { columns: CardColumn[]; samples: Array<Record<strin
 function GroupFormulaSettings({ ctx, what = "section" }: { ctx: Ctx; what?: string }) {
   const { layout, set, columns, disabled } = ctx
   const formula = layout.groupFormula
-  const update = (changes: Partial<NonNullable<ViewLayout["groupFormula"]>>) => set({ groupFormula: { op: "count", ...formula, ...changes } })
+  const update = (changes: Partial<NonNullable<Presentation["groupFormula"]>>) => set({ groupFormula: { op: "count", ...formula, ...changes } })
   return <div className="grid gap-1.5 rounded-lg border border-dashed bg-background/50 p-2.5">
     <SettingsRow>
       <label className={fieldLabel}><span className="flex items-center gap-1"><Sigma className="size-3" />Formule dans l’en-tête de chaque {what}</span>
-        <NativeSelect value={formula ? formula.op : ""} disabled={disabled} onChange={(event) => event.target.value ? update({ op: event.target.value as NonNullable<ViewLayout["groupFormula"]>["op"] }) : set({ groupFormula: undefined })} className="h-8 py-0 text-xs">
+        <NativeSelect value={formula ? formula.op : ""} disabled={disabled} onChange={(event) => event.target.value ? update({ op: event.target.value as NonNullable<Presentation["groupFormula"]>["op"] }) : set({ groupFormula: undefined })} className="h-8 py-0 text-xs">
           <NativeSelectOption value="">— Aucune —</NativeSelectOption>
           {groupFormulaOps.map((op) => <NativeSelectOption key={op.value} value={op.value}>{op.label}</NativeSelectOption>)}
         </NativeSelect>
@@ -98,7 +98,7 @@ function GroupFormulaSettings({ ctx, what = "section" }: { ctx: Ctx; what?: stri
 function GaugeSettings({ ctx }: { ctx: Ctx }) {
   const { layout, set, columns, disabled } = ctx
   const gauge = layout.gauge
-  const update = (changes: Partial<NonNullable<ViewLayout["gauge"]>>) => set({ gauge: gauge ? { ...gauge, ...changes } : undefined })
+  const update = (changes: Partial<NonNullable<Presentation["gauge"]>>) => set({ gauge: gauge ? { ...gauge, ...changes } : undefined })
   return <SettingsRow>
     <label className={fieldLabel}><span className="flex items-center gap-1"><Gauge className="size-3" />Jauge sous chaque élément, prise dans</span>
       <NativeSelect value={gauge?.column ?? ""} disabled={disabled} onChange={(event) => event.target.value ? set({ gauge: { ...gauge, column: event.target.value } }) : set({ gauge: undefined })} className="h-8 py-0 text-xs">
@@ -120,12 +120,12 @@ function ClickSettings({ ctx }: { ctx: Ctx }) {
   const click = master ? "side" : layout.click ?? "sheet"
   const panel = click === "side" || click === "below"
   const detail = layout.detail ?? {}
-  const update = (changes: Partial<NonNullable<ViewLayout["detail"]>>) => { const next = { ...detail, ...changes }; for (const key of Object.keys(next) as Array<keyof typeof next>) if (next[key] === undefined) delete next[key]; set({ detail: Object.keys(next).length ? next : undefined }) }
+  const update = (changes: Partial<NonNullable<Presentation["detail"]>>) => { const next = { ...detail, ...changes }; for (const key of Object.keys(next) as Array<keyof typeof next>) if (next[key] === undefined) delete next[key]; set({ detail: Object.keys(next).length ? next : undefined }) }
   return <div className="grid gap-1.5 rounded-lg border border-dashed bg-background/50 p-2.5">
     <SettingsRow>
       {!master && <label className={fieldLabel}><span className="flex items-center gap-1"><MousePointerClick className="size-3" />Au clic sur un élément</span>
-        <NativeSelect value={click} disabled={disabled} onChange={(event) => set({ click: event.target.value === "sheet" ? undefined : event.target.value as ViewLayout["click"] })} className="h-8 py-0 text-xs" title={viewClicks.find((entry) => entry.value === click)?.hint}>
-          {viewClicks.map((entry) => <NativeSelectOption key={entry.value} value={entry.value}>{entry.label}</NativeSelectOption>)}
+        <NativeSelect value={click} disabled={disabled} onChange={(event) => set({ click: event.target.value === "sheet" ? undefined : event.target.value as Presentation["click"] })} className="h-8 py-0 text-xs" title={presentationClicks.find((entry) => entry.value === click)?.hint}>
+          {presentationClicks.map((entry) => <NativeSelectOption key={entry.value} value={entry.value}>{entry.label}</NativeSelectOption>)}
         </NativeSelect>
       </label>}
       {panel && <label className={fieldLabel}>{master ? "Le détail montre" : "Le panneau montre"}
@@ -259,13 +259,13 @@ function CardChoice({ ctx }: { ctx: Ctx }) {
   const { layout, set, cards, forms, disabled, element } = ctx
   const [picking, setPicking] = useState(false)
   const [editing, setEditing] = useState(false)
-  const own = layout.itemCard === VIEW_ITEM_CARD
+  const own = layout.itemCard === PRESENTATION_ITEM_CARD
   const value = layout.itemForm ? `form:${layout.itemForm}` : layout.itemCard ?? ""
   const kindLabel = presentationKinds.find((entry) => entry.value === ctx.kind)?.label ?? ""
   const choose = (next: string) => {
-    if (next === VIEW_ITEM_CARD) {
+    if (next === PRESENTATION_ITEM_CARD) {
       // L'élément sur mesure : on part d'une forme (une carte de l'onglet, une forme de départ, un preset) s'il n'en a pas encore.
-      if (layout.itemTemplate) set({ itemCard: VIEW_ITEM_CARD, itemForm: undefined })
+      if (layout.itemTemplate) set({ itemCard: PRESENTATION_ITEM_CARD, itemForm: undefined })
       else setPicking(true)
       return
     }
@@ -276,7 +276,7 @@ function CardChoice({ ctx }: { ctx: Ctx }) {
       <label className={cn(fieldLabel, "[&_[data-slot=native-select-wrapper]]:w-full")}>Élément : chaque ligne s’affiche
         <NativeSelect value={value} disabled={disabled} onChange={(event) => choose(event.target.value)} className="h-8 w-full py-0 text-xs">
           <NativeSelectOption value="">Avec les réglages de cette vue (nom, colonnes, icône, image)</NativeSelectOption>
-          {(element || own) && <NativeSelectOptGroup label="Sur mesure"><NativeSelectOption value={VIEW_ITEM_CARD}>Un élément propre à cette vue (moteur des cartes)</NativeSelectOption></NativeSelectOptGroup>}
+          {(element || own) && <NativeSelectOptGroup label="Sur mesure"><NativeSelectOption value={PRESENTATION_ITEM_CARD}>Un élément propre à cette vue (moteur des cartes)</NativeSelectOption></NativeSelectOptGroup>}
           <NativeSelectOptGroup label="Avec une carte de l’onglet"><NativeSelectOption value={DEFAULT_ITEM_CARD}>La carte à l’étoile de l’onglet</NativeSelectOption>{cards.map((card) => <NativeSelectOption key={card.id} value={card.id}>{card.name}</NativeSelectOption>)}{layout.itemCard && !own && layout.itemCard !== DEFAULT_ITEM_CARD && !cards.some((card) => card.id === layout.itemCard) && <NativeSelectOption value={layout.itemCard}>Carte retirée (la carte à l’étoile la remplace)</NativeSelectOption>}</NativeSelectOptGroup>
           <NativeSelectOptGroup label="Avec un formulaire en lecture">{forms.map((form) => <NativeSelectOption key={form.id} value={`form:${form.id}`}>{form.name}</NativeSelectOption>)}</NativeSelectOptGroup>
         </NativeSelect>
@@ -295,7 +295,7 @@ function CardChoice({ ctx }: { ctx: Ctx }) {
       builtins={element.tabCards}
       builtinsLabel="Les cartes de cet onglet"
       builtinsHint="Une copie, à retoucher pour cette vue seulement."
-      onPick={(card) => { set({ itemCard: VIEW_ITEM_CARD, itemTemplate: { ...card, name: `Élément · ${kindLabel}` }, itemForm: undefined }); setPicking(false); setEditing(true) }}
+      onPick={(card) => { set({ itemCard: PRESENTATION_ITEM_CARD, itemTemplate: { ...card, name: `Élément · ${kindLabel}` }, itemForm: undefined }); setPicking(false); setEditing(true) }}
       onClose={() => setPicking(false)}
     />}
     {editing && element && layout.itemTemplate && <Dialog open onOpenChange={(open) => { if (!open) setEditing(false) }}>
@@ -673,8 +673,8 @@ function DashboardPages(ctx: Ctx): Page[] {
 // ---------------------------------------------------------------------------
 
 const galleryShapes = [{ key: "square", label: "Carré", ratio: 1, w: 16, h: 16 }, { key: "portrait", label: "Rectangle vertical", ratio: 0.8, w: 13, h: 16 }, { key: "landscape", label: "Rectangle horizontal", ratio: 1.6, w: 18, h: 11 }] as const
-const galleryRatioOf = (layout: ViewLayout) => layout.galleryHeightRem ? galleryWidthOf(layout) / layout.galleryHeightRem : layout.galleryRatio ?? { square: 1, portrait: 0.8, landscape: 1.6 }[layout.galleryShape ?? "portrait"]
-const galleryWidthOf = (layout: ViewLayout) => layout.galleryWidthRem ?? { sm: 8.5, md: 12, lg: 17 }[layout.gallerySize ?? "md"]
+const galleryRatioOf = (layout: Presentation) => layout.galleryHeightRem ? galleryWidthOf(layout) / layout.galleryHeightRem : layout.galleryRatio ?? { square: 1, portrait: 0.8, landscape: 1.6 }[layout.galleryShape ?? "portrait"]
+const galleryWidthOf = (layout: Presentation) => layout.galleryWidthRem ?? { sm: 8.5, md: 12, lg: 17 }[layout.gallerySize ?? "md"]
 
 function GalleryPages(ctx: Ctx): Page[] {
   const { layout, look, set, setLook, columns, disabled } = ctx
@@ -933,11 +933,11 @@ function CodexPages(ctx: Ctx): Page[] {
 type Page = { key: string; label: string; icon: ReactNode; render: () => ReactNode }
 
 /** Les réglages d'une vue (sa forme déjà choisie), en pages propres à son type. */
-export function ViewKindSettings({ kind, layout, columns, onChange, cards = [], forms = [], stats = [], presentations = {}, optionsOf, disabled = false, element }: {
+export function PresentationKindSettings({ kind, layout, columns, onChange, cards = [], forms = [], stats = [], presentations = {}, optionsOf, disabled = false, element }: {
   kind: PresentationKind
-  layout: ViewLayout
+  layout: Presentation
   columns: string[]
-  onChange: (layout: ViewLayout) => void
+  onChange: (layout: Presentation) => void
   cards?: Array<{ id: string; name: string }>
   /** Les formulaires de l'onglet (« principal » : l'étoilé) : l'élément et le détail peuvent en lire un. */
   forms?: Array<{ id: string; name: string }>
@@ -952,14 +952,14 @@ export function ViewKindSettings({ kind, layout, columns, onChange, cards = [], 
   const [page, setPage] = useState("")
   const calendars = useCalendarNames(kind === "calendar" || kind === "timeline")
   const look = layout.look ?? {}
-  const set = (changes: Partial<ViewLayout>) => {
-    const next: ViewLayout = { ...layout, ...changes, kind }
-    for (const key of Object.keys(next) as Array<keyof ViewLayout>) if (next[key] === undefined) delete next[key]
+  const set = (changes: Partial<Presentation>) => {
+    const next: Presentation = { ...layout, ...changes, kind }
+    for (const key of Object.keys(next) as Array<keyof Presentation>) if (next[key] === undefined) delete next[key]
     onChange(next)
   }
-  const setLook = (changes: Partial<ViewLook>) => {
-    const next: ViewLook = { ...look, ...changes }
-    for (const key of Object.keys(next) as Array<keyof ViewLook>) if (next[key] === undefined) delete next[key]
+  const setLook = (changes: Partial<PresentationLook>) => {
+    const next: PresentationLook = { ...look, ...changes }
+    for (const key of Object.keys(next) as Array<keyof PresentationLook>) if (next[key] === undefined) delete next[key]
     set({ look: Object.keys(next).length ? next : undefined })
   }
   const ctx: Ctx = { kind, layout, columns, set, setLook, look, cards, forms, stats, presentations, optionsOf, disabled, element }
@@ -984,28 +984,28 @@ export function ViewKindSettings({ kind, layout, columns, onChange, cards = [], 
 // ---------------------------------------------------------------------------
 
 /** L'identifiant de la version étoilée d'une vue (celle rangée sous son genre). */
-export const MAIN_VIEW_ID = "principal"
+export const MAIN_PRESENTATION_ID = "principal"
 
 /** Les versions d'une vue d'un onglet : l'étoilée d'abord, puis les autres. */
-export function viewVersionsOf(value: TabPresentations, kind: PresentationKind) {
-  return [{ id: MAIN_VIEW_ID, name: "Vue principale", layout: value[kind] ?? { kind } }, ...namedViewsOf(value, kind)]
+export function presentationVersionsOf(value: TabPresentations, kind: PresentationKind) {
+  return [{ id: MAIN_PRESENTATION_ID, name: "Vue principale", layout: value[kind] ?? { kind } }, ...namedPresentationsOf(value, kind)]
 }
 
 /** La forme de la version choisie d'une vue (l'étoilée si elle n'existe plus). */
-export function viewVersionOf(value: TabPresentations, kind: PresentationKind, id: string): ViewLayout {
-  return (id !== MAIN_VIEW_ID ? namedViewsOf(value, kind).find((item) => item.id === id)?.layout : undefined) ?? value[kind] ?? { kind }
+export function presentationVersionOf(value: TabPresentations, kind: PresentationKind, id: string): Presentation {
+  return (id !== MAIN_PRESENTATION_ID ? namedPresentationsOf(value, kind).find((item) => item.id === id)?.layout : undefined) ?? value[kind] ?? { kind }
 }
 
 /** Les vues d'un onglet où la version choisie prend cette forme. */
-export function withViewVersion(value: TabPresentations, kind: PresentationKind, id: string, layout: ViewLayout): TabPresentations {
-  if (id === MAIN_VIEW_ID || !namedViewsOf(value, kind).some((item) => item.id === id)) return { ...value, [kind]: { ...layout, kind } }
+export function withPresentationVersion(value: TabPresentations, kind: PresentationKind, id: string, layout: Presentation): TabPresentations {
+  if (id === MAIN_PRESENTATION_ID || !namedPresentationsOf(value, kind).some((item) => item.id === id)) return { ...value, [kind]: { ...layout, kind } }
   return { ...value, named: (value.named ?? []).map((item) => item.id === id ? { ...item, layout: { ...layout, kind } } : item) }
 }
 
 const viewId = () => Math.random().toString(36).slice(2, 10)
 
 /** Le panneau d'une vue, sous les onglets : ses versions (l'étoile, nouvelle, dupliquer…) et ses presets. */
-export function ViewsPanel({ kind, tabName, columns, value, selectedId, onSelect, onChange, presets, onSavePreset, onDeletePreset, otherTabs, onCopyTo, disabled = false }: {
+export function PresentationsPanel({ kind, tabName, columns, value, selectedId, onSelect, onChange, presets, onSavePreset, onDeletePreset, otherTabs, onCopyTo, disabled = false }: {
   kind: PresentationKind
   tabName: string
   columns: string[]
@@ -1015,74 +1015,74 @@ export function ViewsPanel({ kind, tabName, columns, value, selectedId, onSelect
   selectedId: string
   onSelect: (id: string) => void
   onChange: (next: TabPresentations) => void
-  presets: ViewPreset[]
-  onSavePreset?: (preset: { id?: string; name: string; layout: ViewLayout }) => Promise<unknown>
+  presets: PresentationPreset[]
+  onSavePreset?: (preset: { id?: string; name: string; layout: Presentation }) => Promise<unknown>
   onDeletePreset?: (id: string) => Promise<unknown>
   otherTabs: Array<{ id: string; name: string }>
   /** La version choisie donnée, comme vue à l'étoile, aux onglets cochés. */
-  onCopyTo: (tabIds: string[], layout: ViewLayout) => void
+  onCopyTo: (tabIds: string[], layout: Presentation) => void
   disabled?: boolean
 }) {
   const [dialog, setDialog] = useState<"save" | "copy" | "manage" | null>(null)
   const kindInfo = presentationKinds.find((entry) => entry.value === kind)
   const kindLabel = kindInfo?.label ?? ""
-  const versions = viewVersionsOf(value, kind)
+  const versions = presentationVersionsOf(value, kind)
   const selected = versions.find((item) => item.id === selectedId) ?? versions[0]
   const layout = selected.layout
-  const named = namedViewsOf(value, kind)
+  const named = namedPresentationsOf(value, kind)
   const others = (value.named ?? []).filter((item) => item.layout.kind !== kind)
-  const setNamed = (list: NamedView[], main?: ViewLayout | null) => {
+  const setNamed = (list: NamedPresentation[], main?: Presentation | null) => {
     const next: TabPresentations = { ...value, named: [...others, ...list] }
     if (main === null) delete next[kind]
     else if (main) next[kind] = main
     if (!next.named?.length) delete next.named
     onChange(next)
   }
-  const add = (name: string, shape: ViewLayout) => { const id = viewId(); setNamed([...named, { id, name, layout: { ...shape, kind } }]); onSelect(id) }
-  const available = [...builtinViewPresets, ...presets].filter((preset) => preset.layout.kind === kind)
+  const add = (name: string, shape: Presentation) => { const id = viewId(); setNamed([...named, { id, name, layout: { ...shape, kind } }]); onSelect(id) }
+  const available = [...builtinPresentationPresets, ...presets].filter((preset) => preset.layout.kind === kind)
   const mine = available.filter((preset) => !preset.builtin)
-  const configured = selected.id === MAIN_VIEW_ID ? Boolean(value[kind]) : Object.keys(layout).length > 1
+  const configured = selected.id === MAIN_PRESENTATION_ID ? Boolean(value[kind]) : Object.keys(layout).length > 1
   return <>
-    <ViewVariantsPanel
+    <VariantsPanel
       title={`${kindLabel} de « ${tabName} »`}
       icon={layoutIcons[kind]}
       noun="vue"
       items={versions.map((item) => ({ id: item.id, name: item.name }))}
       selectedId={selected.id}
-      starredId={MAIN_VIEW_ID}
+      starredId={MAIN_PRESENTATION_ID}
       onSelect={onSelect}
       onStar={(id) => {
         // L'étoile passe à cette version : elle devient celle des pages, l'ancienne garde une place nommée.
         const target = named.find((item) => item.id === id)
         if (!target) return
         setNamed([...named.filter((item) => item.id !== id), ...(value[kind] ? [{ id: viewId(), name: "Ancienne vue principale", layout: { ...value[kind]!, kind } }] : [])], target.layout)
-        onSelect(MAIN_VIEW_ID)
+        onSelect(MAIN_PRESENTATION_ID)
       }}
       starHint="celle que montrent les pages et le tableau de bord ; les autres se choisissent dans un bloc de page"
       onRename={(id, name) => setNamed(named.map((item) => item.id === id ? { ...item, name } : item))}
-      renameable={(id) => id !== MAIN_VIEW_ID}
+      renameable={(id) => id !== MAIN_PRESENTATION_ID}
       onNew={() => add(`${kindLabel} ${named.length + 2}`, { kind })}
       newHint={`Nouvelle version de la vue ${kindLabel}, avec ses réglages d’office`}
-      onDuplicate={() => add(`${selected.id === MAIN_VIEW_ID ? kindLabel : selected.name} (copie)`, layout)}
-      onRemove={() => { setNamed(named.filter((item) => item.id !== selected.id)); onSelect(MAIN_VIEW_ID) }}
-      removable={(id) => id !== MAIN_VIEW_ID}
+      onDuplicate={() => add(`${selected.id === MAIN_PRESENTATION_ID ? kindLabel : selected.name} (copie)`, layout)}
+      onRemove={() => { setNamed(named.filter((item) => item.id !== selected.id)); onSelect(MAIN_PRESENTATION_ID) }}
+      removable={(id) => id !== MAIN_PRESENTATION_ID}
       full={named.length >= 11}
       presets={available.map((preset) => ({ id: preset.id, name: preset.name, group: preset.builtin ? "Eraser" : "Les tiens" }))}
       onApplyPreset={(id) => {
         const preset = available.find((entry) => entry.id === id)
-        if (preset) onChange(withViewVersion(value, kind, selected.id, fitLayoutToColumns({ ...layout, ...preset.layout, kind }, columns)))
+        if (preset) onChange(withPresentationVersion(value, kind, selected.id, fitLayoutToColumns({ ...layout, ...preset.layout, kind }, columns)))
       }}
       onSavePreset={onSavePreset ? () => setDialog("save") : undefined}
       onCopy={otherTabs.length ? () => setDialog("copy") : undefined}
       copyHint={otherTabs.length ? "Copier cette vue vers d’autres onglets…" : "Cet index n’a pas d’autre onglet"}
       onManagePresets={onDeletePreset && mine.length ? () => setDialog("manage") : undefined}
       disabled={disabled}
-      footer={configured && <Button type="button" variant="ghost" size="sm" className="h-7 justify-start text-[11px] text-muted-foreground" disabled={disabled} onClick={() => selected.id === MAIN_VIEW_ID ? setNamed(named, null) : onChange(withViewVersion(value, kind, selected.id, { kind }))}><RotateCcw />Revenir aux réglages d’office</Button>}
+      footer={configured && <Button type="button" variant="ghost" size="sm" className="h-7 justify-start text-[11px] text-muted-foreground" disabled={disabled} onClick={() => selected.id === MAIN_PRESENTATION_ID ? setNamed(named, null) : onChange(withPresentationVersion(value, kind, selected.id, { kind }))}><RotateCcw />Revenir aux réglages d’office</Button>}
     />
     {dialog === "save" && onSavePreset && <NamePresetDialog
       title="Enregistrer en preset"
       description={<>Les réglages de cette vue {kindLabel}, pour les reprendre dans n’importe quel index (Forme de base, bloc de page). Les colonnes absentes y sont sautées.</>}
-      initialName={selected.id === MAIN_VIEW_ID ? `${kindLabel} · ${tabName}` : selected.name}
+      initialName={selected.id === MAIN_PRESENTATION_ID ? `${kindLabel} · ${tabName}` : selected.name}
       existing={mine}
       onSave={(name, id) => onSavePreset({ id, name, layout })}
       onClose={() => setDialog(null)}
@@ -1112,7 +1112,7 @@ export function ViewsPanel({ kind, tabName, columns, value, selectedId, onSelect
 const screens = { phone: "24rem", tablet: "44rem", desktop: "100%" } as const
 const screenOptions: Array<{ value: keyof typeof screens; label: string; icon: ReactNode; title: string }> = [{ value: "phone", label: "", icon: <Smartphone className="size-3.5" />, title: "Téléphone" }, { value: "tablet", label: "", icon: <Tablet className="size-3.5" />, title: "Tablette" }, { value: "desktop", label: "", icon: <Monitor className="size-3.5" />, title: "Toute la largeur" }]
 
-export function IndexViewsEditor({ kind, versionId = MAIN_VIEW_ID, tabName, columns, rows, value, onChange, optionsOf, cards = [], cardColumns = [], forms = [], stats = [], disabled = false }: {
+export function IndexPresentationsEditor({ kind, versionId = MAIN_PRESENTATION_ID, tabName, columns, rows, value, onChange, optionsOf, cards = [], cardColumns = [], forms = [], stats = [], disabled = false }: {
   /** La vue réglée (l'onglet de « Modifier » : Liste, Kanban…). */
   kind: PresentationKind
   /** La version de la vue modifiée (l'étoilée par défaut). */
@@ -1138,8 +1138,8 @@ export function IndexViewsEditor({ kind, versionId = MAIN_VIEW_ID, tabName, colu
   const [starting, setStarting] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [bigScreen, setBigScreen] = useState<keyof typeof screens>("desktop")
-  const layout: ViewLayout = viewVersionOf(value, kind, versionId)
-  const setLayout = (next: ViewLayout) => onChange(withViewVersion(value, kind, versionId, next))
+  const layout: Presentation = presentationVersionOf(value, kind, versionId)
+  const setLayout = (next: Presentation) => onChange(withPresentationVersion(value, kind, versionId, next))
   const nameColumn = columns.find((column) => /^nom\b/i.test(column)) ?? columns[0] ?? ""
   const keys = useMemo(() => rows.map((_, index) => String(index)), [rows])
   const specs = useMemo(() => new Map(cardColumns.map((column) => [foldName(column.header), column.spec])), [cardColumns])
@@ -1163,7 +1163,7 @@ export function IndexViewsEditor({ kind, versionId = MAIN_VIEW_ID, tabName, colu
     const stat = stats.find((item) => item.id === statId)
     return stat ? <IndexStats stats={[{ ...stat, pinned: true }]} pinnedOnly single rows={keys} columns={columns} tabs={[tabName]} valueOf={previewValueOf} tabOf={() => tabName} nameOf={previewNameOf} optionsOf={optionsOf ?? (() => [])} canEdit={false} onSave={async () => undefined} /> : null
   }
-  const preview = (shown: ViewLayout, limit?: number) => <IndexViewLayout
+  const preview = (shown: Presentation, limit?: number) => <IndexPresentation
     layout={shown}
     rows={limit ? keys.slice(0, limit) : keys}
     headers={columns}
@@ -1183,7 +1183,7 @@ export function IndexViewsEditor({ kind, versionId = MAIN_VIEW_ID, tabName, colu
   return <div className="grid min-h-0 gap-3 lg:h-full lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
     <div className="grid content-start gap-2 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
       <div className="flex justify-end"><Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={disabled} onClick={() => setStarting(true)} title="Repartir d’une forme de base, remplie avec les colonnes de cet onglet et dessinée sur ses lignes"><Sparkles className="size-3.5" />Forme de base</Button></div>
-      <ViewKindSettings kind={kind} layout={layout} columns={columns} onChange={setLayout} element={cardColumns.length ? { columns: cardColumns, samples: rows, tabCards: cards } : undefined} cards={cards.map((card) => ({ id: card.id, name: card.name }))} forms={forms.map((form) => ({ id: form.id, name: form.name }))} stats={stats.map((stat) => ({ id: stat.id, title: stat.title }))} presentations={value} optionsOf={optionsOf} disabled={disabled} />
+      <PresentationKindSettings kind={kind} layout={layout} columns={columns} onChange={setLayout} element={cardColumns.length ? { columns: cardColumns, samples: rows, tabCards: cards } : undefined} cards={cards.map((card) => ({ id: card.id, name: card.name }))} forms={forms.map((form) => ({ id: form.id, name: form.name }))} stats={stats.map((stat) => ({ id: stat.id, title: stat.title }))} presentations={value} optionsOf={optionsOf} disabled={disabled} />
     </div>
     <section className="min-w-0 rounded-xl border bg-muted/20 p-3 lg:min-h-0 lg:overflow-auto" aria-label="Aperçu">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -1211,13 +1211,13 @@ export function IndexViewsEditor({ kind, versionId = MAIN_VIEW_ID, tabName, colu
  * presets d'Eraser et les presets enregistrés, chacune dessinée sur les premières lignes de
  * l'onglet. En choisir une remplace les réglages de la vue (tout se modifie après).
  */
-function ViewStarterDialog({ kind, columns, cardColumns, preview, onPick, onClose }: { kind: PresentationKind; columns: string[]; cardColumns: CardColumn[]; preview: (layout: ViewLayout) => ReactNode; onPick: (layout: ViewLayout) => void; onClose: () => void }) {
+function ViewStarterDialog({ kind, columns, cardColumns, preview, onPick, onClose }: { kind: PresentationKind; columns: string[]; cardColumns: CardColumn[]; preview: (layout: Presentation) => ReactNode; onPick: (layout: Presentation) => void; onClose: () => void }) {
   const { viewPresets } = useIndexSettings("")
-  const starters = useMemo(() => viewStartersFor(kind, cardColumns.length ? cardColumns : columns.map((header) => ({ header }))), [cardColumns, columns, kind])
-  const builtins = builtinViewPresets.filter((preset) => preset.layout.kind === kind)
+  const starters = useMemo(() => presentationStartersFor(kind, cardColumns.length ? cardColumns : columns.map((header) => ({ header }))), [cardColumns, columns, kind])
+  const builtins = builtinPresentationPresets.filter((preset) => preset.layout.kind === kind)
   const saved = viewPresets.filter((preset) => preset.layout.kind === kind)
   const kindLabel = presentationKinds.find((entry) => entry.value === kind)?.label ?? ""
-  const tile = (key: string, title: string, hint: string, layout: ViewLayout) => <button key={key} type="button" onClick={() => onPick(layout)} className="group grid content-start gap-2 rounded-xl border bg-card/70 p-2.5 text-left transition hover:border-primary hover:shadow-md">
+  const tile = (key: string, title: string, hint: string, layout: Presentation) => <button key={key} type="button" onClick={() => onPick(layout)} className="group grid content-start gap-2 rounded-xl border bg-card/70 p-2.5 text-left transition hover:border-primary hover:shadow-md">
     <span className="pointer-events-none block max-h-60 min-h-24 overflow-hidden rounded-lg bg-muted/30 p-2"><span className="block origin-top-left scale-[0.7]" style={{ width: "143%" }}>{preview(layout)}</span></span>
     <span><span className="block text-sm font-semibold">{title}</span><span className="block text-[11px] leading-4 text-muted-foreground">{hint}</span></span>
   </button>

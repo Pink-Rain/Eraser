@@ -9,7 +9,7 @@ import { LayoutViewsPanel, PresetBar, useColumnPresets } from "@/components/eras
 import { IndexLayoutEditor, type LayoutColumn } from "@/components/eraser/index-layout-editor"
 import { CardsPanel, IndexCardEditor, duplicateCard } from "@/components/eraser/index-card-editor"
 import { ColumnDescriptionButton, ColumnLockButton, ColumnTypeMenu } from "@/components/eraser/index-column-toolbar"
-import { IndexViewsEditor, MAIN_VIEW_ID, ViewsPanel } from "@/components/eraser/index-views-editor"
+import { IndexPresentationsEditor, MAIN_PRESENTATION_ID, PresentationsPanel } from "@/components/eraser/index-presentations-editor"
 import { columnStyleCss, pillStyle, stylePalette } from "@/components/eraser/index-style"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
@@ -53,8 +53,8 @@ import { lockOverrideFor, sameTabLocks, type TabLocks } from "@/lib/index-locks"
 import { tabLocksOf } from "@/lib/index-locks"
 import { unitFamilies, type UnitFamily } from "@/lib/index-numbers"
 import type { StatDefinition } from "@/lib/index-stats"
-import { fitLayoutToColumns, presentationEntries, presentationKinds, type PresentationKind, type TabPresentations, type ViewLayout, type ViewPreset } from "@/lib/index-view-layouts"
-import { layoutIcons } from "@/components/eraser/index-views"
+import { fitLayoutToColumns, presentationEntries, presentationKinds, type PresentationKind, type TabPresentations, type Presentation, type PresentationPreset } from "@/lib/index-presentations"
+import { layoutIcons } from "@/components/eraser/index-windows"
 
 /** Ce que montre l'éditeur : les colonnes, le formulaire, le survol, les cartes ou une vue. */
 export type EditorMode = "columns" | LayoutKind | "cards" | `view:${PresentationKind}` | "stats"
@@ -772,8 +772,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   presentations?: Record<string, TabPresentations>
   onSavePresentations?: (changes: Array<{ tab: string; presentations: TabPresentations | null }>) => Promise<void>
   /** Les presets de vues, communs à tous les index. */
-  viewPresets?: ViewPreset[]
-  onSaveViewPreset?: (preset: { id?: string; name: string; layout: ViewLayout }) => Promise<unknown>
+  viewPresets?: PresentationPreset[]
+  onSaveViewPreset?: (preset: { id?: string; name: string; layout: Presentation }) => Promise<unknown>
   onDeleteViewPreset?: (id: string) => Promise<unknown>
   /** Des lignes de chaque onglet (en-tête → valeur) pour l'aperçu des vues. */
   previewRows?: Record<string, Array<Record<string, string>>>
@@ -949,7 +949,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
     const renames = new Map(draft.columns.filter((item) => item.original && !item.removed && item.header.trim() && item.header.trim() !== item.original).map((item) => [foldName(item.original!), item.header.trim()]))
     if (!touched && !renamed && !renames.size) return []
     const rename = (value?: string) => value ? renames.get(foldName(value)) ?? value : value
-    const renamedLayout = <T extends ViewLayout>(layout: T): T => ({ ...layout, groupBy: rename(layout.groupBy), kanbanColumn: rename(layout.kanbanColumn), dateColumn: rename(layout.dateColumn), sortBy: rename(layout.sortBy), colorBy: rename(layout.colorBy), imageColumn: rename(layout.imageColumn), fields: layout.fields?.map((field) => rename(field)!), detailFields: layout.detailFields?.map((field) => rename(field)!), tiles: layout.tiles?.map((tile) => ({ ...tile, column: rename(tile.column) })), ...(layout.itemTemplate ? { itemTemplate: renameCardColumns(layout.itemTemplate, renames) } : {}) })
+    const renamedLayout = <T extends Presentation>(layout: T): T => ({ ...layout, groupBy: rename(layout.groupBy), kanbanColumn: rename(layout.kanbanColumn), dateColumn: rename(layout.dateColumn), sortBy: rename(layout.sortBy), colorBy: rename(layout.colorBy), imageColumn: rename(layout.imageColumn), fields: layout.fields?.map((field) => rename(field)!), detailFields: layout.detailFields?.map((field) => rename(field)!), tiles: layout.tiles?.map((tile) => ({ ...tile, column: rename(tile.column) })), ...(layout.itemTemplate ? { itemTemplate: renameCardColumns(layout.itemTemplate, renames) } : {}) })
     const base = touched ? presentationDrafts[draft.id] : saved
     // Chaque vue étoilée, et les autres versions (`named`), suivent les colonnes renommées.
     const next: TabPresentations = Object.fromEntries(presentationEntries(base).map(([kind, layout]) => [kind, renamedLayout(layout)]))
@@ -1265,13 +1265,13 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
           })()}
           {viewKind && presentationsEnabled && tab && !tab.removed && (() => {
             const editKey = `${viewKind}:${tab.id}`
-            return <ViewsPanel
+            return <PresentationsPanel
               key={editKey}
               kind={viewKind}
               tabName={tab.name}
               columns={viewColumnsOf(tab)}
               value={presentationsOf(tab)}
-              selectedId={editedView[editKey] ?? MAIN_VIEW_ID}
+              selectedId={editedView[editKey] ?? MAIN_PRESENTATION_ID}
               onSelect={(id) => setEditedView((state) => ({ ...state, [editKey]: id }))}
               onChange={(next) => setPresentationDrafts((state) => ({ ...state, [tab.id]: next }))}
               presets={viewPresets}
@@ -1295,10 +1295,10 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
         </section>}
 
         {viewKind && tab && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1 lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden lg:pr-0">
-          <IndexViewsEditor
-            key={`${tab.id}:${viewKind}:${editedView[`${viewKind}:${tab.id}`] ?? MAIN_VIEW_ID}`}
+          <IndexPresentationsEditor
+            key={`${tab.id}:${viewKind}:${editedView[`${viewKind}:${tab.id}`] ?? MAIN_PRESENTATION_ID}`}
             kind={viewKind}
-            versionId={editedView[`${viewKind}:${tab.id}`] ?? MAIN_VIEW_ID}
+            versionId={editedView[`${viewKind}:${tab.id}`] ?? MAIN_PRESENTATION_ID}
             tabName={tab.name}
             columns={tab.columns.filter((item) => !item.removed && item.header.trim() && !/^id$/i.test(item.header.trim())).map((item) => item.header.trim())}
             rows={previewRows[tab.original ?? tab.name.trim()] ?? sampleRows[tab.original ?? tab.name.trim()] ?? []}

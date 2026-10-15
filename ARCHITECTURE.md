@@ -78,6 +78,37 @@ Les portraits, bannières et fonds de carte partagés passent par Google Drive.
 `lib/shared-media.ts` utilise le stockage local comme cache et sait migrer les
 anciens médias locaux sans remplacer Drive comme source partagée.
 
+## Index : présentations, filtres, cartes et formulaires
+
+Vocabulaire du code (chaque mot ne désigne qu’une chose) :
+
+- **Présentation** : la forme donnée aux lignes d’un onglet (liste, kanban,
+  maître-détail, calendrier, tableau de bord, galerie, chronologie,
+  arborescence, codex ; tableau et cartes pour les blocs de page). Modèle
+  `lib/index-presentations.ts` (`Presentation`, `PresentationKind`), éditeur
+  `components/eraser/index-presentations-editor.tsx`, affichage
+  `components/eraser/index-presentation.tsx`, formes de départ
+  `lib/index-presentation-starters.ts`. Enregistrées sur le Worker (portées
+  `index-presentations` et `index-view-presets`, `lib/index-presentations-store.ts`).
+- **Filtre** : des conditions sur les lignes (`FilterCondition`,
+  `filterOperators`, `matchesFilter`, dans `lib/index-windows.ts`).
+- **Onglet-fenêtre** (`IndexWindow`) : un onglet sans données propres qui
+  réaffiche les lignes d’un filtre, en tableau ou en cartes, ou un onglet stat.
+  Gardé dans le classeur Google « Eraser · Réglages des index »
+  (`lib/index-settings.ts`), c’est le dernier réglage d’index encore dans Sheets.
+- **Cartes** (`lib/index-cards.ts`), **formulaires et survols**
+  (`lib/index-layouts.ts`), **stats** (`lib/index-stats.ts`) : sur le Worker
+  (portées `index-cards`, `index-layouts`, `index-stats`).
+- **Bloc « Vue d’index »** d’une page (`ViewBlock`, `lib/custom-pages.ts`) :
+  le seul endroit qui réunit aujourd’hui filtre, tri et présentation.
+- **Vue** : réservé à la future vue enregistrée (filtre + tri + présentation
+  sous un nom), voir la roadmap « Vues des index ».
+
+Les clés déjà enregistrées ou échangées avec le serveur gardent leurs anciens
+noms et ne se renomment jamais : actions `save-view`, `delete-view`,
+`save-view-preset`, clés `views` et `viewPresets` de l’API des réglages, portées
+du Worker, colonnes de la feuille, préfixe de version `vue:`, élément `@vue`.
+
 ## Tabletop
 
 Le tabletop conserve ses pages, routes API, composants Leaflet, styles globaux

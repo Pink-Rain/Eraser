@@ -6,11 +6,11 @@ import { Check, ChevronDown, Copy, ExternalLink, LoaderCircle, Plus, RefreshCw, 
 import { IconPicker } from "@/components/eraser/index-gauge"
 import { PageIcon, calloutTones, formatWhen } from "@/components/eraser/custom-page-view"
 import { blockIcons } from "@/components/eraser/page-studio-icons"
-import { ViewKindSettings } from "@/components/eraser/index-views-editor"
-import { isPresentationKind, VIEW_VARIANT_PREFIX, type ViewLayout } from "@/lib/index-view-layouts"
+import { PresentationKindSettings } from "@/components/eraser/index-presentations-editor"
+import { isPresentationKind, PRESENTATION_VARIANT_PREFIX, type Presentation } from "@/lib/index-presentations"
 import { ALL_PINNED_STATS } from "@/lib/custom-pages-data"
 import { eraserModules, moduleSections } from "@/lib/eraser-modules"
-import { describeCondition, viewOperators, type ViewCondition } from "@/lib/index-views"
+import { describeCondition, filterOperators, type FilterCondition } from "@/lib/index-windows"
 import { replaceModes, replaceableRoutes } from "@/lib/page-replacements"
 import {
   blockCatalog,
@@ -96,7 +96,7 @@ function RadioCards<T extends string>({ name, value, options, onChange, disabled
 
 type IndexEntry = { key: string; title: string; path: string }
 type IndexDetails = {
-  tabs: Array<{ name: string; configured?: ViewBlockKind[]; forms?: Partial<Record<ViewBlockKind, ViewLayout>>; cards: boolean; cardList?: Array<{ id: string; name: string }>; viewList?: Array<{ id: string; name: string; kind: string }>; formList?: Array<{ id: string; name: string }>; columns?: string[]; choices?: Record<string, string[]> }>
+  tabs: Array<{ name: string; configured?: ViewBlockKind[]; forms?: Partial<Record<ViewBlockKind, Presentation>>; cards: boolean; cardList?: Array<{ id: string; name: string }>; viewList?: Array<{ id: string; name: string; kind: string }>; formList?: Array<{ id: string; name: string }>; columns?: string[]; choices?: Record<string, string[]> }>
   stats: Array<{ id: string; title: string; pinned: boolean }>
   presets?: Array<{ id: string; name: string; kind: string; builtin: boolean }>
 }
@@ -156,12 +156,12 @@ function IndexPicker({ value, onChange }: { value: string; onChange: (key: strin
 function WhereEditor({ where, columns, choices, rowPage, onChange }: { where?: ViewWhere; columns: string[]; choices: Record<string, string[]>; rowPage: boolean; onChange: (where: ViewWhere | undefined) => void }) {
   const conditions = where?.conditions ?? []
   const match = where?.match ?? "toutes"
-  const set = (next: ViewCondition[], nextMatch = match) => onChange(next.length ? { match: nextMatch, conditions: next } : undefined)
-  const change = (position: number, patch: Partial<ViewCondition>) => set(conditions.map((condition, index) => index === position ? { ...condition, ...patch } : condition))
+  const set = (next: FilterCondition[], nextMatch = match) => onChange(next.length ? { match: nextMatch, conditions: next } : undefined)
+  const change = (position: number, patch: Partial<FilterCondition>) => set(conditions.map((condition, index) => index === position ? { ...condition, ...patch } : condition))
   return <div className="grid gap-2">
     {conditions.length > 1 && <Segmented label="Combinaison" size="sm" value={match} onChange={(value) => set(conditions, value)} options={[{ value: "toutes", label: "Toutes vraies" }, { value: "une", label: "Une suffit" }]} />}
     {conditions.map((condition, position) => {
-      const operator = viewOperators.find((candidate) => candidate.value === condition.operator)
+      const operator = filterOperators.find((candidate) => candidate.value === condition.operator)
       const listId = `conditions-${position}-${condition.column}`
       return <div key={position} className="grid gap-1 rounded-lg border bg-background/50 p-1.5">
         <div className="flex items-center gap-1">
@@ -173,8 +173,8 @@ function WhereEditor({ where, columns, choices, rowPage, onChange }: { where?: V
           <button type="button" onClick={() => set(conditions.filter((_, index) => index !== position))} aria-label="Retirer la condition" className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"><X className="size-3.5" /></button>
         </div>
         <div className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)] gap-1">
-          <select aria-label="Comparaison" className={`${fieldClass} h-7 text-xs`} value={condition.operator} onChange={(event) => change(position, { operator: event.target.value as ViewCondition["operator"] })}>
-            {viewOperators.map((candidate) => <option key={candidate.value} value={candidate.value}>{candidate.label}</option>)}
+          <select aria-label="Comparaison" className={`${fieldClass} h-7 text-xs`} value={condition.operator} onChange={(event) => change(position, { operator: event.target.value as FilterCondition["operator"] })}>
+            {filterOperators.map((candidate) => <option key={candidate.value} value={candidate.value}>{candidate.label}</option>)}
           </select>
           {operator?.needsValue ? <>
             <input aria-label="Valeur" list={choices[condition.column]?.length ? listId : undefined} className={`${fieldClass} h-7 text-xs`} value={condition.value} placeholder={rowPage ? "Valeur ou {Colonne}" : "Valeur"} onChange={(event) => change(position, { value: event.target.value })} />
@@ -198,7 +198,7 @@ function ViewSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { 
   const variants = (tab?.viewList ?? []).filter((item) => item.kind === block.kind)
   const columns = tab?.columns ?? []
   // La forme propre part de celle de l'onglet (sinon de la forme par défaut) : rien n'est perdu à basculer.
-  const startFrom = (kind: ViewBlockKind): ViewLayout => ({ ...(tab?.forms?.[kind] ?? {}), kind })
+  const startFrom = (kind: ViewBlockKind): Presentation => ({ ...(tab?.forms?.[kind] ?? {}), kind })
   // Changer de présentation : un preset ou une forme propre ne passe pas d'une présentation à l'autre.
   const pickKind = (kind: ViewBlockKind) => onChange({ kind, layout: block.layout && isPresentationKind(kind) ? startFrom(kind) : undefined, presetId: undefined })
   const form = block.layout ? "own" : block.presetId ? `preset:${block.presetId}` : ""
@@ -234,14 +234,14 @@ function ViewSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { 
     {block.tab && presentation && <Field label="Forme" hint={<>Les versions de l’onglet (Modifier › {kindLabel} › Nouveau) et les presets apparaissent ici. <RefreshLink onClick={reload} loading={loading} /></>}>
       <select className={fieldClass} value={form} onChange={(event) => pickForm(event.target.value)}>
         <option value="">{configured.includes(block.kind) ? `Celle à l’étoile de l’onglet (Modifier › ${kindLabel})` : `Celle de l’onglet (${kindLabel} par défaut)`}</option>
-        {variants.length > 0 && <optgroup label="Les autres versions de l’onglet">{variants.map((item) => <option key={item.id} value={`preset:${VIEW_VARIANT_PREFIX}${item.id}`}>{item.name}</option>)}</optgroup>}
+        {variants.length > 0 && <optgroup label="Les autres versions de l’onglet">{variants.map((item) => <option key={item.id} value={`preset:${PRESENTATION_VARIANT_PREFIX}${item.id}`}>{item.name}</option>)}</optgroup>}
         {presets.some((preset) => !preset.builtin) && <optgroup label="Tes presets">{presets.filter((preset) => !preset.builtin).map((preset) => <option key={preset.id} value={`preset:${preset.id}`}>{preset.name}</option>)}</optgroup>}
         {presets.some((preset) => preset.builtin) && <optgroup label="Presets d’Eraser">{presets.filter((preset) => preset.builtin).map((preset) => <option key={preset.id} value={`preset:${preset.id}`}>{preset.name}</option>)}</optgroup>}
-        {block.presetId && !presets.some((preset) => preset.id === block.presetId) && !variants.some((item) => `${VIEW_VARIANT_PREFIX}${item.id}` === block.presetId) && details && <option value={`preset:${block.presetId}`}>{block.presetId.startsWith(VIEW_VARIANT_PREFIX) ? "Version supprimée (celle à l’étoile la remplace)" : "Preset supprimé (la forme de l’onglet le remplace)"}</option>}
+        {block.presetId && !presets.some((preset) => preset.id === block.presetId) && !variants.some((item) => `${PRESENTATION_VARIANT_PREFIX}${item.id}` === block.presetId) && details && <option value={`preset:${block.presetId}`}>{block.presetId.startsWith(PRESENTATION_VARIANT_PREFIX) ? "Version supprimée (celle à l’étoile la remplace)" : "Preset supprimé (la forme de l’onglet le remplace)"}</option>}
         <option value="own">Propre à cette page…</option>
       </select>
     </Field>}
-    {block.tab && presentation && block.layout && isPresentationKind(block.kind) && <ViewKindSettings kind={block.kind} layout={block.layout} columns={columns} cards={tab?.cardList ?? []} onChange={(layout) => onChange({ layout: { ...layout, kind: block.kind } })} />}
+    {block.tab && presentation && block.layout && isPresentationKind(block.kind) && <PresentationKindSettings kind={block.kind} layout={block.layout} columns={columns} cards={tab?.cardList ?? []} onChange={(layout) => onChange({ layout: { ...layout, kind: block.kind } })} />}
     {block.tab && <Field label="Seulement les lignes où…" hint={`Sans condition : toutes les lignes. « {Moi} » : le lecteur (« Joueur est {Moi} » : ses personnages ; « MJ est {Moi} » : ses campagnes).${rowOf?.index ? " « {Colonne} » prend la valeur de la ligne de la page, aussi dans un nom de colonne." : " Les colonnes masquées comptent aussi, sans jamais être montrées."}`}>
       <WhereEditor where={where} columns={columns} choices={tab?.choices ?? {}} rowPage={Boolean(rowOf?.index)} onChange={(next) => onChange({ where: next })} />
     </Field>}

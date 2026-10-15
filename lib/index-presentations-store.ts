@@ -7,7 +7,7 @@
  * Une entrée par onglet : portée « index-presentations », clé « index::onglet », valeur
  * `{ kanban: {...}, calendar: {...} }` en JSON. Revenir aux réglages d'office efface l'entrée.
  */
-import { cleanViewPreset, parseTabPresentations, type TabPresentations, type ViewLayout, type ViewPreset } from "@/lib/index-view-layouts"
+import { cleanPresentationPreset, parseTabPresentations, type TabPresentations, type Presentation, type PresentationPreset } from "@/lib/index-presentations"
 import { cleanColumnGroups, cleanStats, cleanStatsRecord, type StatColumnGroup, type StatDefinition } from "@/lib/index-stats"
 import { deleteSharedRecord, listSharedRecords, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
 
@@ -70,24 +70,24 @@ export async function saveIndexPresentations(index: string, changes: Array<{ tab
 
 const PRESET_SCOPE = "index-view-presets"
 
-export async function listViewPresets(): Promise<ViewPreset[]> {
+export async function listViewPresets(): Promise<PresentationPreset[]> {
   if (!sharedStoreAvailable()) return []
   return (await listSharedRecords(PRESET_SCOPE))
     .flatMap((record) => {
       let parsed: unknown = null
       try { parsed = JSON.parse(record.value) } catch { return [] }
-      const preset = cleanViewPreset({ ...(parsed && typeof parsed === "object" ? parsed : {}), id: record.key, updatedAt: record.updatedAt })
+      const preset = cleanPresentationPreset({ ...(parsed && typeof parsed === "object" ? parsed : {}), id: record.key, updatedAt: record.updatedAt })
       return preset ? [preset] : []
     })
     .sort((left, right) => left.name.localeCompare(right.name, "fr"))
 }
 
 /** Enregistre un preset de vue (nouveau, ou remplacé s'il a déjà cet `id`) ; rend son identifiant. */
-export async function saveViewPreset(input: { id?: string; name: string; layout: ViewLayout | null }) {
+export async function saveViewPreset(input: { id?: string; name: string; layout: Presentation | null }) {
   if (!sharedStoreAvailable()) throw new Error("INDEX_PRESENTATIONS_UNAVAILABLE")
   const name = input.name.replace(/\s+/g, " ").trim()
   if (!name || name.length > 60) throw new Error("INDEX_PRESET_NAME_INVALID")
-  const clean = cleanViewPreset({ name, layout: input.layout })
+  const clean = cleanPresentationPreset({ name, layout: input.layout })
   if (!clean) throw new Error("INDEX_PRESENTATIONS_INVALID")
   const id = input.id?.trim() && /^[A-Za-z0-9-]{4,40}$/.test(input.id.trim()) ? input.id.trim() : `VUE-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
   const value = JSON.stringify({ name: clean.name, layout: clean.layout })

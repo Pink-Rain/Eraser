@@ -18,8 +18,8 @@ import type { SiteRole } from "@/lib/auth-types"
 import { internalAppPath } from "@/lib/app-links"
 import { sanitizeRichText } from "@/lib/rich-text-sanitize"
 import { cleanReplaceMode, isReplaceablePath, type ReplaceMode } from "@/lib/page-replacements"
-import { cleanViewLayout, isPresentationKind, type ViewLayout } from "@/lib/index-view-layouts"
-import { parseViewConditions, viewOperators, type ViewCondition } from "@/lib/index-views"
+import { cleanPresentation, isPresentationKind, type Presentation } from "@/lib/index-presentations"
+import { parseFilterConditions, filterOperators, type FilterCondition } from "@/lib/index-windows"
 import { eraserModuleKeys, moduleSections, type EraserModuleKey } from "@/lib/eraser-modules"
 
 /* ---------- Les types ---------- */
@@ -67,7 +67,7 @@ export type ViewBlock = Common & {
    */
   viewId?: string
   /** La forme réglée pour cette page seulement (sinon : le preset choisi, ou celle de l'onglet). */
-  layout?: ViewLayout
+  layout?: Presentation
   /** Un preset de vue (« Kanban serré », un des tiens…) : sa forme, appliquée aux colonnes de l'onglet. */
   presetId?: string
   /** Les cartes : laquelle des cartes de l'onglet (sinon celle à l'étoile). */
@@ -85,7 +85,7 @@ export type ViewBlock = Common & {
   click?: string
 }
 /** Les conditions d'un bloc : « toutes » doivent être vraies, ou « une » suffit. */
-export type ViewWhere = { match: "toutes" | "une"; conditions: ViewCondition[] }
+export type ViewWhere = { match: "toutes" | "une"; conditions: FilterCondition[] }
 export type StatBlock = Common & { type: "stat"; index: string; statId: string; heading: string }
 /** Page de ligne : les valeurs de la ligne (toutes, ou les colonnes choisies). */
 /** « form » : disposées comme la fiche de l'index (Modifier › Formulaire). */
@@ -353,7 +353,7 @@ export function cleanClick(value: unknown) {
 export function cleanViewWhere(value: unknown): ViewWhere | undefined {
   if (!value || typeof value !== "object") return undefined
   const raw = value as Record<string, unknown>
-  const conditions = Array.isArray(raw.conditions) ? parseViewConditions(JSON.stringify(raw.conditions)) : []
+  const conditions = Array.isArray(raw.conditions) ? parseFilterConditions(JSON.stringify(raw.conditions)) : []
   return conditions.length ? { match: raw.match === "une" ? "une" : "toutes", conditions } : undefined
 }
 
@@ -363,7 +363,7 @@ export function cleanViewWhere(value: unknown): ViewWhere | undefined {
  */
 export function activeWhere(where: ViewWhere | undefined): ViewWhere | undefined {
   if (!where) return undefined
-  const conditions = where.conditions.filter((condition) => condition.column.trim() && (!viewOperators.find((operator) => operator.value === condition.operator)?.needsValue || condition.value.trim()))
+  const conditions = where.conditions.filter((condition) => condition.column.trim() && (!filterOperators.find((operator) => operator.value === condition.operator)?.needsValue || condition.value.trim()))
   return conditions.length ? { ...where, conditions } : undefined
 }
 
@@ -393,7 +393,7 @@ export function cleanBlock(input: unknown): PageBlock | null {
     case "view": {
       const limit = Number(raw.limit)
       // Une forme propre à la page : seulement une présentation (le tableau et les cartes n'en ont pas).
-      const layout = cleanViewLayout(raw.layout)
+      const layout = cleanPresentation(raw.layout)
       const ownLayout = layout && isPresentationKind(layout.kind) ? layout : undefined
       const viewId = text(raw.viewId, 60)
       const presetId = ownLayout ? "" : text(raw.presetId, 80)

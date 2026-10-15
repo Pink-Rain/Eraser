@@ -8,9 +8,9 @@ import { parseCardTemplate, parseTabCards } from "@/lib/index-cards"
 import { cleanTabLocks } from "@/lib/index-locks"
 import { listIndexLocks, saveIndexLocks } from "@/lib/index-locks-store"
 import { deleteViewPreset, listIndexPresentations, listIndexStatsRecord, listViewPresets, saveIndexPresentations, saveIndexStats, saveViewPreset } from "@/lib/index-presentations-store"
-import { cleanViewLayout, parseTabPresentations } from "@/lib/index-view-layouts"
+import { cleanPresentation, parseTabPresentations } from "@/lib/index-presentations"
 import type { PresetColumn } from "@/lib/index-presets"
-import type { ViewCondition } from "@/lib/index-views"
+import type { FilterCondition } from "@/lib/index-windows"
 import { authorizedAccount } from "@/lib/server-auth"
 
 const messages: Record<string, string> = {
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
   const account = await authorizedAccount(["admin", "mj"])
   if (!account) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
-    const body = (await request.json()) as { action?: string; id?: string; index?: string; name?: string; source?: string; match?: string; conditions?: ViewCondition[]; layout?: unknown; description?: string; columns?: PresetColumn[]; changes?: Array<{ tab?: unknown; form?: unknown; hover?: unknown }> }
+    const body = (await request.json()) as { action?: string; id?: string; index?: string; name?: string; source?: string; match?: string; conditions?: FilterCondition[]; layout?: unknown; description?: string; columns?: PresetColumn[]; changes?: Array<{ tab?: unknown; form?: unknown; hover?: unknown }> }
     if (body.action === "save-layouts") {
       // Mise en page de la fiche et du survol, onglet par onglet ; vide : l'affichage automatique.
       const changes = (Array.isArray(body.changes) ? body.changes : []).map((change) => ({ tab: String(change.tab ?? ""), form: parseIndexLayout(change.form), hover: parseIndexLayout(change.hover), forms: parseNamedLayouts((change as { forms?: unknown }).forms), hovers: parseNamedLayouts((change as { hovers?: unknown }).hovers) }))
@@ -117,7 +117,7 @@ export async function POST(request: Request) {
       try {
         const raw = body as { layout?: unknown }
         const id = body.action === "save-view-preset"
-          ? await saveViewPreset({ id: body.id, name: String(body.name ?? ""), layout: cleanViewLayout(raw.layout) ?? null })
+          ? await saveViewPreset({ id: body.id, name: String(body.name ?? ""), layout: cleanPresentation(raw.layout) ?? null })
           : (await deleteViewPreset(String(body.id ?? "")), "")
         return NextResponse.json({ id, viewPresets: await listViewPresets() })
       } catch (error) {

@@ -8,20 +8,20 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { ColumnPreset, PresetColumn } from "@/lib/index-presets"
-import { ALL_SOURCES, describeCondition, viewOperators, type IndexView, type ViewCondition } from "@/lib/index-views"
+import { ALL_SOURCES, describeCondition, filterOperators, type IndexWindow, type FilterCondition } from "@/lib/index-windows"
 import type { IndexLayout, LayoutKind, LayoutPreset, NamedLayout, TabLayouts } from "@/lib/index-layouts"
 import type { CardPreset, CardTemplate, TabCards } from "@/lib/index-cards"
 import type { TabLocks } from "@/lib/index-locks"
 import { forgetResolvedReferences } from "@/components/eraser/reference-store"
 import type { StatColumnGroup, StatDefinition } from "@/lib/index-stats"
-import { type TabPresentations, type ViewLayout, type ViewLayoutKind, type ViewPreset } from "@/lib/index-view-layouts"
+import { type TabPresentations, type Presentation, type AllPresentationKind, type PresentationPreset } from "@/lib/index-presentations"
 
-export const layoutIcons: Record<ViewLayoutKind, LucideIcon> = { table: Table2, cards: LayoutGrid, list: LayoutList, kanban: Columns3, "master-detail": PanelsLeftRight, calendar: CalendarDays, dashboard: Gauge, gallery: Images, timeline: GitCommitVertical, tree: ListTree, codex: BookOpen, stats: ChartColumnBig }
-
-
+export const layoutIcons: Record<AllPresentationKind, LucideIcon> = { table: Table2, cards: LayoutGrid, list: LayoutList, kanban: Columns3, "master-detail": PanelsLeftRight, calendar: CalendarDays, dashboard: Gauge, gallery: Images, timeline: GitCommitVertical, tree: ListTree, codex: BookOpen, stats: ChartColumnBig }
 
 
-type Settings = { views: IndexView[]; presets: ColumnPreset[]; layouts: Record<string, TabLayouts>; layoutPresets: LayoutPreset[]; cards: Record<string, TabCards>; cardPresets: CardPreset[]; presentations: Record<string, TabPresentations>; viewPresets: ViewPreset[]; stats: StatDefinition[]; statGroups: StatColumnGroup[]; locks: Record<string, TabLocks> }
+
+
+type Settings = { views: IndexWindow[]; presets: ColumnPreset[]; layouts: Record<string, TabLayouts>; layoutPresets: LayoutPreset[]; cards: Record<string, TabCards>; cardPresets: CardPreset[]; presentations: Record<string, TabPresentations>; viewPresets: PresentationPreset[]; stats: StatDefinition[]; statGroups: StatColumnGroup[]; locks: Record<string, TabLocks> }
 
 const emptySettings: Settings = { views: [], presets: [], layouts: {}, layoutPresets: [], cards: {}, cardPresets: [], presentations: {}, viewPresets: [], stats: [], statGroups: [], locks: {} }
 
@@ -60,7 +60,7 @@ export function useIndexSettings(index: string) {
       return next
     })
   }, [index])
-  const saveView = useCallback(async (view: Omit<IndexView, "id" | "position"> & { id?: string }) => {
+  const saveView = useCallback(async (view: Omit<IndexWindow, "id" | "position"> & { id?: string }) => {
     const payload = await postSettings({ action: "save-view", ...view })
     if (payload.views) update({ views: payload.views })
     return payload.id ?? ""
@@ -120,7 +120,7 @@ export function useIndexSettings(index: string) {
     if (payload.stats) update({ stats: payload.stats, ...(payload.statGroups ? { statGroups: payload.statGroups } : {}) })
   }, [index, update])
   /** Les presets de vues, communs à tous les index. */
-  const saveViewPreset = useCallback(async (preset: { id?: string; name: string; layout: ViewLayout }) => {
+  const saveViewPreset = useCallback(async (preset: { id?: string; name: string; layout: Presentation }) => {
     const payload = await postSettings({ action: "save-view-preset", ...preset })
     if (payload.viewPresets) update({ viewPresets: payload.viewPresets })
     return payload.id ?? ""
@@ -142,22 +142,22 @@ export function useIndexSettings(index: string) {
   return { ...settings, error, saveView, deleteView, savePreset, deletePreset, saveLayouts, saveLayoutPreset, deleteLayoutPreset, saveCards, saveCardPreset, deleteCardPreset, savePresentations, saveViewPreset, deleteViewPreset, saveStats, saveLocks }
 }
 
-const emptyCondition = (column: string): ViewCondition => ({ column, operator: "est", value: "" })
+const emptyCondition = (column: string): FilterCondition => ({ column, operator: "est", value: "" })
 
 /**
  * Créer ou modifier un onglet-fenêtre : son nom, d'où il prend ses lignes (tout l'index
  * ou un onglet) et ses conditions. Les lignes ne sont jamais copiées.
  */
-export function IndexViewDialog({ open, onOpenChange, index, view, sources, columnsOf, onSave, onDelete, allowStats = false }: {
+export function IndexWindowDialog({ open, onOpenChange, index, view, sources, columnsOf, onSave, onDelete, allowStats = false }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   index: string
-  view?: IndexView | null
+  view?: IndexWindow | null
   /** Les sources possibles : la valeur (« * » ou un onglet) et son libellé. */
   sources: Array<{ value: string; label: string }>
   /** Les colonnes proposées pour les conditions, selon la source choisie. */
   columnsOf: (source: string) => string[]
-  onSave: (view: Omit<IndexView, "id" | "position"> & { id?: string }) => Promise<string>
+  onSave: (view: Omit<IndexWindow, "id" | "position"> & { id?: string }) => Promise<string>
   onDelete?: (id: string) => Promise<void>
   /** Un nouvel onglet peut être un onglet stat (le moteur des index sait l'afficher). */
   allowStats?: boolean
@@ -191,9 +191,9 @@ function StatsTabDialog({ open, onOpenChange, index, view, onBack, onSave, onDel
   open: boolean
   onOpenChange: (open: boolean) => void
   index: string
-  view?: IndexView | null
+  view?: IndexWindow | null
   onBack?: () => void
-  onSave: (view: Omit<IndexView, "id" | "position"> & { id?: string }) => Promise<string>
+  onSave: (view: Omit<IndexWindow, "id" | "position"> & { id?: string }) => Promise<string>
   onDelete?: (id: string) => Promise<void>
 }) {
   const [name, setName] = useState(view?.name ?? "")
@@ -240,22 +240,22 @@ function WindowViewDialog({ open, onOpenChange, index, view, sources, columnsOf,
   open: boolean
   onOpenChange: (open: boolean) => void
   index: string
-  view?: IndexView | null
+  view?: IndexWindow | null
   sources: Array<{ value: string; label: string }>
   columnsOf: (source: string) => string[]
-  onSave: (view: Omit<IndexView, "id" | "position"> & { id?: string }) => Promise<string>
+  onSave: (view: Omit<IndexWindow, "id" | "position"> & { id?: string }) => Promise<string>
   onDelete?: (id: string) => Promise<void>
   onBack?: () => void
 }) {
   const [name, setName] = useState(view?.name ?? "")
   const [source, setSource] = useState(view?.source ?? ALL_SOURCES)
-  const [match, setMatch] = useState<IndexView["match"]>(view?.match ?? "toutes")
+  const [match, setMatch] = useState<IndexWindow["match"]>(view?.match ?? "toutes")
   const columns = columnsOf(source)
-  const [conditions, setConditions] = useState<ViewCondition[]>(() => view?.conditions.length ? view.conditions : [emptyCondition(columns.find((column) => /^type$/i.test(column)) ?? columns[0] ?? "")])
+  const [conditions, setConditions] = useState<FilterCondition[]>(() => view?.conditions.length ? view.conditions : [emptyCondition(columns.find((column) => /^type$/i.test(column)) ?? columns[0] ?? "")])
   const [pending, setPending] = useState("")
   const [error, setError] = useState("")
 
-  function change(position: number, changes: Partial<ViewCondition>) {
+  function change(position: number, changes: Partial<FilterCondition>) {
     setConditions((current) => current.map((condition, index) => index === position ? { ...condition, ...changes } : condition))
   }
 
@@ -302,14 +302,14 @@ function WindowViewDialog({ open, onOpenChange, index, view, sources, columnsOf,
           </NativeSelect>
         </div>
         {conditions.map((condition, position) => {
-          const operator = viewOperators.find((candidate) => candidate.value === condition.operator)
+          const operator = filterOperators.find((candidate) => candidate.value === condition.operator)
           return <div key={position} className="grid grid-cols-[minmax(0,1fr)_minmax(0,10rem)_minmax(0,1fr)_2rem] items-center gap-2">
             <NativeSelect value={condition.column} onChange={(event) => change(position, { column: event.target.value })} aria-label="Colonne" className="h-9 text-sm">
               {!columns.includes(condition.column) && condition.column && <NativeSelectOption value={condition.column}>{condition.column}</NativeSelectOption>}
               {columns.map((column) => <NativeSelectOption key={column} value={column}>{column}</NativeSelectOption>)}
             </NativeSelect>
-            <NativeSelect value={condition.operator} onChange={(event) => change(position, { operator: event.target.value as ViewCondition["operator"] })} aria-label="Comparaison" className="h-9 text-sm">
-              {viewOperators.map((candidate) => <NativeSelectOption key={candidate.value} value={candidate.value}>{candidate.label}</NativeSelectOption>)}
+            <NativeSelect value={condition.operator} onChange={(event) => change(position, { operator: event.target.value as FilterCondition["operator"] })} aria-label="Comparaison" className="h-9 text-sm">
+              {filterOperators.map((candidate) => <NativeSelectOption key={candidate.value} value={candidate.value}>{candidate.label}</NativeSelectOption>)}
             </NativeSelect>
             {operator?.needsValue ? <Input value={condition.value} onChange={(event) => change(position, { value: event.target.value })} placeholder="Valeur" aria-label="Valeur" className="h-9" /> : <span />}
             <button type="button" onClick={() => setConditions((current) => current.filter((_, index) => index !== position))} className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Retirer la condition"><X className="size-3.5" /></button>
