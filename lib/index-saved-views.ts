@@ -50,6 +50,8 @@ export type SavedView = {
   click?: string
   /** Onglet stat : les statistiques qu'il gardait avant l'alpha 197, toujours montrées avec celles de l'index. */
   stats?: StatDefinition[]
+  /** Onglet stat : les statistiques qu'il montre (identifiants, dans l'ordre de l'index) ; absent : toutes les épinglées. */
+  statIds?: string[]
   position: number
   /** Prévue par Eraser (définie dans le code, jamais écrite) : elle ne se modifie ni ne se supprime. */
   builtin?: boolean
@@ -116,6 +118,9 @@ export function cleanSavedView(input: unknown): SavedView | null {
   if (click) view.click = click
   const stats = kind === "stats" ? cleanStats(raw.stats) : []
   if (stats.length) view.stats = stats
+  // Les identifiants des statistiques (même règle que `cleanStat`), 24 au plus comme les statistiques d'un index.
+  const statIds = kind === "stats" && Array.isArray(raw.statIds) ? [...new Set(raw.statIds.filter((entry): entry is string => typeof entry === "string" && /^[A-Za-z0-9_-]{1,24}$/.test(entry)))].slice(0, 24) : []
+  if (statIds.length) view.statIds = statIds
   if (raw.builtin === true) view.builtin = true
   return view
 }

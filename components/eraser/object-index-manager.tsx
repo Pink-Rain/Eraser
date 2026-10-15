@@ -4,7 +4,7 @@ import dynamic from "next/dynamic"
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useRememberedSearch } from "@/hooks/use-remembered-search"
 import { usePathname, useRouter } from "next/navigation"
-import { ArrowRightLeft, CircleHelp, Coins, FileText, Filter, LoaderCircle, Pencil, Plus, RefreshCw, Search, Send, Settings2 } from "lucide-react"
+import { ArrowRightLeft, BookmarkPlus, CircleHelp, Coins, FileText, Filter, LoaderCircle, Pencil, Plus, RefreshCw, Search, Send, Settings2 } from "lucide-react"
 
 import { usePersistentState } from "@/hooks/use-persistent-state"
 import { chooseCampaign, copyToClipboard, DrawRowButton, rowCard, sendToCampaignChat, useChoiceDialog, useIndexNotices } from "@/components/eraser/index-action-ui"
@@ -19,7 +19,8 @@ import type { EditorMode } from "@/components/eraser/index-editor"
 import { SavedViewDialog, savedViewMark, useIndexSettings } from "@/components/eraser/index-windows"
 import { IndexCardGrid, IndexDisplayControls, NoCardsYet, isCardChoice, isIndexDisplay, type CardRowSource, type IndexDisplay } from "@/components/eraser/index-card"
 import { pickCard, tabCardsOf } from "@/lib/index-cards"
-import { ObjectViewGrid, specIn } from "@/components/eraser/object-view-grid"
+import { isValidGridSort, ObjectViewGrid, objectViewGridKey, objectViewSortKey, specIn } from "@/components/eraser/object-view-grid"
+import { isGridFilters, type GridFilters } from "@/components/eraser/sheet-grid-filter"
 import { IndexStats, TAB_PSEUDO } from "@/components/eraser/index-stats"
 import { ObjectSendDialog } from "@/components/eraser/object-send-dialog"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -42,9 +43,9 @@ import { isBuiltinWorldIndexKey, worldIndexDefinitions } from "@/lib/world-index
 import { numberCorrection } from "@/lib/index-numbers"
 import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
 import { findEntry, isTrashedEntry, objectHeaderIndex, type IndexEditorModel, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
-import { ALL_SOURCES, windowIdOfSelectKey, windowSelectKey } from "@/lib/index-windows"
+import { ALL_SOURCES, windowIdOfSelectKey, windowSelectKey, type FilterCondition } from "@/lib/index-windows"
 import { builtinPresentationPresets, type Presentation } from "@/lib/index-presentations"
-import { filterWindowOf, resolveSavedViewPresentation, savedViewFromWindow, type SavedView } from "@/lib/index-saved-views"
+import { filterFromGridFilters, filterWindowOf, resolveSavedViewPresentation, savedViewFromWindow, type SavedView } from "@/lib/index-saved-views"
 import { formOf, layoutPlaces, tabLayout } from "@/lib/index-layouts"
 import { tabLayoutsOf } from "@/lib/index-layout-defaults"
 import { headerOccurrence, objectIndexRowRef } from "@/lib/object-index-refs"
@@ -432,6 +433,41 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   // La vue en cartes : celles du tableau affiché (index « objects », onglet du tableau).
   const tabCards = selected ? tabCardsOf(settings.cards, "objects", selected.tabName) : null
   const shownCard = tabCards ? pickCard(tabCards, cardChoice) : null
+  // « Enregistrer comme vue » : ce tableau (ou cette vue), son affichage, le tri et les filtres de
+  // chacun dans le tableau (gardés sur la machine), pour tout le monde.
+  const gridKey = activeView ? objectViewGridKey(activeView.id) : selected ? `eraser:object-index:grid:${selected.fileId}:${selected.sheetId}` : ""
+  const [gridFilters] = usePersistentState<GridFilters>(`${gridKey}:filters`, {}, isGridFilters)
+  const [viewGridSort] = usePersistentState<SheetGridSort>(objectViewSortKey(activeView?.id ?? ""), null, isValidGridSort)
+  const saveHereAsView = useCallback(() => {
+    if (!selected) return
+    // En tableau, les colonnes se désignent par leur place ; dans une vue, par leur nom. « __… » : propres à la page.
+    const headerOfKey = (key: string) => key.startsWith("__") ? undefined : activeView ? key : selected.headers[Number(key)]?.trim() || undefined
+    const grid = filterFromGridFilters(gridFilters, headerOfKey)
+    const skipped = [...grid.skipped]
+    let match: "toutes" | "une" = activeView?.filter?.match ?? "toutes"
+    let conditions: FilterCondition[] = [...(activeView?.filter?.conditions ?? [])]
+    if (grid.filter) {
+      if (match === "une" && conditions.length > 1) skipped.push("tes filtres du tableau (la vue demande « au moins une condition »)")
+      else { conditions = [...conditions, ...grid.filter.conditions]; match = "toutes" }
+    }
+    const kind = activeView && activeView.kind !== "table" ? activeView.kind : !activeView && display === "cards" ? "cards" : "table"
+    const current = activeView ? viewGridSort : sort
+    const header = current ? headerOfKey(current.column) : undefined
+    const gridSort = current && header ? { column: header, desc: current.direction === "desc" } : undefined
+    if (current && !gridSort) skipped.push("le tri par une colonne propre à la page")
+    const cardId = activeView ? activeView.cardId : cardChoice || undefined
+    const draft: Partial<SavedView> = {
+      name: activeView ? `${activeView.name} (copie)` : tableLabel(selected),
+      source: activeView ? activeView.source : tableKey(selected),
+      kind,
+      ...(activeView?.shape ? { shape: activeView.shape } : {}),
+      ...(kind === "cards" && cardId ? { cardId } : {}),
+      ...(conditions.length ? { filter: { match, conditions: conditions.slice(0, 20) } } : {}),
+      ...(gridSort ? { sort: gridSort } : activeView?.sort ? { sort: activeView.sort } : {}),
+    }
+    setViewDialog({ mode: "new", draft, notice: skipped.length ? `Pas repris dans la vue : ${skipped.join(", ")}.` : undefined })
+  }, [activeView, cardChoice, display, gridFilters, selected, sort, tableLabel, viewGridSort])
+
   const cardRow = useCallback((rowKey: string): CardRowSource => ({
     value: (header) => { const index = columnOfHeader(header); return index >= 0 ? valueOf(rowKey, String(index)) : "" },
     spec: (header) => { const index = columnOfHeader(header); return index >= 0 ? specs[index] : undefined },
@@ -717,6 +753,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
           {selected && !activeView && display === "table" && <FullscreenButton fullscreen={fullscreen.fullscreen} onToggle={fullscreen.toggle} />}
           <ToolbarIconButton label="Actualiser : relire Google Sheets" onClick={() => void refresh()} disabled={busy}>{pending === "refresh" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}</ToolbarIconButton>
           {priceCorrections.length > 0 && <Button type="button" variant="outline" onClick={() => void correctPrices()} disabled={busy} title="Les pièces d’argent (PA) et de bronze (PB) n’existent pas : ces prix sont réécrits en pièces de cuivre (PC).">{pending === "prices" ? <LoaderCircle className="animate-spin" /> : <Coins />}Corriger {priceCorrections.length} prix</Button>}
+          {selected && activeView?.kind !== "stats" && <ToolbarIconButton label="Enregistrer comme vue : ce tableau, son affichage, ton tri et tes filtres du tableau, pour tout le monde" onClick={saveHereAsView} disabled={busy}><BookmarkPlus /></ToolbarIconButton>}
           <ToolbarIconButton label="Nouvelle vue : des items choisis, dans un ordre, sous une forme (tableau, cartes, liste, kanban…) ou un onglet stat" onClick={() => setViewDialog({ mode: "new" })} disabled={!tables.length || busy}><Filter /></ToolbarIconButton>
           {selected && !activeView && <DrawRowButton
             rows={displayedRows}
@@ -773,15 +810,15 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
       />}
 
       {settings.savedViewsUnavailable && <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">Les vues enregistrées n’ont pas pu être lues sur le serveur partagé d’Eraser : seuls les onglets-fenêtres de la feuille sont montrés, et une vue ne peut pas être enregistrée pour l’instant.</p>}
-      {activeView && activeView.kind === "stats" ? <IndexStats {...statsProps} pinnedOnly canEdit={!busy} onManage={() => void openEditor("stats")} />
-        : activeView ? <ObjectViewGrid view={filterWindowOf(activeView)} tables={tables} schemas={schemas} disabled={busy} layout={activeLayout} cards={settings.cards} onEdited={() => { editedInView.current = true }} /> : selected && display === "cards" ? (shownCard
+      {activeView && activeView.kind === "stats" ? <IndexStats key={activeView.id} {...statsProps} statIds={activeView.statIds} pinnedOnly canEdit={!busy} onManage={() => void openEditor("stats")} />
+        : activeView ? <ObjectViewGrid key={activeView.id} view={filterWindowOf(activeView)} sortDefault={activeView.sort} tables={tables} schemas={schemas} disabled={busy} layout={activeLayout} cards={settings.cards} onEdited={() => { editedInView.current = true }} /> : selected && display === "cards" ? (shownCard
         ? <IndexCardGrid card={shownCard} rows={displayedRows} rowSource={cardRow} onOpen={setDetails} hrefOf={rowHref} empty={selected.rows.length ? "Aucune ligne ne correspond à la recherche." : "Ce tableau est vide. Ajoute son premier item."} />
         : <NoCardsYet tabName={selected.tabName} onCreate={() => void openEditor("cards")} />
       ) : selected ? (
         <SheetGrid
           fullscreen={fullscreen.fullscreen}
           onExitFullscreen={fullscreen.exit}
-          layoutKey={`eraser:object-index:grid:${selected.fileId}:${selected.sheetId}`}
+          layoutKey={gridKey}
           columns={columns}
           rows={displayedRows}
           valueOf={valueOf}
@@ -840,6 +877,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         allowStats
         view={viewDialog.mode === "edit" ? activeView : null}
         usedBy={viewDialog.mode === "edit" && activeView ? settings.savedViewPages[activeView.id] : undefined}
+        stats={indexStats}
         draft={viewDialog.draft}
         notice={viewDialog.notice}
         sources={[{ value: ALL_SOURCES, label: "Tous les index d’items" }, ...tables.map((table) => ({ value: tableKey(table), label: tableLabel(table) }))]}

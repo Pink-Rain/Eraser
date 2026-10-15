@@ -195,7 +195,7 @@ export function savedViewMark(kind: AllPresentationKind) {
  * `draft` pré-remplit une vue nouvelle (« Enregistrer comme vue »), `notice` dit ce qui n'a pas
  * pu en être repris, `usedBy` les pages qui montrent la vue (prévenues avant de la changer).
  */
-export function SavedViewDialog({ open, onOpenChange, index, view, draft, notice, usedBy = [], sources, columnsOf, tabOf, presentations, presets, cards, cardsIndex, nextPosition, allowStats = false, onSave, onDelete }: {
+export function SavedViewDialog({ open, onOpenChange, index, view, draft, notice, usedBy = [], stats = [], sources, columnsOf, tabOf, presentations, presets, cards, cardsIndex, nextPosition, allowStats = false, onSave, onDelete }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   index: string
@@ -203,6 +203,8 @@ export function SavedViewDialog({ open, onOpenChange, index, view, draft, notice
   draft?: Partial<SavedView> | null
   notice?: string
   usedBy?: SavedViewPage[]
+  /** Les statistiques de l'index : un onglet stat en choisit (sinon il montre les épinglées). */
+  stats?: StatDefinition[]
   /** Les sources possibles : la valeur (« * » ou un onglet) et son libellé. */
   sources: Array<{ value: string; label: string }>
   /** Les colonnes proposées pour les conditions et le tri, selon la source choisie. */
@@ -222,6 +224,8 @@ export function SavedViewDialog({ open, onOpenChange, index, view, draft, notice
   const [name, setName] = useState(start?.name ?? "")
   const [source, setSource] = useState(start?.source ?? ALL_SOURCES)
   const [kind, setKind] = useState<AllPresentationKind>(start?.kind ?? "table")
+  // Onglet stat : `null` montre toutes les épinglées (comme avant) ; une liste, seulement celles-là.
+  const [statIds, setStatIds] = useState<string[] | null>(start?.statIds ?? null)
   const [shape, setShape] = useState<SavedView["shape"]>(start?.shape)
   const [cardId, setCardId] = useState(start?.cardId ?? "")
   const [match, setMatch] = useState<"toutes" | "une">(start?.filter?.match ?? "toutes")
@@ -274,6 +278,7 @@ export function SavedViewDialog({ open, onOpenChange, index, view, draft, notice
         ...(kind !== "stats" && sortColumn ? { sort: { column: sortColumn, desc: sortDesc } } : {}),
         ...(view?.click ? { click: view.click } : {}),
         ...(kind === "stats" && view?.stats?.length ? { stats: view.stats } : {}),
+        ...(kind === "stats" && statIds?.length ? { statIds: stats.filter((stat) => statIds.includes(stat.id)).map((stat) => stat.id) } : {}),
         position: view?.position ?? nextPosition,
       }
       await onSave(next)
@@ -337,7 +342,20 @@ export function SavedViewDialog({ open, onOpenChange, index, view, draft, notice
         </NativeSelect>
       </label>}
       {kind === "stats"
-        ? <p className="rounded-xl border bg-card/60 p-3 text-xs text-muted-foreground">Un onglet stat montre les statistiques épinglées de l’index ; elles se créent et s’épinglent dans « Modifier › Stats ».</p>
+        ? <div className="grid gap-2 rounded-xl border bg-card/60 p-3 text-sm">
+          <p className="text-xs text-muted-foreground">Les statistiques se créent et s’épinglent dans « Modifier › Stats ».</p>
+          {stats.length > 0 && <>
+            <label className="flex items-center gap-2"><input type="radio" name="stat-choice" className="accent-primary" checked={statIds === null} onChange={() => setStatIds(null)} />Toutes les statistiques épinglées (suit « Modifier › Stats »)</label>
+            <label className="flex items-center gap-2"><input type="radio" name="stat-choice" className="accent-primary" checked={statIds !== null} onChange={() => setStatIds(statIds ?? stats.filter((stat) => stat.pinned).map((stat) => stat.id))} />Seulement celles-ci</label>
+            {statIds !== null && <div className="grid gap-1 pl-6 sm:grid-cols-2">
+              {[...stats].sort((left, right) => Number(Boolean(right.pinned)) - Number(Boolean(left.pinned))).map((stat) => <label key={stat.id} className="flex min-w-0 items-center gap-2 text-xs">
+                <input type="checkbox" className="accent-primary" checked={statIds.includes(stat.id)} onChange={(event) => setStatIds(event.target.checked ? [...statIds, stat.id] : statIds.filter((id) => id !== stat.id))} />
+                <span className="truncate">{stat.pinned ? "📌 " : ""}{stat.title || "Sans titre"}</span>
+              </label>)}
+            </div>}
+            {statIds !== null && !statIds.length && <p className="pl-6 text-xs text-amber-700 dark:text-amber-300">Aucune cochée : l’onglet montrera toutes les épinglées.</p>}
+          </>}
+        </div>
         : <>
           <div className="grid gap-2 rounded-xl border bg-card/60 p-3">
             <div className="flex flex-wrap items-center gap-2 text-sm">

@@ -17,12 +17,25 @@ import { findEntry, isTrashedEntry, objectHeaderIndex, type SchemaEntry } from "
 import { ALL_SOURCES, matchesFilter, type IndexWindow } from "@/lib/index-windows"
 import { DEFAULT_ITEM_CARD, isPresentationKind, type Presentation } from "@/lib/index-presentations"
 import { objectIndexCellRef } from "@/lib/object-index-refs"
+import { usePersistentState } from "@/hooks/use-persistent-state"
 
 export function objectTableKey(table: ObjectIndexTable) {
   return `${table.fileId}:${table.sheetId}`
 }
 
 const ORIGIN = "__origine"
+
+/** Le tri de chacun dans le tableau d'une vue (gardé sur la machine) : la page le lit pour « Enregistrer comme vue ». */
+export const objectViewSortKey = (viewId: string) => `eraser:object-index:fenetre:${viewId}:sort`
+/** Les filtres de chacun dans le tableau d'une vue (ceux de la grille, sous sa clé de mise en page). */
+export const objectViewGridKey = (viewId: string) => `eraser:object-index:fenetre:${viewId}`
+
+export function isValidGridSort(value: unknown): value is SheetGridSort {
+  if (value === null) return true
+  if (!value || typeof value !== "object") return false
+  const candidate = value as { column?: unknown; direction?: unknown }
+  return typeof candidate.column === "string" && (candidate.direction === "asc" || candidate.direction === "desc")
+}
 const originSpec: IndexColumnSpec = { kind: "rich" }
 
 export function specIn(table: ObjectIndexTable, header: string, schemas: Record<string, SchemaEntry[]>) {
@@ -37,17 +50,23 @@ export function specIn(table: ObjectIndexTable, header: string, schemas: Record<
  * d'origine ; rien n'est copié. Ajouter, supprimer ou les boutons se font depuis
  * l'onglet d'origine de la ligne.
  */
-export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited, layout, cards }: { view: IndexWindow; tables: ObjectIndexTable[]; schemas: Record<string, SchemaEntry[]>; disabled: boolean; onEdited?: () => void
+export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited, layout, cards, sortDefault }: { view: IndexWindow; tables: ObjectIndexTable[]; schemas: Record<string, SchemaEntry[]>; disabled: boolean; onEdited?: () => void
   /** La forme de la vue (liste, kanban…, ou les cartes) ; absente : le tableau. */
   layout?: Presentation | null
   /** Les cartes des onglets (Modifier › Cartes) : vue Cartes, et éléments dessinés en cartes. */
-  cards?: Record<string, TabCards> }) {
+  cards?: Record<string, TabCards>
+  /** Le tri de la vue : sous une autre forme que le tableau, le seul ; en tableau, celui de chacun l'emporte. */
+  sortDefault?: { column: string; desc: boolean } }) {
   const sources = useMemo(() => view.source === ALL_SOURCES ? tables : tables.filter((table) => objectTableKey(table) === view.source), [tables, view.source])
   const byKey = useMemo(() => new Map(sources.map((table) => [objectTableKey(table), table])), [sources])
   // Un seul classeur (index regroupés) : la colonne « Tableau » montre l'onglet seul.
   const originOf = useCallback((table: ObjectIndexTable) => tables.every((candidate) => candidate.fileId === table.fileId) ? table.tabName : `${table.fileName} · ${table.tabName}`, [tables])
   const [query, setQuery] = useState("")
-  const [sort, setSort] = useState<SheetGridSort>(null)
+  const [sort, setSort] = usePersistentState<SheetGridSort>(objectViewSortKey(view.id), null, isValidGridSort)
+  const rowSort = useMemo((): SheetGridSort => {
+    const own: SheetGridSort = sortDefault ? { column: sortDefault.column, direction: sortDefault.desc ? "desc" : "asc" } : null
+    return layout ? own : sort ?? own
+  }, [layout, sort, sortDefault])
   const [saving, setSaving] = useState(0)
   const [error, setError] = useState("")
   const localEdits = useRef<Record<string, string>>({})
@@ -109,17 +128,17 @@ export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited, layo
       .filter((row) => matchesFilter(view, (header) => { const column = objectHeaderIndex(table.headers, header); return column >= 0 ? row.values[column] ?? "" : "" }))
       .filter((row) => !folded || row.values.some((value) => foldName(value).includes(folded)))
       .map((row) => ({ key: `${objectTableKey(table)}|${row.rowNumber}`, rowNumber: row.rowNumber, table, row })))
-    if (!sort) return matched.map(({ key, rowNumber }) => ({ key, rowNumber }))
+    if (!rowSort) return matched.map(({ key, rowNumber }) => ({ key, rowNumber }))
     // Ce que montre la case (prix sur sa valeur, texte sans mise en forme), vides en bas.
     const keyOf = (entry: (typeof matched)[number]) => {
-      const column = objectHeaderIndex(entry.table.headers, sort.column)
-      if (sort.column === ORIGIN) return indexSortKey(originOf(entry.table))
-      const spec = specIn(entry.table, sort.column, schemas)
+      const column = objectHeaderIndex(entry.table.headers, rowSort.column)
+      if (rowSort.column === ORIGIN) return indexSortKey(originOf(entry.table))
+      const spec = specIn(entry.table, rowSort.column, schemas)
       const value = column < 0 ? "" : spec && isRichSpec(spec) ? entry.row.html[column] ?? "" : entry.row.values[column] ?? ""
       return indexSortKey(value, spec ?? undefined, { resolveReference: shownReferenceText })
     }
-    return sortByIndexKey(matched, keyOf, sort.direction === "asc" ? 1 : -1).map(({ key, rowNumber }) => ({ key, rowNumber }))
-  }, [originOf, query, schemas, sort, sources, view])
+    return sortByIndexKey(matched, keyOf, rowSort.direction === "asc" ? 1 : -1).map(({ key, rowNumber }) => ({ key, rowNumber }))
+  }, [originOf, query, rowSort, schemas, sources, view])
 
   /* eslint-disable react-hooks/refs -- les cellules ne lisent les modifications en cours qu'en se dessinant, comme dans les autres index */
   const columns = useMemo<SheetGridColumn[]>(() => {
@@ -171,7 +190,7 @@ export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited, layo
       onOpen={() => undefined}
       empty="Aucun item ne remplit les conditions de cette vue."
     /> : <SheetGrid
-      layoutKey={`eraser:object-index:fenetre:${view.id}`}
+      layoutKey={objectViewGridKey(view.id)}
       columns={columns}
       rows={rows}
       valueOf={rawOf}

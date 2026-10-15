@@ -32,6 +32,11 @@ export type IndexStatsProps = {
   pinnedOnly?: boolean
   /** Avec `pinnedOnly` : une seule statistique, sur toute la largeur (bloc « Stat épinglée » d'une page). */
   single?: boolean
+  /**
+   * Avec `pinnedOnly` : les statistiques que montre cet onglet stat (dans l'ordre de l'index),
+   * épinglées ou non ; absent : toutes les épinglées. Les statistiques restent toutes enregistrées.
+   */
+  statIds?: string[]
   /** L'onglet stat : ouvrir « Modifier › Stats ». */
   onManage?: () => void
   /** Les lignes de l'index (recherche comprise), tous onglets de données. */
@@ -353,7 +358,7 @@ const widthClass: Record<StatWidth, string> = {
   full: "md:col-span-6",
 }
 
-type Arrange = { pending: boolean; first: boolean; last: boolean; onWidth: (width: StatWidth | null) => void; onRows: (rows: StatDefinition["rows"] | null) => void; onMove: (step: -1 | 1) => void; onUnpin: () => void }
+type Arrange = { pending: boolean; first: boolean; last: boolean; onWidth: (width: StatWidth | null) => void; onRows: (rows: StatDefinition["rows"] | null) => void; onMove?: (step: -1 | 1) => void; onUnpin?: () => void }
 
 const seg = "rounded-md px-2 py-0.5 text-xs aria-pressed:bg-card aria-pressed:font-semibold aria-pressed:text-foreground aria-pressed:shadow-[0_0_0_1px_var(--border)] text-muted-foreground hover:text-foreground disabled:opacity-50"
 
@@ -369,9 +374,9 @@ function ArrangeBar({ stat, arrange }: { stat: StatDefinition; arrange: Arrange 
       {([[null, "Lignes"], ["folded", "Repliées"], ["hidden", "Sans lignes"]] as const).map(([value, label]) => <button key={label} type="button" className={seg} aria-pressed={(stat.rows ?? null) === value} disabled={arrange.pending} onClick={() => arrange.onRows(value)}>{label}</button>)}
     </span>
     <span className="ml-auto inline-flex items-center gap-0.5">
-      <button type="button" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" disabled={arrange.pending || arrange.first} onClick={() => arrange.onMove(-1)} aria-label="Avancer" title="Avancer"><ChevronLeft className="size-4" /></button>
-      <button type="button" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" disabled={arrange.pending || arrange.last} onClick={() => arrange.onMove(1)} aria-label="Reculer" title="Reculer"><ChevronRight className="size-4" /></button>
-      <button type="button" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" disabled={arrange.pending} onClick={arrange.onUnpin} aria-label="Ne plus épingler" title="Ne plus épingler"><PinOff className="size-4" /></button>
+      {arrange.onMove && <button type="button" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" disabled={arrange.pending || arrange.first} onClick={() => arrange.onMove?.(-1)} aria-label="Avancer" title="Avancer"><ChevronLeft className="size-4" /></button>}
+      {arrange.onMove && <button type="button" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" disabled={arrange.pending || arrange.last} onClick={() => arrange.onMove?.(1)} aria-label="Reculer" title="Reculer"><ChevronRight className="size-4" /></button>}
+      {arrange.onUnpin && <button type="button" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" disabled={arrange.pending} onClick={arrange.onUnpin} aria-label="Ne plus épingler" title="Ne plus épingler"><PinOff className="size-4" /></button>}
     </span>
   </div>
 }
@@ -401,7 +406,7 @@ function PinnedStat({ stat, data, expanded, onToggle, tabs, tabOf, nameOf, onOpe
   </article>
 }
 
-export function IndexStats({ stats, groups: groupsProp, pinnedOnly = false, single = false, onManage, rows, columns, tabs, valueOf, tabOf, nameOf, optionsOf, separatorOf, onOpen, canEdit, onSave }: IndexStatsProps) {
+export function IndexStats({ stats, groups: groupsProp, pinnedOnly = false, single = false, statIds, onManage, rows, columns, tabs, valueOf, tabOf, nameOf, optionsOf, separatorOf, onOpen, canEdit, onSave }: IndexStatsProps) {
   // Un groupe créé ou modifié se voit tout de suite, avant même la réponse du serveur.
   const [pendingGroups, setPendingGroups] = useState<StatColumnGroup[] | null>(null)
   const groups = useMemo(() => pendingGroups ?? groupsProp ?? [], [groupsProp, pendingGroups])
@@ -608,7 +613,9 @@ export function IndexStats({ stats, groups: groupsProp, pinnedOnly = false, sing
   const pick: PickRows = (label, list, id) => setSelection({ label, rows: list, id, draft: draftKey })
   const searchKey = libQuery.trim().toLocaleLowerCase("fr")
   const listed = ordered.filter((stat) => (libFilter === "all" || stat.pinned) && (!searchKey || `${stat.title} ${autoStatTitle(stat, labelOf)}`.toLocaleLowerCase("fr").includes(searchKey)))
-  const pinned = ordered.filter((stat) => stat.pinned)
+  // Un onglet stat qui choisit ses statistiques : celles-là ; sinon toutes les épinglées.
+  const chosen = pinnedOnly && statIds?.length ? new Set(statIds) : null
+  const pinned = ordered.filter((stat) => chosen ? chosen.has(stat.id) : stat.pinned)
   const concerned = picked?.rows ?? unitRows(prepared.units)
   const usage = (group: StatColumnGroup) => stats.filter((stat) => JSON.stringify(stat).includes(`"${groupRef(group.id)}"`)).length
   const allowedForms = statForms.map((form) => ({ ...form, problem: formProblem(draft, form.value, context) }))
@@ -638,11 +645,11 @@ export function IndexStats({ stats, groups: groupsProp, pinnedOnly = false, sing
       {error && <p className="rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive" role="alert">{error}</p>}
       <section aria-label="Statistiques épinglées" className={`grid grid-cols-[minmax(0,1fr)] items-start gap-3 ${single ? "" : "md:grid-cols-6"}`}>
         {pinned.map((stat, index) => <PinnedStat key={stat.id} stat={stat} data={data} expanded={expanded} onToggle={onToggle} tabs={tabs} tabOf={tabOf} nameOf={nameOf} onOpen={onOpen} full={single}
-          arrange={arranging && canEdit && !single ? { pending, first: index === 0, last: index === pinned.length - 1, onWidth: (width) => void arrange(stat.id, { width }), onRows: (rows) => void arrange(stat.id, { rows }), onMove: (step) => void persist(movePinned(stats, stat.id, step), "Ordre enregistré."), onUnpin: () => void togglePin(stat.id) } : undefined} />)}
+          arrange={arranging && canEdit && !single ? { pending, first: index === 0, last: index === pinned.length - 1, onWidth: (width) => void arrange(stat.id, { width }), onRows: (rows) => void arrange(stat.id, { rows }), ...(chosen ? {} : { onMove: (step: -1 | 1) => void persist(movePinned(stats, stat.id, step), "Ordre enregistré."), onUnpin: () => void togglePin(stat.id) }) } : undefined} />)}
       </section>
       {toastView}
     </div>
-    : <div className="grid place-items-center gap-3 rounded-xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground"><p>Aucune statistique épinglée. Crée-les et épingle-les dans « Modifier › Stats ».</p>{manage}</div>
+    : <div className="grid place-items-center gap-3 rounded-xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground"><p>{chosen ? "Les statistiques choisies pour cet onglet n’existent plus. Choisis-en d’autres (crayon de l’onglet), ou crée-les dans « Modifier › Stats »." : "Aucune statistique épinglée. Crée-les et épingle-les dans « Modifier › Stats »."}</p>{manage}</div>
 
   return <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
     {pinned.length > 0 && <section aria-label="Statistiques épinglées" className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 xl:grid-cols-3">

@@ -1512,6 +1512,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
 
       {table && statsView ? <IndexStats
         key={statsView.id}
+        statIds={statsView.statIds}
         stats={indexStats}
         groups={settings.statGroups}
         separatorOf={statSeparatorOf}
@@ -1635,6 +1636,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         index={indexKey}
         view={viewDialog.mode === "edit" ? activeView : null}
         usedBy={viewDialog.mode === "edit" && activeView ? settings.savedViewPages[activeView.id] : undefined}
+        stats={indexStats}
         draft={viewDialog.draft}
         notice={viewDialog.notice}
         sources={[{ value: ALL_SOURCES, label: "Tous les onglets de l’index" }, ...tables.map((candidate) => ({ value: candidate.tabName, label: `L’onglet « ${candidate.tabName} »` }))]}

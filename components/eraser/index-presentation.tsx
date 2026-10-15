@@ -478,16 +478,19 @@ function KanbanLayout(props: PresentationProps) {
   }
   // Les colonnes : les choix de la liste dans leur ordre, puis les valeurs écrites, puis « Sans valeur ».
   const names = [...new Set([...options.map((option) => option.value), ...(layout.lanes ?? []).map((lane) => lane.value), ...rows.map(firstValue).filter(Boolean)])]
-  const lanes = [...names, ""].map((name) => {
+  const allLanes = [...names, ""].map((name) => {
     const own = settings(name)
     return { name, label: own?.label || name, color: own?.color ?? options.find((option) => option.value === name)?.color, icon: own?.icon ?? look.sectionIcon, limit: own?.limit, hidden: Boolean(own?.hidden), rows: rows.filter((row) => fold(firstValue(row)) === fold(name)) }
-  }).filter((lane) => !lane.hidden && (!layout.hideEmpty || lane.rows.length))
+  }).filter((lane) => !lane.hidden && (!layout.hideEmpty || lane.rows.length)).filter((lane) => lane.name || lane.rows.length)
   const width = layout.laneWidth === "narrow" ? "w-52" : layout.laneWidth === "wide" ? "w-80" : "w-64"
   const laneStyle = look.laneStyle ?? "plain"
   const accent = accentOf(look)
+  // Les couloirs (« Couloirs par… ») : une rangée de colonnes par valeur d'une autre colonne, les
+  // mêmes colonnes dans chaque couloir. Glisser une carte ne change que sa colonne, dans son couloir.
+  const swimlane = layout.groupBy && fold(layout.groupBy) !== fold(column) ? layout.groupBy : ""
   if (!column) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne du kanban dans les réglages de cette vue.</p>
-  return <div className="flex gap-3 overflow-x-auto pb-2">
-    {lanes.filter((lane) => lane.name || lane.rows.length).map((lane) => {
+  const board = (groupRows: string[], group: string) => { const inGroup = new Set(groupRows); return <div className="flex gap-3 overflow-x-auto pb-2">
+    {allLanes.map((all) => ({ ...all, rows: swimlane ? all.rows.filter((row) => inGroup.has(row)) : all.rows })).map((lane) => {
       const tint = lane.color ?? accent
       const closed = layout.laneCollapse && folded.has(lane.name)
       const laneLook: CSSProperties = laneStyle === "tinted" ? { backgroundColor: `color-mix(in srgb, ${tint} 9%, transparent)`, borderColor: `color-mix(in srgb, ${tint} 30%, var(--border))` } : {}
@@ -497,12 +500,14 @@ function KanbanLayout(props: PresentationProps) {
       const head = laneStyle === "header"
         ? <p className="flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-white" style={{ backgroundColor: tint }}><span className="flex items-center gap-1.5"><Glyph value={lane.icon} />{lane.label || "Sans valeur"}</span>{count}</p>
         : <p className="flex items-center justify-between gap-2 px-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground"><span className="flex items-center gap-1.5">{lane.color && !lane.icon && <span className="size-2.5 rounded-full" style={{ backgroundColor: lane.color }} />}<Glyph value={lane.icon} color={tint} />{lane.label || "Sans valeur"}</span>{count}</p>
+      const target = `${group}::${lane.name}`
+      const accepts = (row: string) => movable(row) && (!swimlane || inGroup.has(row))
       return <section key={lane.name || "*"}
-        onDragOver={(event) => { if (dragged && movable(dragged)) { event.preventDefault(); setOver(lane.name) } }}
-        onDragLeave={() => setOver((current) => current === lane.name ? null : current)}
-        onDrop={(event) => { event.preventDefault(); setOver(null); if (onCommit && dragged && movable(dragged) && fold(firstValue(dragged)) !== fold(lane.name)) onCommit(dragged, column, lane.name); setDragged("") }}
+        onDragOver={(event) => { if (dragged && accepts(dragged)) { event.preventDefault(); setOver(target) } }}
+        onDragLeave={() => setOver((current) => current === target ? null : current)}
+        onDrop={(event) => { event.preventDefault(); setOver(null); if (onCommit && dragged && accepts(dragged) && fold(firstValue(dragged)) !== fold(lane.name)) onCommit(dragged, column, lane.name); setDragged("") }}
         style={laneLook}
-        className={`flex ${closed ? "w-12" : width} shrink-0 flex-col ${gaps[look.density ?? "normal"]} overflow-hidden ${radii[look.radius ?? "md"]} border ${laneStyle === "plain" ? "bg-muted/30" : ""} ${laneStyle === "header" ? "bg-muted/20 pb-2" : "p-2"} transition-[width,colors] ${over === lane.name ? "ring-2 ring-primary" : ""}`}>
+        className={`flex ${closed ? "w-12" : width} shrink-0 flex-col ${gaps[look.density ?? "normal"]} overflow-hidden ${radii[look.radius ?? "md"]} border ${laneStyle === "plain" ? "bg-muted/30" : ""} ${laneStyle === "header" ? "bg-muted/20 pb-2" : "p-2"} transition-[width,colors] ${over === target ? "ring-2 ring-primary" : ""}`}>
         {layout.laneCollapse
           ? <button type="button" onClick={toggle} aria-expanded={!closed} className={`text-left ${closed ? "[writing-mode:vertical-rl] rotate-180 px-1 py-2" : ""}`} title={closed ? "Déplier la colonne" : "Replier la colonne"}>{closed ? <span className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">{lane.label || "Sans valeur"} · {lane.rows.length}</span> : head}</button>
           : head}
@@ -516,7 +521,11 @@ function KanbanLayout(props: PresentationProps) {
         </div>}
       </section>
     })}
-  </div>
+  </div> }
+  if (!swimlane) return board(rows, "")
+  const groupOptions = optionsOf?.(swimlane) ?? []
+  const groups = groupRowsBy(rows, (row) => valueOf(row, swimlane), groupOptions.map((option) => option.value))
+  return <div className="space-y-5">{groups.map((group) => <Section key={group.name || "*"} title={group.name} count={group.rows.length} collapsible={layout.collapsible} startCollapsed={layout.collapsed} hideCount={layout.hideCounts} color={groupOptions.find((option) => fold(option.value) === fold(group.name))?.color} accent={look.color}>{board(group.rows, group.name)}</Section>)}</div>
 }
 
 /* ---------- Maître-détail ---------- */
@@ -896,6 +905,13 @@ function GalleryLayout(props: PresentationProps) {
   const sizes = layout.gallerySizeColumn ? new Map(rows.map((row) => [row, cellNumber(plain(valueOf(row, layout.gallerySizeColumn!)))])) : null
   const sizeMax = sizes ? Math.max(1, ...[...sizes.values()].map((value) => value ?? 0)) : 1
   const widthOf = (row: string) => sizes ? 5 + Math.max(0, Math.min(1, (sizes.get(row) ?? 0) / sizeMax)) * (width - 5) : width
+  // Une carte ou un formulaire comme élément : chaque ligne s'affiche ainsi, rangée comme dans la vue « Cartes ».
+  const card = cardFor(props, { fill: true })
+  if (card) {
+    const cardTemplate = !layout.itemForm && layout.itemCard && rows[0] ? itemTemplateOf(props, rows[0]) : null
+    const cardGap = look.density === "compact" ? "gap-2" : look.density === "airy" ? "gap-5" : "gap-3"
+    return <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} render={(group) => <Paged rows={group} render={(shown) => <div className={`grid items-start ${cardGap}`} style={cardTemplate ? cardGridStyle(cardTemplate) : { gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${width}rem), 1fr))` }}>{shown.map((row) => <div key={row} className="min-w-0">{card(row) ?? <Item row={row} props={props} framed />}</div>)}</div>} />} />
+  }
   if (!layout.imageColumn) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne des images dans les réglages de cette vue.</p>
   const tile = (row: string) => {
     const src = rowImage(layout, row, valueOf)
@@ -1259,6 +1275,7 @@ function CodexLayout(props: PresentationProps) {
   const numberOf = new Map(ordered.map((row, index) => [row, index + 1]))
   const byName = useMemo(() => new Map(rows.map((row) => [fold(plain(nameOf(row))), row])), [nameOf, rows])
   const gaugeRatio = (row: string) => { const gauge = layout.gauge; if (!gauge) return null; const value = cellNumber(plain(valueOf(row, gauge.column))); if (value === null) return null; const max = gauge.maxColumn ? cellNumber(plain(valueOf(row, gauge.maxColumn))) : gauge.max ?? null; return Math.max(0, Math.min(1, max ? value / max : value / 100)) }
+  const card = cardFor(props, { fill: true })
   const article = (row: string) => {
     const color = rowColor(layout, row, valueOf, optionsOf)
     const src = rowImage(layout, row, valueOf)
@@ -1289,6 +1306,9 @@ function CodexLayout(props: PresentationProps) {
         <div className="flex items-center gap-2"><Button type="button" size="sm" variant="outline" onClick={() => setFlipped((current) => { const next = new Set(current); if (next.has(row)) next.delete(row); else next.add(row); return next })}>{back ? "Recto" : "Verso"}</Button>{!props.inert && <Button type="button" size="sm" variant="ghost" onClick={() => onOpen(row)}><ExternalLink />Ouvrir la fiche</Button>}</div>
       </div>
     }
+    // Une carte ou un formulaire comme élément : la fiche s'affiche ainsi (le sommaire la retrouve par son ancre).
+    const drawn = card?.(row)
+    if (drawn) return <div key={row} id={anchor(row)} className="scroll-mt-24">{drawn}</div>
     return <article key={row} id={anchor(row)} className={`scroll-mt-24 overflow-hidden ${style === "plain" ? "" : radii[look.radius ?? "lg"]} ${shell.className} ${frame.className}`} style={{ ...shell.style, ...frame.style }}>
       {banner && <CoverImage src={src} className={style === "sketch" ? "mx-auto mt-5 max-h-72 w-auto max-w-[90%] rotate-[-1deg] border-8 border-white object-contain shadow-md" : "aspect-[21/8] w-full border-b object-cover"} />}
       <div className={style === "plain" ? "" : look.density === "compact" ? "p-4" : look.density === "airy" ? "p-7" : "p-5"}>

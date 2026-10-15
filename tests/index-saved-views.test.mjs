@@ -191,3 +191,11 @@ test("les pages qui montrent une vue : version en cours et publiée, corbeille e
   assert.deepEqual(uses["vue-boss"].map((entry) => entry.id), ["a", "b"]);
   assert.ok(uses["vue-boss"][0].href);
 });
+
+test("un onglet stat choisit ses statistiques : identifiants gardés pour l'onglet stat seulement, absents = toutes les épinglées", () => {
+  const stat = saved.cleanSavedView({ id: "v-stats", index: "places", name: "Richesses", source: "*", kind: "stats", statIds: ["or", "or", "mauvais id !", 4, "pop"], position: 0 });
+  assert.deepEqual(stat.statIds, ["or", "pop"], "doublons, identifiants illisibles et autres types écartés");
+  assert.equal(saved.cleanSavedView({ id: "v2", index: "places", kind: "stats", statIds: [] }).statIds, undefined, "liste vide : toutes les épinglées");
+  assert.equal(saved.cleanSavedView({ id: "v3", index: "places", kind: "table", statIds: ["or"] }).statIds, undefined, "seulement pour un onglet stat");
+  assert.equal(saved.cleanSavedView({ id: "v4", index: "places", kind: "stats", statIds: Array.from({ length: 40 }, (_, at) => `s${at}`) }).statIds.length, 24);
+});

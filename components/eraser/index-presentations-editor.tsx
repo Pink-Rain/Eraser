@@ -428,6 +428,14 @@ function KanbanPages(ctx: Ctx): Page[] {
         </div>
         <span className={fieldLabel}>Icône d’office des colonnes<IconPick value={look.sectionIcon} onChange={(sectionIcon) => setLook({ sectionIcon })} disabled={disabled} /></span>
       </div>
+      {layout.kanbanColumn && <div className={settingsGroup}>
+        <p className={settingsTitle}><LayoutList className="size-3.5" />Couloirs</p>
+        <ColumnField label="Une rangée de colonnes par valeur de" value={layout.groupBy} columns={columns.filter((name) => name !== layout.kanbanColumn)} onChange={(groupBy) => set({ groupBy, ...(groupBy ? {} : { collapsible: undefined, collapsed: undefined }) })} empty="— Pas de couloirs —" disabled={disabled} hint="Les mêmes colonnes dans chaque couloir ; glisser une carte la change de colonne dans son couloir." />
+        {layout.groupBy && <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Toggle checked={Boolean(layout.collapsible)} onChange={(collapsible) => set({ collapsible: collapsible || undefined, collapsed: collapsible ? layout.collapsed : undefined })} disabled={disabled}>Couloirs repliables</Toggle>
+          {layout.collapsible && <Toggle checked={Boolean(layout.collapsed)} onChange={(collapsed) => set({ collapsed: collapsed || undefined })} disabled={disabled}>Repliés à l’ouverture</Toggle>}
+        </div>}
+      </div>}
       {layout.kanbanColumn && <GroupFormulaSettings ctx={ctx} what="colonne" />}
       <LanesEditor ctx={ctx} />
     </> },
@@ -456,7 +464,7 @@ function MasterDetailPages(ctx: Ctx): Page[] {
         </div>
       </div>
       <ItemSettings ctx={ctx} max={4} />
-      <SectionsSettings ctx={ctx} />
+      <SectionsSettings ctx={ctx} withAlphabet />
     </> },
     { key: "detail", label: "Détail", icon: <BookOpen className="size-3.5" />, render: () => <>
       <div className={settingsGroup}>
@@ -523,6 +531,7 @@ function CalendarPages(ctx: Ctx, calendars: string[]): Page[] {
         <Choice label="Entrées" value={look.entryStyle ?? "pill"} options={[{ value: "pill", label: "Pastilles" }, { value: "dot", label: "Points" }, { value: "bar", label: "Barres" }]} onChange={(entryStyle) => setLook({ entryStyle: entryStyle === "pill" ? undefined : entryStyle })} disabled={disabled} />
         <Range text="Entrées par jour, au plus" value={layout.maxPerDay ?? 0} min={0} max={12} format={(value) => value ? String(value) : "toutes"} onChange={(value) => set({ maxPerDay: value || undefined })} disabled={disabled} title="Au-delà, « +N » ouvre le reste" />
       </div>}
+      <div className={settingsGroup}><p className={settingsTitle}>Ordre dans un même jour</p><SortSettings ctx={ctx} /><p className={hintText}>Les jours suivent toujours le calendrier ; ce tri range les lignes d’un même jour.</p></div>
       <CardChoice ctx={ctx} />
       <ItemSettings ctx={ctx} fieldsLabel={scale === "day" && forms.day === "paragraphs" ? "Sous le nom (la première en paragraphe)" : scale === "week" && forms.week === "table" ? "Colonnes du tableau" : "Sous le nom (listes, fiches)"} />
     </> },
@@ -758,8 +767,8 @@ function GalleryPages(ctx: Ctx): Page[] {
         <GaugeSettings ctx={ctx} />
         <p className={hintText}>Sur la vignette : la barre en bas de l’image, les charges dans un coin.</p>
       </div>
-      <ClickSettings ctx={ctx} />
     </> },
+    { key: "items", label: "Élément", icon: <LayoutGrid className="size-3.5" />, render: () => <><CardChoice ctx={ctx} /><p className={hintText}>Avec une carte ou un formulaire, chaque ligne s’affiche ainsi à la place de sa vignette ; l’image, la légende et le ruban de la galerie ne servent plus.</p></> },
     { key: "sections", label: "Sections", icon: <ListTree className="size-3.5" />, render: () => <SectionsSettings ctx={ctx} withAlphabet /> },
     { key: "look", label: "Apparence", icon: <Palette className="size-3.5" />, render: () => <>
       <div className={settingsGroup}>
@@ -818,6 +827,7 @@ function TimelinePages(ctx: Ctx, calendars: string[]): Page[] {
     { key: "items", label: "Éléments", icon: <LayoutGrid className="size-3.5" />, render: () => <>
       <CardChoice ctx={ctx} />
       <ItemSettings ctx={ctx} withBadge fieldsLabel={style === "bars" || style === "lanes" ? "Sous le nom (jauge)" : "Sous le nom"} />
+      <div className={settingsGroup}><p className={settingsTitle}>Ordre à date égale</p><SortSettings ctx={ctx} /><p className={hintText}>Les lignes suivent toujours leur date ; ce tri range celles d’une même date (ou d’une même année).</p></div>
     </> },
     { key: "look", label: "Apparence", icon: <Palette className="size-3.5" />, render: () => <>
       <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p><FrameLook ctx={ctx} surfaces={[{ value: "boxed", label: "Encadrés" }, { value: "plain", label: "Nus" }]} surface={style === "chapters" ? "plain" : "boxed"} /><TitleLook ctx={ctx} font={style === "chapters" ? "display" : "sans"} size={style === "chapters" ? "lg" : "sm"} /><FieldsLook ctx={ctx} /></div>
@@ -875,7 +885,7 @@ function TreePages(ctx: Ctx): Page[] {
       {layout.click === "side" && <div className={settingsGroup}><Toggle checked={layout.detail?.kind === "children"} onChange={(children) => set({ detail: { ...(layout.detail ?? {}), kind: children ? "children" : undefined } })} disabled={disabled}>Le panneau montre les enfants du nœud choisi (explorateur)</Toggle><p className={hintText}>Les enfants se dessinent avec l’élément (carte ou lignes) ; un clic sur l’un d’eux descend d’un niveau.</p></div>}
     </> },
     { key: "look", label: "Apparence", icon: <Palette className="size-3.5" />, render: () => <>
-      <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p><TitleLook ctx={ctx} sizes={[{ value: "sm", label: "S" }, { value: "md", label: "M" }, { value: "lg", label: "L" }]} font="mixed" size="mixed" /><FieldsLook ctx={ctx} /></div>
+      <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p>{/* Le cadre autour de l'arbre n'existe qu'en lignes et en retrait ; les autres dessins encadrent chaque nœud. */}<FrameLook ctx={ctx} surfaces={style === "lines" || style === "indent" ? [{ value: "boxed", label: "Dans un cadre" }, { value: "plain", label: "Sans cadre" }] : []} surface="boxed" /><TitleLook ctx={ctx} sizes={[{ value: "sm", label: "S" }, { value: "md", label: "M" }, { value: "lg", label: "L" }]} font="mixed" size="mixed" /><FieldsLook ctx={ctx} /></div>
       <div className={settingsGroup}><p className={settingsTitle}><Palette className="size-3.5" />Couleurs</p><ColorLook ctx={ctx} modes={[{ value: "border", label: "Point et nom" }, { value: "tint", label: "Teinte" }, { value: "dot", label: "Point" }, { value: "title", label: "Nom coloré" }, { value: "none", label: "Rien" }]} /><p className={hintText}>« Couleur des lignes selon » une colonne de rang teinte chaque niveau de la hiérarchie.</p></div>
       <div className={settingsGroup}><p className={settingsTitle}>Tri des enfants</p><SortSettings ctx={ctx} /></div>
     </> },
@@ -926,7 +936,7 @@ function CodexPages(ctx: Ctx): Page[] {
         </div>
         <p className={hintText}>Chaque fiche devient une carte qu’un bouton retourne : deux cartes de « Modifier › Cartes », une par face.</p>
       </div>
-      <ClickSettings ctx={ctx} />
+      {/* L'élément (une carte ou un formulaire à la place de la fiche dessinée ici), puis « Au clic ». */}<CardChoice ctx={ctx} />
     </> },
     { key: "toc", label: "Sommaire", icon: <ListTree className="size-3.5" />, render: () => <>
       <div className={settingsGroup}>
@@ -947,6 +957,8 @@ function CodexPages(ctx: Ctx): Page[] {
         {style === "sketch" && <p className={hintText}>L’image d’abord, posée de travers ; le texte et les notes en écriture penchée sur papier pointillé.</p>}
         <div className="flex flex-wrap items-end gap-3">
           <Choice label="Marges" value={look.density ?? "normal"} options={densityOptions} onChange={(density) => setLook({ density: density === "normal" ? undefined : density })} disabled={disabled} />
+          {style !== "plain" && <Choice label="Coins" value={look.radius ?? "lg"} options={radiusOptions} onChange={(radius) => setLook({ radius: radius === "lg" ? undefined : radius })} disabled={disabled} />}
+          {style !== "plain" && style !== "scroll" && style !== "board" && style !== "sketch" && <Toggle checked={Boolean(look.shadow)} onChange={(shadow) => setLook({ shadow: shadow || undefined })} disabled={disabled}>Ombre</Toggle>}
           <Choice label="Image" value={look.imageShape ?? "rounded"} options={imageShapeOptions} onChange={(imageShape) => setLook({ imageShape: imageShape === "rounded" ? undefined : imageShape })} disabled={disabled} />
         </div>
         <TitleLook ctx={ctx} font="display" size="md" />
