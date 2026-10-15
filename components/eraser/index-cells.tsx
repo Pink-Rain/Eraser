@@ -16,7 +16,7 @@ import type { SpellIndexKind } from "@/lib/class-content"
 import { conversionsOf, findUnit, formatIndexNumber, numberSortKey, parseIndexNumber, unitsOf, unitTone, type NumberFormat } from "@/lib/index-numbers"
 import { ActionsCell, FormulaCell, RandomCell } from "@/components/eraser/index-computed-cells"
 import { GaugeCell, GlyphCell, IndexIconGlyph } from "@/components/eraser/index-gauge"
-import { DEFAULT_LAYOUT_ACCENT, FieldLabel, IndexLayoutView, labelLookOf, largeFieldClass, layoutBackgroundOf } from "@/components/eraser/index-layout-view"
+import { DEFAULT_LAYOUT_ACCENT, FieldLabel, fieldAlignClass, IndexLayoutView, labelLookOf, largeFieldClass, layoutBackgroundOf, smallFieldClass } from "@/components/eraser/index-layout-view"
 import { LayoutBlockView } from "@/components/eraser/index-layout-blocks"
 import { columnStyleCss, pillStyle } from "@/components/eraser/index-style"
 import { cn } from "@/lib/utils"
@@ -1300,7 +1300,7 @@ export function IndexEntryForm({ title, fields, pending, leading, layout, onCanc
           // Un bloc (tuiles de valeurs…) écrit dans ses cases ; un inventaire attend que la ligne existe.
           render={(field, placed) => field.block
             ? <div className="grid gap-1">{!placed.hideLabel && placed.label && <FieldLabel field={placed} fallback="" accent={accent} readColumn={readEntry} look={layout.look} className="text-xs font-semibold" />}<LayoutBlockView block={field.block} ctx={{ valueOf: readEntry, accent, onChange: (column, value) => { const target = fields.find((item) => foldName(item.label) === foldName(column)); if (target) setValues((current) => ({ ...current, [target.key]: value })) } }} /></div>
-            : <div className={placed.large ? largeFieldClass : undefined}>{entryField(field, placed.hideLabel, placed)}</div>}
+            : <div className={cn(placed.large ? largeFieldClass : placed.size === "sm" ? smallFieldClass : undefined, placed.align && fieldAlignClass[placed.align])} style={placed.imageWidth ? { width: `${placed.imageWidth}%` } : undefined}>{entryField(field, placed.hideLabel, placed)}</div>}
           renderRest={(rest) => <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">{rest.map((field) => entryField(field))}</div>}
         />
       </div>

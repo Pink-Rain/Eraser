@@ -53,7 +53,7 @@ import { lockOverrideFor, sameTabLocks, type TabLocks } from "@/lib/index-locks"
 import { tabLocksOf } from "@/lib/index-locks"
 import { unitFamilies, type UnitFamily } from "@/lib/index-numbers"
 import type { StatDefinition } from "@/lib/index-stats"
-import { fitLayoutToColumns, presentationEntries, presentationKinds, type PresentationKind, type TabPresentations, type Presentation, type PresentationPreset } from "@/lib/index-presentations"
+import { fitLayoutToColumns, namedPresentationsOf, presentationEntries, presentationKinds, type PresentationKind, type TabPresentations, type Presentation, type PresentationPreset } from "@/lib/index-presentations"
 import { layoutIcons } from "@/components/eraser/index-windows"
 
 /** Ce que montre l'éditeur : les colonnes, le formulaire, le survol, les cartes ou une vue. */
@@ -1244,10 +1244,22 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               onRemove={() => { if (!chosen) return; setNamed(named.filter((item) => item.id !== chosen.id)); select(DEFAULT_FORM_ID) }}
               full={named.length >= 11}
               layout={current}
-              otherTabs={otherTabsOf(tab)}
+              otherTabs={otherTabsOf(tab).map((other) => { const target = tabs.find((candidate) => candidate.id === other.id); return target && namedLayoutsOf(target, kind).length >= 11 ? { ...other, disabled: true, hint: "12 versions au plus" } : other })}
               disabled={pending || layoutSaving}
               onApply={(layout) => chosen ? setNamed(named.map((item) => item.id === chosen.id ? { ...item, layout } : item)) : touchLayout(tab, kind === "form" ? { form: layout } : { hover: layout })}
-              onCopyTo={(ids) => setLayoutDrafts((state) => ({ ...state, ...Object.fromEntries(ids.map((id) => [id, { ...state[id], ...(kind === "form" ? { form: current } : { hover: current }) }])) }))}
+              onCopyTo={(ids, star) => setLayoutDrafts((state) => ({ ...state, ...Object.fromEntries(ids.flatMap((id) => {
+                // La copie s'ajoute aux versions de l'onglet, sans rien remplacer ; à l'étoile, l'ancienne étoilée garde une place nommée.
+                const target = tabs.find((candidate) => candidate.id === id)
+                if (!target) return []
+                const key = kind === "form" ? "forms" : "hovers"
+                const touched = state[id]
+                const list = touched && key in touched ? touched[key] ?? [] : savedLayoutsOf(target)?.[key] ?? []
+                if (list.length >= 11) return []
+                const copy = { id: layoutId(), name: `${chosen ? chosen.name : `${label} principal`} (de « ${tab.name} »)`, layout: current }
+                if (!star) return [[id, { ...touched, [key]: [...list, copy] }]]
+                const previous = { id: layoutId(), name: `Ancien ${label.toLocaleLowerCase("fr")} principal`, layout: layoutOf(target, kind).layout }
+                return [[id, { ...touched, [kind]: current, [key]: [...list, previous] }]]
+              })) }))}
             />
           })()}
           {mode === "cards" && cardsEnabled && tab && !tab.removed && (() => {
@@ -1260,15 +1272,18 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               builtin={entry.builtin}
               builtins={tabCardsOf({}, cardsIndex ?? model.key, tab.original ?? tab.name.trim()).cards}
               samples={sampleRows[tab.original ?? tab.name] ?? []}
-              otherTabs={otherTabsOf(tab)}
+              otherTabs={otherTabsOf(tab).map((other) => { const target = tabs.find((candidate) => candidate.id === other.id); return target && cardsOf(target).cards.length >= 12 ? { ...other, disabled: true, hint: "12 cartes au plus" } : other })}
               selected={selectedCard[tab.id] ?? null}
               onSelect={(id) => setSelectedCard((current) => ({ ...current, [tab.id]: id }))}
               disabled={pending || layoutSaving}
               onChange={(next) => setCardDrafts((current) => ({ ...current, [tab.id]: { cards: next.cards, ...(next.defaultId ? { defaultId: next.defaultId } : {}) } }))}
-              onCopyTo={(ids, card) => setCardDrafts((current) => ({ ...current, ...Object.fromEntries(ids.map((id) => {
+              onCopyTo={(ids, card, star) => setCardDrafts((current) => ({ ...current, ...Object.fromEntries(ids.flatMap((id) => {
+                // La carte s'ajoute (un onglet plein n'est pas proposé) ; à l'étoile, elle devient celle montrée d'abord.
                 const target = tabs.find((candidate) => candidate.id === id)
                 const base = target ? cardsOf(target) : { cards: [] as CardTemplate[] }
-                return [id, { ...base, cards: [...base.cards, duplicateCard(card)].slice(0, 12) }]
+                if (base.cards.length >= 12) return []
+                const copy = duplicateCard(card)
+                return [[id, { ...base, cards: [...base.cards, copy], ...(star ? { defaultId: copy.id } : {}) }]]
               })) }))}
               onReset={() => setCardDrafts((current) => ({ ...current, [tab.id]: null }))}
             />
@@ -1287,10 +1302,18 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               presets={viewPresets}
               onSavePreset={onSaveViewPreset}
               onDeletePreset={onDeleteViewPreset}
-              otherTabs={otherTabsOf(tab)}
-              onCopyTo={(ids, layout) => setPresentationDrafts((state) => ({ ...state, ...Object.fromEntries(ids.map((id) => {
+              otherTabs={otherTabsOf(tab).map((other) => { const target = tabs.find((candidate) => candidate.id === other.id); return target && namedPresentationsOf(presentationsOf(target), viewKind).length >= 11 ? { ...other, disabled: true, hint: "12 versions au plus" } : other })}
+              onCopyTo={(ids, layout, star, name) => setPresentationDrafts((state) => ({ ...state, ...Object.fromEntries(ids.flatMap((id) => {
+                // La vue s'ajoute aux versions de l'onglet, sans rien remplacer ; à l'étoile, l'ancienne étoilée garde une place nommée.
                 const target = tabs.find((candidate) => candidate.id === id)
-                return [id, { ...(target ? presentationsOf(target) : {}), [viewKind]: fitLayoutToColumns(layout, target ? viewColumnsOf(target) : []) }]
+                if (!target) return []
+                const value = state[id] ?? presentationsOf(target)
+                if (namedPresentationsOf(value, viewKind).length >= 11) return []
+                const fitted = { ...fitLayoutToColumns(layout, viewColumnsOf(target)), kind: viewKind }
+                const copyId = () => Math.random().toString(36).slice(2, 10)
+                if (!star) return [[id, { ...value, named: [...(value.named ?? []), { id: copyId(), name: `${name} (de « ${tab.name} »)`, layout: fitted }] }]]
+                const previous = value[viewKind] ? [{ id: copyId(), name: "Ancienne vue principale", layout: { ...value[viewKind]!, kind: viewKind } }] : []
+                return [[id, { ...value, [viewKind]: fitted, named: [...(value.named ?? []), ...previous] }]]
               })) }))}
               disabled={pending || layoutSaving}
             />

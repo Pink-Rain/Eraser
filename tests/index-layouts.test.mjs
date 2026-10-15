@@ -358,3 +358,12 @@ test("le survol d'une ligne dans la version choisie par une vue, sinon l'étoil�
   assert.equal(references.referenceKey({ index: "npcs", id: "PNJ-1", hover: "principal" }), plain);
   assert.notEqual(references.referenceKey({ index: "npcs", id: "PNJ-1", hover: "court" }), plain);
 });
+
+test("un champ de formulaire : petit ou grand, centré ou à droite, largeur d'image ; rien d'autre", () => {
+  const read = (field) => layouts.parseIndexLayout({ aside: [], sections: [{ id: "s", rows: [{ id: "r", fields: [field] }] }] }).sections[0].rows[0].fields[0];
+  assert.deepEqual(read({ column: "Note", size: "sm", align: "center" }), { column: "Note", size: "sm", align: "center" });
+  // « Grand » reste `large` (les anciens réglages et l'ancien code le lisent) ; grand l'emporte sur petit.
+  assert.deepEqual(read({ column: "Nom", large: true, size: "sm" }), { column: "Nom", large: true });
+  assert.deepEqual(read({ column: "Portrait", imageWidth: 37 }), { column: "Portrait", imageWidth: 37 });
+  assert.deepEqual(read({ column: "Portrait", imageWidth: 400, align: "justify", size: "xl" }), { column: "Portrait", imageWidth: 100 });
+});

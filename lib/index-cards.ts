@@ -38,6 +38,8 @@ export type CardBlockType = "title" | "line" | "text" | "pills" | "field" | "bar
 export type CardBlock = {
   id: string
   type: CardBlockType
+  /** Une icône devant le titre, la ligne, le texte, le libellé (nom d'icône ou émoji). */
+  icon?: string
   /** Titre, texte, champ, jauge, image, valeur : la colonne. */
   column?: string
   /** Pastilles, tuiles, détails : les colonnes. */
@@ -328,6 +330,8 @@ function oneOf<T extends string>(value: unknown, allowed: readonly T[] | Set<str
 function tone(value: unknown): CardTone | undefined {
   if (typeof value !== "string") return undefined
   if (["default", "muted", "accent", "column"].includes(value)) return value
+  // Une couleur prise dans une autre colonne de la ligne (« {Couleur} »).
+  if (/^\{[^{}]{1,120}\}$/.test(value.trim())) return value.trim()
   return /^#[0-9a-f]{3,8}$/i.test(value.trim()) ? value.trim() : undefined
 }
 
@@ -376,6 +380,8 @@ function cleanBlock(input: unknown): CardBlock | null {
   const type = oneOf<CardBlockType>(raw.type, blockTypeSet)
   if (!type) return null
   const block: CardBlock = { id: text(raw.id, 20) || cardId("b"), type }
+  const icon = text(raw.icon, 40)
+  if (icon) block.icon = icon
   const column = text(raw.column, 120)
   if (column) block.column = column
   const columns = columnList(raw.columns)
@@ -569,6 +575,9 @@ export function serializeTabCards(value: TabCards) {
 // ---------------------------------------------------------------------------
 
 /** Toutes les colonnes qu'une carte nomme, dans l'ordre. */
+/** La colonne d'une couleur prise dans la ligne (« {Couleur} »), sinon rien. */
+export const toneColumnOf = (tone: string | undefined) => tone?.match(/^\{([^{}]+)\}$/)?.[1].trim()
+
 export function cardColumns(card: CardTemplate): string[] {
   const list: string[] = []
   const add = (column: string | undefined) => { if (column && !list.some((item) => foldName(item) === foldName(column))) list.push(column) }
@@ -581,6 +590,7 @@ export function cardColumns(card: CardTemplate): string[] {
     block.parts?.forEach((part) => add(part.column))
     block.badges?.forEach(add)
     add(block.maxColumn)
+    add(toneColumnOf(block.tone))
   }
   return list
 }
@@ -602,6 +612,8 @@ export function renameCardColumns(card: CardTemplate, renames: Map<string, strin
       if (block.parts) next.parts = block.parts.map((part) => ({ ...part, column: rename(part.column) }))
       if (block.badges) next.badges = block.badges.map(rename)
       if (block.maxColumn) next.maxColumn = maybe(block.maxColumn)
+      const toneColumn = toneColumnOf(block.tone)
+      if (toneColumn) next.tone = `{${rename(toneColumn)}}`
       return next
     }),
   }

@@ -23,6 +23,7 @@ import {
   DEFAULT_CARD_ACCENT,
   isCardColor,
   plainCardText,
+  toneColumnOf,
   readableListValue,
   type CardAspect,
   type CardBlock,
@@ -135,6 +136,14 @@ function toneLook(value: CardTone | undefined, accent: string, row?: CardRowSour
   if (!value || value === "default") return { className: "", style: {} }
   if (value === "muted") return { className: "text-muted-foreground", style: {} }
   if (value === "accent") return { className: "", style: { color: accent } }
+  const fromColumn = toneColumnOf(value)
+  if (fromColumn) {
+    // La couleur écrite dans une autre colonne de la ligne, ou celle de son choix dans la liste.
+    if (!row) return { className: "", style: {} }
+    const written = plainCardText(row.value(fromColumn) ?? "")
+    const color = isCardColor(written) ? written : choiceColor(row, fromColumn, written.split(/\s*[,;]\s*/)[0])
+    return { className: "", style: color && color !== "muted" ? { color } : {} }
+  }
   if (value === "column") {
     if (!row || !column) return { className: "", style: {} }
     const spec = row.spec(column)
@@ -250,6 +259,8 @@ function BlockBody({ block, ctx }: { block: CardBlock; ctx: BlockContext }): Rea
   const alignClass = align === "center" ? "text-center justify-center" : align === "right" ? "text-right justify-end" : ""
   const base = (size: CardTextSize | undefined, fallback: CardTextSize) => textSizes[size ?? fallback]
   const flags = cn(block.bold && "font-semibold", block.italic && "italic", block.caps && "uppercase tracking-[.12em] text-[10px]")
+  // L'icône du bloc, devant son titre, sa ligne, son texte ou son libellé (de la couleur du texte).
+  const glyph = block.icon ? (() => { const parsed = parseGlyphValue(block.icon); return <IndexIconGlyph icon={parsed.icon} emoji={parsed.emoji} className="mr-1 inline-block size-[1em] shrink-0 align-[-0.125em]" filled={Boolean(parsed.emoji)} /> })() : null
   switch (block.type) {
     case "title": {
       if (!block.column) return null
@@ -261,7 +272,7 @@ function BlockBody({ block, ctx }: { block: CardBlock; ctx: BlockContext }): Rea
       const rich = /<[a-z][^>]*>/i.test(raw) && (!block.tone || block.tone === "column")
       return <div className={cn("flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1", alignClass)}>
         <h3 className={cn(block.font === "sans" ? "font-sans" : "font-display", "min-w-0 font-semibold tracking-[-0.01em]", titleSizes[block.size ?? "md"], block.italic && "italic", look.className)} style={{ ...look.style, ...clampStyle(block.clamp ?? 2) }}>
-          {rich ? <IndexRichText as="span" html={raw} className="[&_p]:inline" /> : name}
+          {glyph}{rich ? <IndexRichText as="span" html={raw} className="[&_p]:inline" /> : name}
         </h3>
         {badges}
       </div>
@@ -274,10 +285,10 @@ function BlockBody({ block, ctx }: { block: CardBlock; ctx: BlockContext }): Rea
         return [<span key={part.column} className={cn(part.bold && "font-semibold", part.italic && "italic", look.className)} style={look.style}>{part.prefix}{value}{part.suffix}</span>]
       })
       if (!pieces.length) return null
-      const look = toneLook(block.tone, accent)
+      const look = toneLook(block.tone, accent, row)
       const separator = block.separator ?? " · "
       return <p className={cn(base(block.size, "sm"), block.font === "display" && "font-display", flags, alignClass, look.className, "min-w-0 break-words [overflow-wrap:anywhere]")} style={{ ...look.style, ...clampStyle(block.clamp) }}>
-        {pieces.map((piece, index) => <span key={index}>{index > 0 && <span className="whitespace-pre opacity-70">{separator}</span>}{piece}</span>)}
+        {glyph}{pieces.map((piece, index) => <span key={index}>{index > 0 && <span className="whitespace-pre opacity-70">{separator}</span>}{piece}</span>)}
       </p>
     }
     case "text": {
@@ -289,9 +300,10 @@ function BlockBody({ block, ctx }: { block: CardBlock; ctx: BlockContext }): Rea
       const listed = /^[[{]/.test(plain) ? readableListValue(plain) : null
       const look = toneLook(block.tone, accent, row, block.column)
       return <div className={cn("grid min-w-0 gap-0.5", block.quote && "border-l-2 pl-2.5")} style={block.quote ? { borderColor: accent } : undefined}>
-        {block.showLabel && <p className="text-[10px] font-semibold uppercase tracking-[.14em] text-muted-foreground">{block.label || block.column}</p>}
+        {block.showLabel && <p className="text-[10px] font-semibold uppercase tracking-[.14em] text-muted-foreground">{glyph}{block.label || block.column}</p>}
         <div className={cn(base(block.size, "sm"), flags, alignClass, look.className, "min-w-0 break-words [overflow-wrap:anywhere] [&_p]:m-0")} style={{ ...look.style, ...clampStyle(block.clamp) }}>
-          {listed !== null ? listed : <IndexRichText html={html} className="[&_p+p]:mt-1" />}
+          {/* Sans libellé : l'icône flotte devant la première ligne du texte. */}
+          {!block.showLabel && glyph && <span className="float-left mt-[0.2em]">{glyph}</span>}{listed !== null ? listed : <IndexRichText html={html} className="[&_p+p]:mt-1" />}
         </div>
       </div>
     }
@@ -299,7 +311,7 @@ function BlockBody({ block, ctx }: { block: CardBlock; ctx: BlockContext }): Rea
       const pills = pillsOf(ctx, block.columns ?? [], block.pill, block.tone)
       if (!pills.length) return null
       return <div className="grid gap-1">
-        {block.showLabel && block.label && <p className={cn("text-[10px] font-semibold uppercase tracking-[.14em] text-muted-foreground", alignClass)}>{block.label}</p>}
+        {block.showLabel && block.label && <p className={cn("text-[10px] font-semibold uppercase tracking-[.14em] text-muted-foreground", alignClass)}>{glyph}{block.label}</p>}
         <div className={cn("flex min-w-0 flex-wrap gap-1", block.stacked && "flex-col", block.stacked ? (align === "center" ? "items-center" : align === "right" ? "items-end" : "items-start") : alignClass)}>{pills}</div>
       </div>
     }
@@ -309,7 +321,7 @@ function BlockBody({ block, ctx }: { block: CardBlock; ctx: BlockContext }): Rea
       if (!value) return null
       const look = toneLook(block.tone ?? "column", accent, row, block.column, value)
       return <div className={cn("flex min-w-0 items-baseline gap-2", base(block.size, "xs"))}>
-        <span className="shrink-0 text-muted-foreground">{block.label || block.column}</span>
+        <span className="shrink-0 text-muted-foreground">{glyph}{block.label || block.column}</span>
         <span className="min-w-4 flex-1 translate-y-[-3px] border-b border-dotted border-foreground/20" aria-hidden="true" />
         <span className={cn("inline-flex min-w-0 items-center justify-end gap-1 text-right font-semibold", look.className)} style={look.style}><ChoiceIcon row={row} column={block.column} value={value} />{value}</span>
       </div>
@@ -322,7 +334,7 @@ function BlockBody({ block, ctx }: { block: CardBlock; ctx: BlockContext }): Rea
       const gaugeMax = spec?.gauge && gaugeScaleOf(spec.gauge) === "column" ? spec.gauge.max : undefined
       const max = block.maxColumn ? cardNumber(cellText(row, block.maxColumn)) : block.max ?? gaugeMax ?? null
       const ratio = max && max > 0 ? Math.max(0, Math.min(1, current / max)) : Math.max(0, Math.min(1, current / 100))
-      const color = block.tone && block.tone !== "accent" && block.tone !== "default" ? toneLook(block.tone, accent).style.color as string | undefined ?? accent : accent
+      const color = block.tone && block.tone !== "accent" && block.tone !== "default" ? toneLook(block.tone, accent, row).style.color as string | undefined ?? accent : accent
       const shown = max ? `${current} / ${max}` : `${current}${block.unit ?? ""}`
       return <div className="grid min-w-0 gap-1">
         {(block.label || block.showValue) && <div className="flex items-baseline justify-between gap-2 text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground">

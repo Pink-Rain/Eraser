@@ -74,6 +74,12 @@ export type LayoutField = {
   hideLabel?: boolean
   /** Le champ en grand (un nom, un titre). */
   large?: boolean
+  /** Le champ en petit (une précision) ; « Grand » reste `large`. */
+  size?: "sm"
+  /** La valeur centrée ou à droite (d'office : à gauche). */
+  align?: "center" | "right"
+  /** Une image : sa largeur, en % de la case (d'office : celle de la fiche, de la lecture ou du survol). */
+  imageWidth?: number
   /** Le texte écrit au-dessus du champ à la place du nom de la colonne (« Actifs »). */
   label?: string
   /** Un bloc (paliers, tuiles, inventaire…) à la place d'une colonne ; `column` est alors sa clé « bloc:… ». */
@@ -315,6 +321,9 @@ function cleanField(input: unknown): LayoutField | null {
   if (typeof raw.span === "number" && spans.has(raw.span)) field.span = raw.span as LayoutSpan
   if (raw.hideLabel === true) field.hideLabel = true
   if (raw.large === true) field.large = true
+  else if (raw.size === "sm") field.size = "sm"
+  if (raw.align === "center" || raw.align === "right") field.align = raw.align
+  if (typeof raw.imageWidth === "number" && Number.isFinite(raw.imageWidth)) field.imageWidth = Math.max(10, Math.min(100, Math.round(raw.imageWidth)))
   const label = cleanText(raw.label, 60)
   if (label) field.label = label
   const icon = cleanText(raw.icon, 40)

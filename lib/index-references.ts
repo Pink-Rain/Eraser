@@ -210,7 +210,7 @@ export type ResolvedReference = {
 }
 
 /** Une case du survol d'une ligne, dans sa mise en page ; un bloc (paliers, tuiles…) porte les cases qu'il lit. */
-export type ResolvedLayoutField = { column: string; span?: number; hideLabel?: boolean; large?: boolean; label?: string; icon?: string; color?: string; value: string; valueHtml: string; look?: ReferenceLook; block?: LayoutBlock; cells?: Record<string, { value: string; valueHtml: string }> }
+export type ResolvedLayoutField = { column: string; span?: number; hideLabel?: boolean; large?: boolean; size?: "sm"; align?: "center" | "right"; imageWidth?: number; label?: string; icon?: string; color?: string; value: string; valueHtml: string; look?: ReferenceLook; block?: LayoutBlock; cells?: Record<string, { value: string; valueHtml: string }> }
 
 /** Le survol d'une ligne selon sa mise en page : image et sous-titre en tête, puis les cases rangées. */
 export type ResolvedLayout = {

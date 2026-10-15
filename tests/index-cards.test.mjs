@@ -119,3 +119,13 @@ test("les valeurs d'une case se lisent comme sur une carte", () => {
   assert.ok(cards.isCardColor("#aa3355"));
   assert.ok(!cards.isCardColor("rouge"));
 });
+
+test("un bloc de carte : une icône, une couleur prise dans une colonne (qui suit son renommage)", () => {
+  const card = cards.parseCardTemplate({ id: "c", name: "C", blocks: [{ id: "t", type: "title", column: "Nom", icon: "sword", tone: "{Couleur}" }, { id: "x", type: "text", column: "Texte", tone: "{pas une colonne" }] });
+  assert.equal(card.blocks[0].icon, "sword");
+  assert.equal(card.blocks[0].tone, "{Couleur}");
+  assert.equal(card.blocks[1].tone, undefined, "une couleur illisible est écartée");
+  assert.ok(cards.cardColumns(card).includes("Couleur"), "la colonne de la couleur compte parmi celles de la carte");
+  const renamed = cards.renameCardColumns(card, new Map([["couleur", "Teinte"]]));
+  assert.equal(renamed.blocks[0].tone, "{Teinte}");
+});

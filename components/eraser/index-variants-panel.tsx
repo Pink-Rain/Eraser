@@ -192,9 +192,14 @@ export function NamePresetDialog({ title, description, initialName, existing, on
   </Dialog>
 }
 
-/** « Copier vers… » : les autres onglets de l'index, à cocher. Rien n'est écrit avant « Enregistrer ». */
-export function CopyToTabsDialog({ title, description, tabs, onCopy, onClose }: { title: string; description: ReactNode; tabs: VariantOption[]; onCopy: (ids: string[]) => void; onClose: () => void }) {
+/**
+ * « Copier vers… » : les autres onglets de l'index, à cocher (un onglet plein est grisé). La copie
+ * s'ajoute toujours, sans rien remplacer ; `starLabel` : une case pour la mettre aussi à l'étoile.
+ * Rien n'est écrit avant « Enregistrer ».
+ */
+export function CopyToTabsDialog({ title, description, tabs, starLabel, onCopy, onClose }: { title: string; description: ReactNode; tabs: Array<VariantOption & { disabled?: boolean; hint?: string }>; starLabel?: string; onCopy: (ids: string[], star: boolean) => void; onClose: () => void }) {
   const [chosen, setChosen] = useState<Set<string>>(() => new Set())
+  const [star, setStar] = useState(false)
   const toggle = (id: string) => setChosen((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })
   return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
     <DialogContent className="sm:max-w-md">
@@ -203,16 +208,17 @@ export function CopyToTabsDialog({ title, description, tabs, onCopy, onClose }: 
         <DialogDescription>{description} Rien n’est écrit avant « Enregistrer ».</DialogDescription>
       </DialogHeader>
       <div className="grid max-h-72 gap-1 overflow-y-auto rounded-lg border p-2">
-        {tabs.map((tab) => <label key={tab.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/60"><Checkbox checked={chosen.has(tab.id)} onCheckedChange={() => toggle(tab.id)} />{tab.name}</label>)}
+        {tabs.map((tab) => <label key={tab.id} className={cn("flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/60", tab.disabled && "opacity-50")} title={tab.hint}><Checkbox checked={chosen.has(tab.id)} disabled={tab.disabled} onCheckedChange={() => toggle(tab.id)} />{tab.name}{tab.disabled && tab.hint && <span className="ml-auto text-[11px] text-muted-foreground">{tab.hint}</span>}</label>)}
       </div>
+      {starLabel && <label className="flex items-center gap-2 text-sm"><Checkbox checked={star} onCheckedChange={(checked) => setStar(checked === true)} />{starLabel}</label>}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="flex gap-1">
-          <Button type="button" variant="ghost" size="sm" onClick={() => setChosen(new Set(tabs.map((tab) => tab.id)))}>Tout cocher</Button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setChosen(new Set(tabs.filter((tab) => !tab.disabled).map((tab) => tab.id)))}>Tout cocher</Button>
           <Button type="button" variant="ghost" size="sm" onClick={() => setChosen(new Set())}>Tout décocher</Button>
         </span>
         <span className="flex gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Annuler</Button>
-          <Button type="button" disabled={!chosen.size} onClick={() => onCopy([...chosen])}><Copy />Copier vers {chosen.size || ""} onglet{chosen.size > 1 ? "s" : ""}</Button>
+          <Button type="button" disabled={!chosen.size} onClick={() => onCopy([...chosen], star)}><Copy />Copier vers {chosen.size || ""} onglet{chosen.size > 1 ? "s" : ""}</Button>
         </span>
       </div>
     </DialogContent>

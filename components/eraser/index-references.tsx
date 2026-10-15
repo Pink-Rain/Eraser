@@ -321,7 +321,7 @@ function LayoutValue({ reference, field, depth, accent, level }: { reference: Re
   const kind = field.look?.kind
   if (kind === "file") {
     const files = field.value.split(/\n+/).map((item) => item.trim()).filter(Boolean)
-    return <span className="flex flex-wrap gap-1.5">{files.slice(0, 6).map((file) => <IndexImage key={file} value={file} alt={field.column} className={`${field.large ? "aspect-[4/5] w-full" : "size-14"} rounded-lg border object-cover`} fallback={<a href={file} target="_blank" rel="noreferrer" className="truncate text-xs underline">{file.split("/").pop()}</a>} />)}</span>
+    return <span className="flex flex-wrap gap-1.5">{files.slice(0, 6).map((file) => { const image = <IndexImage key={file} value={file} alt={field.column} className={`${field.imageWidth ? "h-auto w-full" : field.large ? "aspect-[4/5] w-full" : "size-14"} rounded-lg border object-cover`} fallback={<a href={file} target="_blank" rel="noreferrer" className="truncate text-xs underline">{file.split("/").pop()}</a>} />; return field.imageWidth ? <span key={file} className="block" style={{ width: `${field.imageWidth}%` }}>{image}</span> : image })}</span>
   }
   if (kind === "color") return <span className="inline-flex items-center gap-1.5 font-mono text-[11px]"><span className="size-3.5 rounded-full border" style={{ backgroundColor: field.value }} />{field.value}</span>
   if (kind === "glyph") { const look = parseGlyphValue(field.value); return <IndexIconGlyph icon={look.icon} emoji={look.emoji} className="size-5" filled={Boolean(look.emoji)} /> }
@@ -391,7 +391,7 @@ export function LayoutDetails({ reference, layout, color, depth, level }: { refe
       ? <div className="grid gap-1">{!field.hideLabel && field.label && <p className={cn("flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground", labels.className)} style={labels.color ? { color: labels.color } : undefined}>{field.icon && <IndexIconGlyph icon={field.icon} className="size-3" filled={false} />}{field.label}</p>}<div><LayoutValue reference={reference} field={field} depth={depth} accent={accent} level={level} /></div></div>
       : <div className="grid gap-0.5">
       {!field.hideLabel && <p className={cn("flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground", labels.className)} style={field.color ? { color: resolveLayoutColor(field.color, accent, readColumn) } : labels.color ? { color: labels.color } : undefined}>{field.icon && <IndexIconGlyph icon={field.icon} className="size-3" filled={false} />}{field.label || field.column}</p>}
-      <div className={field.large ? "font-display text-base font-semibold leading-snug" : "text-xs leading-5 [&_a]:underline"}><LayoutValue reference={reference} field={field} depth={depth} accent={accent} level={level} /></div>
+      <div className={cn(field.large ? "font-display text-base font-semibold leading-snug" : field.size === "sm" ? "text-[11px] leading-4 [&_a]:underline" : "text-xs leading-5 [&_a]:underline", field.align === "center" ? "text-center" : field.align === "right" ? "text-right" : "")}><LayoutValue reference={reference} field={field} depth={depth} accent={accent} level={level} /></div>
     </div>} />
   </div>
 }

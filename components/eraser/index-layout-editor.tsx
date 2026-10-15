@@ -400,8 +400,15 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
                 <div className="flex flex-wrap items-center gap-3">
                   <span className={smallLabel}>Icône<IconPicker icon={field.icon} disabled={disabled} allowNone onChange={(value) => updateField(field.column, { icon: value.icon || undefined })} /></span>
                   <label className="flex items-center gap-1.5 text-[11px]"><Checkbox disabled={disabled} checked={Boolean(field.hideLabel)} onCheckedChange={(checked) => updateField(field.column, { hideLabel: checked === true || undefined })} />Sans libellé</label>
-                  <label className="flex items-center gap-1.5 text-[11px]"><Checkbox disabled={disabled} checked={Boolean(field.large)} onCheckedChange={(checked) => updateField(field.column, { large: checked === true || undefined })} />En grand (un nom, un titre)</label>
                 </div>
+                <div className="flex flex-wrap items-end gap-3">
+                  <span className={smallLabel}>Taille<Segmented label="Taille du champ" disabled={disabled} value={field.large ? "lg" : field.size === "sm" ? "sm" : "md"} options={[{ value: "sm", label: "Petit", title: "Une précision" }, { value: "md", label: "Normal" }, { value: "lg", label: "Grand", title: "Un nom, un titre" }]} onChange={(size) => updateField(field.column, { large: size === "lg" || undefined, size: size === "sm" ? "sm" : undefined })} /></span>
+                  <span className={smallLabel}>Alignement<Segmented label="Alignement du champ" disabled={disabled} value={field.align ?? "left"} options={[{ value: "left", label: "Gauche" }, { value: "center", label: "Centre" }, { value: "right", label: "Droite" }]} onChange={(align) => updateField(field.column, { align: align === "left" ? undefined : align })} /></span>
+                </div>
+                {spec && normalizeSpec(spec).kind === "file" && spec.file?.accept === "image" && <label className={smallLabel}>
+                  <span className="flex justify-between"><span>Largeur de l’image</span><span className="font-normal tabular-nums">{field.imageWidth ? `${field.imageWidth} % de la case` : "d’office"}</span></span>
+                  <span className="flex items-center gap-2"><input type="range" min={10} max={100} step={5} value={field.imageWidth ?? 100} disabled={disabled} onChange={(event) => updateField(field.column, { imageWidth: Number(event.target.value) })} className="flex-1 accent-primary" aria-label="Largeur de l’image" />{field.imageWidth && <button type="button" className="text-[11px] font-normal text-primary hover:underline" disabled={disabled} onClick={() => updateField(field.column, { imageWidth: undefined })}>d’office</button>}</span>
+                </label>}
                 <span className={smallLabel}>Couleur du libellé<ColorPick allowMuted label="Couleur du libellé" value={field.color} columns={colorColumns} disabled={disabled} onChange={(color) => updateField(field.column, { color })} /></span>
               </div>}
           </PopoverContent>
@@ -655,7 +662,7 @@ function LayoutPreview({ kind, layout, columns, sample = {}, sampleRow }: { kind
     ? <div className="grid gap-0.5">{!field.hideLabel && field.label && <span className="text-[10px] font-semibold text-muted-foreground">{field.label}</span>}<LayoutBlockView block={item.block} ctx={{ valueOf: readColumn, htmlOf, accent, compact: hover, preview: true, row: sampleRow }} /></div>
     : <div className="grid gap-0.5">
       {!field.hideLabel && <span className={cn("flex items-center gap-1 text-[10px] font-semibold text-muted-foreground", labels.className)} style={field.color ? { color: resolveLayoutColor(field.color, accent, readColumn) } : labels.color ? { color: labels.color } : undefined}>{field.icon && <IndexIconGlyph icon={field.icon} className="size-3" filled={false} />}{field.label || item.header}</span>}
-      <span className={cn("block min-h-6 truncate rounded-md border bg-background/70 px-1.5 py-1", field.large ? "font-display text-sm font-semibold" : "text-[11px]")}>{item.text || <span className="text-muted-foreground/60">—</span>}</span>
+      <span className={cn("block min-h-6 truncate rounded-md border bg-background/70 px-1.5 py-1", field.large ? "font-display text-sm font-semibold" : field.size === "sm" ? "text-[10px]" : "text-[11px]", field.align === "center" && "text-center", field.align === "right" && "text-right")}>{item.text || <span className="text-muted-foreground/60">—</span>}</span>
     </div>
   const bannerValue = layout.banner?.column ? readColumn(layout.banner.column) : ""
   return <div className={cn("grid gap-2", background && "-m-1.5 rounded-lg p-1.5")} style={background ? { background } : undefined}>

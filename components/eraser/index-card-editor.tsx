@@ -46,7 +46,7 @@ import {
 } from "lucide-react"
 
 import { IndexCard, cardGridStyle, cardWidthRem, type CardRowSource } from "@/components/eraser/index-card"
-import { Choice, HoverChoice, ImageBoxControls, SettingsRow, Tabs } from "@/components/eraser/editor-controls"
+import { Choice, HoverChoice, IconPick, ImageBoxControls, SettingsRow, Tabs } from "@/components/eraser/editor-controls"
 import { useIndexSettings } from "@/components/eraser/index-windows"
 import { CopyToTabsDialog, ManagePresetsDialog, NamePresetDialog, PreviewDialog, PreviewExpandButton, VariantsPanel } from "@/components/eraser/index-variants-panel"
 import { Button } from "@/components/ui/button"
@@ -162,7 +162,7 @@ function ColumnsPicker({ value, columns, onChange, disabled, ariaLabel }: { valu
 }
 
 /** Une couleur de texte : normale, discrète, l'accent, celle de la colonne, ou une teinte. */
-function ToneSwatches({ value, onChange, allowColumn = true, disabled, compact = false }: { value: CardTone | undefined; onChange: (value: CardTone | undefined) => void; allowColumn?: boolean; disabled?: boolean; compact?: boolean }) {
+function ToneSwatches({ value, onChange, allowColumn = true, colorColumns, disabled, compact = false }: { value: CardTone | undefined; onChange: (value: CardTone | undefined) => void; allowColumn?: boolean; /** Les colonnes d'où prendre une couleur (« {Couleur} »), comme dans les formulaires. */ colorColumns?: string[]; disabled?: boolean; compact?: boolean }) {
   const current = value ?? "default"
   const named: Array<{ value: CardTone; label: string; swatch: ReactNode }> = [
     { value: "default", label: "Normale", swatch: <span className="size-3.5 rounded-full border bg-foreground" /> },
@@ -175,6 +175,10 @@ function ToneSwatches({ value, onChange, allowColumn = true, disabled, compact =
     {!compact && <span className="mx-0.5 h-4 w-px bg-border" />}
     {(compact ? cardPalette.slice(0, 6) : cardPalette).map((color) => <button key={color.value} type="button" disabled={disabled} title={color.label} aria-label={color.label} aria-pressed={current === color.value} onClick={() => onChange(color.value)} className={cn("size-5 rounded-full border", current === color.value && "ring-2 ring-primary ring-offset-1")} style={{ backgroundColor: color.value }} />)}
     {!compact && <FreeColor value={current.startsWith("#") && !cardPalette.some((color) => color.value === current) ? current : undefined} onChange={onChange} disabled={disabled} />}
+    {colorColumns && colorColumns.length > 0 && <NativeSelect disabled={disabled} value={current.startsWith("{") ? current.slice(1, -1) : ""} onChange={(event) => onChange(event.target.value ? `{${event.target.value}}` : undefined)} className="h-6 w-auto py-0 pl-2 pr-7 text-[11px]" aria-label="Couleur prise dans une colonne">
+      <NativeSelectOption value="">…ou une colonne</NativeSelectOption>
+      {colorColumns.map((column) => <NativeSelectOption key={column} value={column}>{`{${column}}`}</NativeSelectOption>)}
+    </NativeSelect>}
   </span>
 }
 
@@ -301,13 +305,18 @@ function PartEditor({ part, columns, onChange, onRemove, onMove, first, last, di
 /** Les réglages d'un bloc : seulement ceux de son type. */
 function BlockSettings({ block, columns, onChange, disabled }: { block: CardBlock; columns: CardColumn[]; onChange: (block: CardBlock) => void; disabled?: boolean }) {
   const set = (changes: Partial<CardBlock>) => onChange({ ...block, ...changes })
+  // Les colonnes d'où prendre une couleur : celles de type Couleur, ou des listes à choix colorés.
+  const colorColumns = columns.filter((column) => { const kind = normalizeSpec(column.spec).kind; return kind === "color" || (kind === "choice" && (column.spec.options ?? []).some((option) => option.color)) }).map((column) => column.header)
+  // L'icône devant le titre, la ligne, le texte ou le libellé (comme dans les formulaires).
+  const iconPick = <span className={label}>Icône devant<IconPick value={block.icon} onChange={(icon) => set({ icon })} disabled={disabled} /></span>
   const textStyle = (withFont: boolean) => <>
+    {iconPick}
     <div className="flex flex-wrap items-end gap-3">
       <span className={label}>Taille<Segmented ariaLabel="Taille du texte" value={block.size ?? (block.type === "title" ? "md" : "sm")} options={[...sizeOptions]} onChange={(size) => set({ size })} disabled={disabled} /></span>
       {withFont && <span className={label}>Police<Segmented ariaLabel="Police" value={block.font ?? (block.type === "title" ? "display" : "sans")} options={[{ value: "display", label: "Titre" }, { value: "sans", label: "Texte" }]} onChange={(font) => set({ font })} disabled={disabled} /></span>}
       <span className={label}>Alignement<Segmented ariaLabel="Alignement" value={block.align ?? "left"} options={[...alignOptionsRight]} onChange={(align) => set({ align: align === "left" ? undefined : align })} disabled={disabled} /></span>
     </div>
-    <span className={label}>Couleur<ToneSwatches value={block.tone} onChange={(tone) => set({ tone })} disabled={disabled} allowColumn={block.type !== "line"} /></span>
+    <span className={label}>Couleur<ToneSwatches value={block.tone} onChange={(tone) => set({ tone })} disabled={disabled} allowColumn={block.type !== "line"} colorColumns={colorColumns} /></span>
     <div className="flex flex-wrap gap-3">
       {block.type !== "title" && <Toggle checked={Boolean(block.bold)} onChange={(bold) => set({ bold: bold || undefined })} disabled={disabled}>Gras</Toggle>}
       <Toggle checked={Boolean(block.italic)} onChange={(italic) => set({ italic: italic || undefined })} disabled={disabled}>Italique</Toggle>
@@ -373,6 +382,7 @@ function BlockSettings({ block, columns, onChange, disabled }: { block: CardBloc
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <Toggle checked={Boolean(block.showLabel)} onChange={(showLabel) => set({ showLabel: showLabel || undefined, label: showLabel ? block.label || (block.columns ?? [])[0] : block.label })} disabled={disabled}>Un titre au-dessus</Toggle>
+          {block.showLabel && iconPick}
           {block.showLabel && <Input value={block.label ?? ""} disabled={disabled} onChange={(event) => set({ label: event.target.value || undefined })} placeholder="Traits, Mots-clés…" className="h-7 w-40 text-xs" aria-label="Titre des pastilles" />}
         </div>
       </div>
@@ -380,7 +390,8 @@ function BlockSettings({ block, columns, onChange, disabled }: { block: CardBloc
       return <div className="grid gap-3">
         <label className={label}>Colonne<ColumnSelect value={block.column} columns={columns} onChange={(column) => set({ column })} disabled={disabled} ariaLabel="Colonne" /></label>
         <label className={label}>Libellé<Input value={block.label ?? ""} disabled={disabled} onChange={(event) => set({ label: event.target.value || undefined })} placeholder={block.column ?? "Le nom de la colonne"} className="h-8 text-xs" /></label>
-        <span className={label}>Couleur de la valeur<ToneSwatches value={block.tone ?? "column"} onChange={(tone) => set({ tone: tone === "column" ? undefined : tone })} disabled={disabled} /></span>
+        {iconPick}
+        <span className={label}>Couleur de la valeur<ToneSwatches value={block.tone ?? "column"} onChange={(tone) => set({ tone: tone === "column" ? undefined : tone })} disabled={disabled} colorColumns={colorColumns} /></span>
       </div>
     case "bar":
       return <div className="grid gap-3">
@@ -394,7 +405,7 @@ function BlockSettings({ block, columns, onChange, disabled }: { block: CardBloc
           <label className={label}>Unité (sans maximum)<Input value={block.unit ?? ""} disabled={disabled} onChange={(event) => set({ unit: event.target.value || undefined })} placeholder="%" className="h-8 text-xs" /></label>
         </div>
         <Toggle checked={Boolean(block.showValue)} onChange={(showValue) => set({ showValue: showValue || undefined })} disabled={disabled}>Écrire la valeur (« 18 / 24 »)</Toggle>
-        <span className={label}>Couleur de la barre<ToneSwatches value={block.tone ?? "accent"} allowColumn={false} onChange={(tone) => set({ tone: tone === "accent" ? undefined : tone })} disabled={disabled} /></span>
+        <span className={label}>Couleur de la barre<ToneSwatches value={block.tone ?? "accent"} allowColumn={false} colorColumns={colorColumns} onChange={(tone) => set({ tone: tone === "accent" ? undefined : tone })} disabled={disabled} /></span>
       </div>
     case "stats":
       return <div className="grid gap-3">
@@ -929,11 +940,12 @@ export function CardsPanel({ tabName, columns, value, builtin, builtins, samples
   builtin: boolean
   builtins: CardTemplate[]
   samples: Array<Record<string, string>>
-  otherTabs: Array<{ id: string; name: string }>
+  /** Les autres onglets ; plein (12 versions) : grisé. */
+  otherTabs: Array<{ id: string; name: string; disabled?: boolean; hint?: string }>
   selected: string | null
   onSelect: (id: string | null) => void
   onChange: (value: TabCards) => void
-  onCopyTo: (tabIds: string[], card: CardTemplate) => void
+  onCopyTo: (tabIds: string[], card: CardTemplate, star: boolean) => void
   onReset?: () => void
   disabled?: boolean
 }) {
@@ -1000,9 +1012,10 @@ export function CardsPanel({ tabName, columns, value, builtin, builtins, samples
     />}
     {dialog === "copy" && card && <CopyToTabsDialog
       title={`Copier « ${card.name} » vers d’autres onglets`}
-      description="La carte s’ajoute aux cartes de chaque onglet choisi (rien n’est remplacé)."
+      description="La carte s’ajoute aux cartes de chaque onglet choisi, sans rien remplacer."
       tabs={otherTabs}
-      onCopy={(ids) => { onCopyTo(ids, card); setDialog(null) }}
+      starLabel="Et la mettre à l’étoile dans ces onglets"
+      onCopy={(ids, star) => { onCopyTo(ids, card, star); setDialog(null) }}
       onClose={() => setDialog(null)}
     />}
     {dialog === "manage" && <ManagePresetsDialog

@@ -236,7 +236,7 @@ function RowFieldsView({ block, row }: { block: Extract<PageBlock, { type: "rowf
       ? <div className="grid min-w-0 gap-1">{!placed.hideLabel && placed.label && <FieldLabel field={placed} fallback="" className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-muted-foreground" />}<LayoutBlockView block={column.block} ctx={blockContext} /></div>
       : <div className="grid min-w-0 gap-0.5">
         {!placed.hideLabel && <FieldLabel field={placed} fallback={column.header} className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-muted-foreground" readColumn={blockContext.valueOf} />}
-        <IndexRichText html={column.html} as="span" className={`min-w-0 [overflow-wrap:anywhere] ${placed.large ? "font-display text-xl font-semibold" : "text-[14px]"}`} />
+        <IndexRichText html={column.html} as="span" className={`min-w-0 [overflow-wrap:anywhere] ${placed.large ? "font-display text-xl font-semibold" : placed.size === "sm" ? "text-[12px]" : "text-[14px]"} ${placed.align === "center" ? "text-center" : placed.align === "right" ? "text-right" : ""}`} />
       </div>
     return <section className="grid gap-2">
       {block.heading && <h3 className="font-display text-lg font-semibold">{block.heading}</h3>}

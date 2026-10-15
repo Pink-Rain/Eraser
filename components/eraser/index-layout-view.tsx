@@ -142,6 +142,10 @@ export function IndexLayoutView<T>({ arranged, render, renderRest, restTitle = "
 
 /** Le grand format d'un champ « en grand » de la fiche (un nom, un titre). */
 export const largeFieldClass = "[&_input]:h-11 [&_input]:font-display [&_input]:text-xl [&_input]:font-semibold [&_[contenteditable]]:font-display [&_[contenteditable]]:text-xl [&_[contenteditable]]:font-semibold"
+/** Un champ en petit (une précision) : la saisie et le texte un cran plus petits. */
+export const smallFieldClass = "[&_input]:h-8 [&_input]:text-xs [&_[contenteditable]]:text-xs"
+/** La valeur d'un champ centrée ou à droite, saisie comprise. */
+export const fieldAlignClass = { center: "text-center [&_input]:text-center [&_[contenteditable]]:text-center", right: "text-right [&_input]:text-right [&_[contenteditable]]:text-right" } as const
 
 /**
  * Le style d'ensemble des libellés (« Apparence » de la mise en page) : des classes qui

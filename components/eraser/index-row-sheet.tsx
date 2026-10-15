@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { DEFAULT_LAYOUT_ACCENT, FieldLabel, IndexLayoutView, labelLookOf, largeFieldClass, layoutBackgroundOf } from "@/components/eraser/index-layout-view"
+import { DEFAULT_LAYOUT_ACCENT, FieldLabel, fieldAlignClass, IndexLayoutView, labelLookOf, largeFieldClass, layoutBackgroundOf, smallFieldClass } from "@/components/eraser/index-layout-view"
+import { cn } from "@/lib/utils"
 import { LayoutBlockView, type LayoutBlockContext } from "@/components/eraser/index-layout-blocks"
 import { richTextPlainText } from "@/components/eraser/rich-text"
 import { foldName, normalizeSpec, type IndexColumnSpec } from "@/lib/index-columns"
@@ -325,7 +326,7 @@ function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, o
         // Une case à cocher (sans libellé au-dessus) s'aligne sur le bas des champs de sa ligne.
         render={(item, placed) => item.block
           ? <div key={item.key} className="grid gap-1">{!placed.hideLabel && placed.label && <FieldLabel field={placed} fallback="" accent={accent} readColumn={readColumn} look={layout?.look} className="text-xs font-semibold text-muted-foreground" />}<LayoutBlockView block={item.block} ctx={blockContext} /></div>
-          : <div className={placed.large ? largeFieldClass : normalizeSpec(item.spec).kind === "checkbox" ? "grid flex-1" : undefined}>{field(item, placed.hideLabel, placed)}</div>}
+          : <div className={cn(placed.large ? largeFieldClass : placed.size === "sm" ? smallFieldClass : normalizeSpec(item.spec).kind === "checkbox" ? "grid flex-1" : undefined, placed.align && fieldAlignClass[placed.align])} style={placed.imageWidth ? { width: `${placed.imageWidth}%` } : undefined}>{field(item, placed.hideLabel, placed)}</div>}
         renderRest={(rest) => <div className="grid content-start gap-3 md:grid-cols-2">{rest.map((item) => field(item))}</div>}
       />
       : <div className={pictures.length ? "grid gap-4 md:grid-cols-[minmax(0,1fr)_16rem]" : ""}>

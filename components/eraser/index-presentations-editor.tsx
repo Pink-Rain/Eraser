@@ -1067,9 +1067,10 @@ export function PresentationsPanel({ kind, tabName, columns, value, selectedId, 
   presets: PresentationPreset[]
   onSavePreset?: (preset: { id?: string; name: string; layout: Presentation }) => Promise<unknown>
   onDeletePreset?: (id: string) => Promise<unknown>
-  otherTabs: Array<{ id: string; name: string }>
+  /** Les autres onglets ; plein (12 versions) : grisé. */
+  otherTabs: Array<{ id: string; name: string; disabled?: boolean; hint?: string }>
   /** La version choisie donnée, comme vue à l'étoile, aux onglets cochés. */
-  onCopyTo: (tabIds: string[], layout: Presentation) => void
+  onCopyTo: (tabIds: string[], layout: Presentation, star: boolean, name: string) => void
   disabled?: boolean
 }) {
   const [dialog, setDialog] = useState<"save" | "copy" | "manage" | null>(null)
@@ -1148,9 +1149,10 @@ export function PresentationsPanel({ kind, tabName, columns, value, selectedId, 
     />}
     {dialog === "copy" && <CopyToTabsDialog
       title={`Copier la vue ${kindLabel} vers d’autres onglets`}
-      description="Elle remplace la vue à l’étoile de chaque onglet choisi ; les colonnes absentes y sont retirées."
+      description="Elle s’ajoute aux versions de chaque onglet choisi, sans rien remplacer ; les colonnes absentes y sont retirées."
       tabs={otherTabs}
-      onCopy={(ids) => { onCopyTo(ids, layout); setDialog(null) }}
+      starLabel="Et la mettre à l’étoile dans ces onglets (l’ancienne garde une place nommée)"
+      onCopy={(ids, star) => { onCopyTo(ids, layout, star, selected.id === MAIN_PRESENTATION_ID ? kindLabel : selected.name); setDialog(null) }}
       onClose={() => setDialog(null)}
     />}
     {dialog === "manage" && onDeletePreset && <ManagePresetsDialog

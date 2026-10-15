@@ -147,10 +147,12 @@ export function LayoutViewsPanel({ kind, tabName, items, selectedId, onSelect, o
   full: boolean
   /** La mise en page de la version choisie. */
   layout: IndexLayout
-  otherTabs: Array<{ id: string; name: string }>
+  /** Les autres onglets ; plein (12 versions) : grisé. */
+  otherTabs: Array<{ id: string; name: string; disabled?: boolean; hint?: string }>
   disabled: boolean
   onApply: (layout: IndexLayout) => void
-  onCopyTo: (tabIds: string[]) => void
+  /** Copier la version choisie : ajoutée aux onglets cochés ; `star` : mise aussi à l'étoile. */
+  onCopyTo: (tabIds: string[], star: boolean) => void
 }) {
   const { layoutPresets, saveLayoutPreset, deleteLayoutPreset } = useIndexSettings("")
   const presets = layoutPresets.filter((preset) => preset.kind === kind)
@@ -196,9 +198,10 @@ export function LayoutViewsPanel({ kind, tabName, items, selectedId, onSelect, o
     />}
     {dialog === "copy" && <CopyToTabsDialog
       title="Copier vers d’autres onglets"
-      description={<>Les onglets cochés reçoivent {what} comme {form ? "formulaire" : "survol"} à l’étoile.</>}
+      description={<>{form ? "Ce formulaire" : "Ce survol"} s’ajoute aux {form ? "formulaires" : "survols"} de chaque onglet choisi, sans rien remplacer.</>}
       tabs={otherTabs}
-      onCopy={(ids) => { onCopyTo(ids); setDialog(null) }}
+      starLabel="Et le mettre à l’étoile dans ces onglets (l’ancien garde une place nommée)"
+      onCopy={(ids, star) => { onCopyTo(ids, star); setDialog(null) }}
       onClose={() => setDialog(null)}
     />}
     {dialog === "manage" && <ManageNamedPresetsDialog
