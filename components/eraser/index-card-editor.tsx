@@ -62,6 +62,7 @@ import {
   cardRoles,
   cardStarters,
   DEFAULT_CARD_ACCENT,
+  eraserCardPresets,
   blockBox,
   mediaBox,
   missingCardColumns,
@@ -857,6 +858,8 @@ export function NewCardDialog({ columns, samples, builtins, onPick, onClose, tit
   const rows = useMemo(() => previewSamples(samples, columns), [columns, samples])
   const source = sampleSource(rows[0], columns)
   const starters = useMemo(() => cardStarters.map((starter) => ({ key: starter.key, label: starter.label, hint: starter.hint, card: starter.build(columns) })), [columns])
+  // Les cartes des pages d'Eraser (classe de Règles › Classes, campagne de l'accueil…), à reprendre dans n'importe quel index.
+  const eraserCards = useMemo(() => eraserCardPresets().filter((entry) => !builtins.some((card) => card.id === entry.card.id)), [builtins])
   const tile = (key: string, title: string, hint: string, card: CardTemplate, extra?: ReactNode) => <div key={key} className="group relative grid content-start gap-2 rounded-xl border bg-card/70 p-2.5 transition hover:border-primary hover:shadow-md">
     <button type="button" onClick={() => onPick({ ...card, id: cardId() })} className="grid content-start gap-2 text-left">
       <span className="pointer-events-none grid max-h-56 min-h-28 place-items-center overflow-hidden rounded-lg bg-muted/30 p-2">
@@ -880,6 +883,10 @@ export function NewCardDialog({ columns, samples, builtins, onPick, onClose, tit
         <p className={groupTitle}><Sparkles className="size-3.5" />Formes de départ</p>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{starters.map((starter) => tile(starter.key, starter.label, starter.hint, starter.card))}</div>
       </section>
+      {eraserCards.length > 0 && <section className="grid gap-2">
+        <p className={groupTitle}><Star className="size-3.5" />Les cartes des autres pages d’Eraser</p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{eraserCards.map((entry) => tile(`eraser:${entry.card.id}`, `${entry.card.name} (${entry.label})`, "La carte qu’Eraser montre dans cet index-là. Les colonnes absentes ici restent vides.", entry.card))}</div>
+      </section>}
       <section className="grid gap-2">
         <p className={groupTitle}><Bookmark className="size-3.5" />Presets enregistrés</p>
         {cardPresets.length
