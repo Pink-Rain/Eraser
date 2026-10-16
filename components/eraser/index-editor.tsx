@@ -9,7 +9,7 @@ import { LayoutViewsPanel, PresetBar, useColumnPresets } from "@/components/eras
 import { IndexLayoutEditor, type LayoutColumn } from "@/components/eraser/index-layout-editor"
 import { CardsPanel, IndexCardEditor, duplicateCard } from "@/components/eraser/index-card-editor"
 import { ColumnDescriptionButton, ColumnLockButton, ColumnTypeMenu } from "@/components/eraser/index-column-toolbar"
-import { IndexPresentationsEditor, MAIN_PRESENTATION_ID, PresentationsPanel } from "@/components/eraser/index-presentations-editor"
+import { IndexPresentationsEditor, LIST_FAMILY, MAIN_PRESENTATION_ID, PresentationsPanel } from "@/components/eraser/index-presentations-editor"
 import { columnStyleCss, pillStyle, stylePalette } from "@/components/eraser/index-style"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
@@ -53,7 +53,7 @@ import { lockOverrideFor, sameTabLocks, type TabLocks } from "@/lib/index-locks"
 import { tabLocksOf } from "@/lib/index-locks"
 import { unitFamilies, type UnitFamily } from "@/lib/index-numbers"
 import type { StatDefinition } from "@/lib/index-stats"
-import { fitLayoutToColumns, namedPresentationsOf, presentationEntries, presentationKinds, type PresentationKind, type TabPresentations, type Presentation, type PresentationPreset } from "@/lib/index-presentations"
+import { fitLayoutToColumns, isPresentationKind, namedPresentationsOf, presentationEntries, presentationKinds, type PresentationKind, type TabPresentations, type Presentation, type PresentationPreset } from "@/lib/index-presentations"
 import { layoutIcons } from "@/components/eraser/index-windows"
 
 /** Ce que montre l'éditeur : les colonnes, le formulaire, le survol, les cartes ou une vue. */
@@ -828,7 +828,10 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
 
   // « Colonnes », ou la mise en page de la fiche ou du survol de l'onglet choisi.
   const [mode, setMode] = useState<EditorMode>(() => (initialMode === "cards" && !onSaveCards) || (initialMode.startsWith("view:") && !onSavePresentations) || (initialMode === "stats" && !statsPanel) ? "columns" : initialMode)
-  const viewKind = mode.startsWith("view:") ? mode.slice(5) as PresentationKind : null
+  // La Liste réunit liste, kanban et maître-détail sous un seul onglet (« view:list ») : sa version choisie dit sa forme (« forme|id »).
+  const openedKind = mode.startsWith("view:") ? mode.slice(5) as PresentationKind : null
+  const listFamily = openedKind !== null && LIST_FAMILY.includes(openedKind)
+  const viewKind = listFamily ? "list" as PresentationKind : openedKind
   /**
    * Les mises en page touchées, par onglet (identifiant du brouillon) : le formulaire étoilé
    * (`null` : retour à celui d'Eraser ou à l'automatique), le survol, les autres formulaires.
@@ -1151,7 +1154,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
           </div>
           <span className="flex flex-wrap items-center gap-2">
             {(layoutsEnabled || cardsEnabled || presentationsEnabled) && <span className="inline-flex flex-wrap rounded-lg border bg-muted/30 p-0.5" role="tablist" aria-label="Que modifier">
-              {([["columns", Columns3, "Colonnes"], ...(layoutsEnabled ? [["form", LayoutTemplate, "Formulaire"], ["hover", MessageSquareQuote, "Survol"]] as const : []), ...(cardsEnabled ? [["cards", LayoutGrid, "Cartes"]] as const : []), ...(presentationsEnabled ? presentationKinds.map((kind) => [`view:${kind.value}`, layoutIcons[kind.value], kind.label] as const) : []), ...(statsPanel && !readOnly ? [["stats", layoutIcons.stats, "Stats"] as const] : [])] as Array<readonly [EditorMode, LucideIcon, string]>).map(([key, Icon, label]) => <Button key={key} type="button" role="tab" aria-selected={mode === key} size="sm" variant={mode === key ? "default" : "ghost"} className="h-7" onClick={() => setMode(key)}><Icon />{label}</Button>)}
+              {([["columns", Columns3, "Colonnes"], ...(layoutsEnabled ? [["form", LayoutTemplate, "Formulaire"], ["hover", MessageSquareQuote, "Survol"]] as const : []), ...(cardsEnabled ? [["cards", LayoutGrid, "Cartes"]] as const : []), ...(presentationsEnabled ? presentationKinds.filter((kind) => kind.value === "list" || !LIST_FAMILY.includes(kind.value)).map((kind) => [`view:${kind.value}`, layoutIcons[kind.value], kind.label] as const) : []), ...(statsPanel && !readOnly ? [["stats", layoutIcons.stats, "Stats"] as const] : [])] as Array<readonly [EditorMode, LucideIcon, string]>).map(([key, Icon, label]) => <Button key={key} type="button" role="tab" aria-selected={mode === key || (key === "view:list" && listFamily)} size="sm" variant={mode === key || (key === "view:list" && listFamily) ? "default" : "ghost"} className="h-7" onClick={() => setMode(key)}><Icon />{label}</Button>)}
             </span>}
             {!readOnly && <Button type="button" variant="ghost" size="sm" className="absolute top-3 right-11 h-7 text-muted-foreground" onClick={() => setMinimized(true)} title="Réduire : les modifications restent en attente pendant que tu regardes l’index (changer d’onglet, ouvrir une ligne…) ; « Reprendre » rouvre l’éditeur tel quel."><Minimize2 />Réduire</Button>}
           </span>
@@ -1293,10 +1296,11 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             return <PresentationsPanel
               key={editKey}
               kind={viewKind}
+              family={listFamily ? LIST_FAMILY : undefined}
               tabName={tab.name}
               columns={viewColumnsOf(tab)}
               value={presentationsOf(tab)}
-              selectedId={editedView[editKey] ?? MAIN_PRESENTATION_ID}
+              selectedId={editedView[editKey] ?? (listFamily ? `${openedKind}|${MAIN_PRESENTATION_ID}` : MAIN_PRESENTATION_ID)}
               onSelect={(id) => setEditedView((state) => ({ ...state, [editKey]: id }))}
               onChange={(next) => setPresentationDrafts((state) => ({ ...state, [tab.id]: next }))}
               presets={viewPresets}
@@ -1305,15 +1309,17 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               otherTabs={otherTabsOf(tab).map((other) => { const target = tabs.find((candidate) => candidate.id === other.id); return target && namedPresentationsOf(presentationsOf(target), viewKind).length >= 11 ? { ...other, disabled: true, hint: "12 versions au plus" } : other })}
               onCopyTo={(ids, layout, star, name) => setPresentationDrafts((state) => ({ ...state, ...Object.fromEntries(ids.flatMap((id) => {
                 // La vue s'ajoute aux versions de l'onglet, sans rien remplacer ; à l'étoile, l'ancienne étoilée garde une place nommée.
+                // Sa forme est la sienne (une version kanban de la Liste reste un kanban).
+                const form = isPresentationKind(layout.kind) ? layout.kind : viewKind
                 const target = tabs.find((candidate) => candidate.id === id)
                 if (!target) return []
                 const value = state[id] ?? presentationsOf(target)
-                if (namedPresentationsOf(value, viewKind).length >= 11) return []
-                const fitted = { ...fitLayoutToColumns(layout, viewColumnsOf(target)), kind: viewKind }
+                if (namedPresentationsOf(value, form).length >= 11) return []
+                const fitted = { ...fitLayoutToColumns(layout, viewColumnsOf(target)), kind: form }
                 const copyId = () => Math.random().toString(36).slice(2, 10)
                 if (!star) return [[id, { ...value, named: [...(value.named ?? []), { id: copyId(), name: `${name} (de « ${tab.name} »)`, layout: fitted }] }]]
-                const previous = value[viewKind] ? [{ id: copyId(), name: "Ancienne vue principale", layout: { ...value[viewKind]!, kind: viewKind } }] : []
-                return [[id, { ...value, [viewKind]: fitted, named: [...(value.named ?? []), ...previous] }]]
+                const previous = value[form] ? [{ id: copyId(), name: "Ancienne vue principale", layout: { ...value[form]!, kind: form } }] : []
+                return [[id, { ...value, [form]: fitted, named: [...(value.named ?? []), ...previous] }]]
               })) }))}
               disabled={pending || layoutSaving}
             />
@@ -1327,11 +1333,15 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
           {statsPanel}
         </section>}
 
-        {viewKind && tab && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1 lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden lg:pr-0">
+        {viewKind && tab && (() => {
+          // La version ouverte : « forme|id » pour la Liste (la liste principale d'office), sinon son identifiant.
+          const chosen = editedView[`${viewKind}:${tab.id}`] ?? (listFamily ? `${openedKind}|${MAIN_PRESENTATION_ID}` : MAIN_PRESENTATION_ID)
+          const [editedKind, versionId] = listFamily && chosen.includes("|") ? [chosen.split("|")[0] as PresentationKind, chosen.split("|")[1]] : [viewKind, chosen]
+          return <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1 lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden lg:pr-0">
           <IndexPresentationsEditor
-            key={`${tab.id}:${viewKind}:${editedView[`${viewKind}:${tab.id}`] ?? MAIN_PRESENTATION_ID}`}
-            kind={viewKind}
-            versionId={editedView[`${viewKind}:${tab.id}`] ?? MAIN_PRESENTATION_ID}
+            key={`${tab.id}:${editedKind}:${versionId}`}
+            kind={editedKind}
+            versionId={versionId}
             tabName={tab.name}
             columns={tab.columns.filter((item) => !item.removed && item.header.trim() && !/^id$/i.test(item.header.trim())).map((item) => item.header.trim())}
             rows={previewRows[tab.original ?? tab.name.trim()] ?? sampleRows[tab.original ?? tab.name.trim()] ?? []}
@@ -1344,7 +1354,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             hovers={namedLayoutsOf(tab, "hover").map((hover) => ({ id: hover.id, name: hover.name }))}
             stats={stats}
           />
-        </section>}
+        </section>
+        })()}
 
         {mode === "cards" && tab && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1 lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden lg:pr-0">
           {(() => {
@@ -1359,6 +1370,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               selected={selectedCard[tab.id] ?? null}
               onSelect={(id) => setSelectedCard((current) => ({ ...current, [tab.id]: id }))}
               hovers={namedLayoutsOf(tab, "hover").map((hover) => ({ id: hover.id, name: hover.name }))}
+              extras={{ forms: [{ id: DEFAULT_FORM_ID, name: "Formulaire principal" }, ...namedFormsOf(tab).map((form) => ({ id: form.id, name: form.name }))], indexes: model.relationTargets, tabs: tabs.filter((item) => !item.removed).map((item) => item.name), family: model.family === "objects" ? "objects" : "world" }}
               disabled={pending || layoutSaving || tab.removed}
               onChange={(next) => setCardDrafts((current) => ({ ...current, [tab.id]: { cards: next.cards, ...(next.defaultId ? { defaultId: next.defaultId } : {}) } }))}
             />

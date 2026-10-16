@@ -1,9 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react"
-import { Check, ChevronLeft, ChevronRight, CircleAlert, LoaderCircle, RefreshCw, Search } from "lucide-react"
+import { Check, ChevronLeft, ChevronRight, CircleAlert, LoaderCircle, Lock, RefreshCw, Search } from "lucide-react"
 
 import { IndexField, type IndexFieldProps } from "@/components/eraser/index-cells"
+import { IndexRichText } from "@/components/eraser/index-references"
 import { RichTextToolbar, RichTextToolbarHost, type RichTextTarget } from "@/components/eraser/rich-text"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -214,6 +215,46 @@ function RowJump({ navigation, current, position, onGo }: { navigation: RowSheet
  * (la frappe continue), puis partent l'une après l'autre ; ce qui reste quand on change de
  * ligne ou qu'on ferme la fiche part aussitôt, toujours vers la ligne d'où il vient.
  */
+/**
+ * La fiche d'une ligne posée dans une page (le détail modifiable d'une vue) : le même corps que la
+ * fiche, ses champs enregistrés d'eux-mêmes, une barre de mise en forme et l'état de
+ * l'enregistrement. Les champs `locked` restent en lecture.
+ */
+export function IndexRowForm({ rowKey, fields, layout, rowFor, onSave, rowRef, inventoryEndpoint, openForm, locked = [] }: {
+  rowKey: string
+  fields: RowSheetField[]
+  layout?: IndexLayout | null
+  rowFor?: (key: string) => IndexFieldProps["row"]
+  onSave: (rowKey: string, changes: Record<string, string>) => Promise<void> | void
+  rowRef?: { index: string; id: string; tab?: string }
+  inventoryEndpoint?: (row: { index: string; id: string }) => string
+  openForm?: (formId?: string) => void
+  locked?: string[]
+}) {
+  const [status, setStatus] = useState<SaveStatus>("idle")
+  const retryRef = useRef<(() => void) | null>(null)
+  const targetRef = useRef<RichTextTarget | null>(null)
+  const [toolbarReady, setToolbarReady] = useState(false)
+  const toolbarHost = useMemo(() => ({ activate: (target: RichTextTarget) => { targetRef.current = target; setToolbarReady(true) } }), [])
+  const lockedSet = new Set(locked.map(foldName))
+  const renderLocked = (field: RowSheetField) => lockedSet.has(foldName(field.label)) ? <div className="grid gap-1">
+    <span className="flex items-center gap-1 text-xs font-semibold text-muted-foreground"><Lock className="size-3" />{field.label}</span>
+    <div className="min-h-8 rounded-md border border-dashed bg-muted/20 px-2 py-1.5 text-sm">{field.value.trim() ? <IndexRichText html={field.value} /> : <span className="text-muted-foreground/60">—</span>}</div>
+  </div> : undefined
+  return <div className="grid gap-2">
+    <div className="flex flex-wrap items-center gap-1 rounded-lg border bg-card/80 px-2 py-1">
+      <RichTextToolbar targetRef={targetRef} ready={toolbarReady} />
+      <span className="ml-auto flex items-center gap-2">
+        {status === "error" && <Button type="button" size="sm" variant="outline" className="h-7" onClick={() => retryRef.current?.()}><RefreshCw />Réessayer</Button>}
+        <SaveIndicator status={status} />
+      </span>
+    </div>
+    <RichTextToolbarHost.Provider value={toolbarHost}>
+      <RowSheetBody key={rowKey} rowKey={rowKey} fields={fields} layout={layout} rowFor={rowFor} renderField={locked.length ? renderLocked : undefined} retryRef={retryRef} onSave={onSave} onStatus={setStatus} rowRef={rowRef} inventoryEndpoint={inventoryEndpoint} openForm={openForm} />
+    </RichTextToolbarHost.Provider>
+  </div>
+}
+
 function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, onSave, onStatus, rowRef, inventoryEndpoint, openForm }: {
   rowKey: string
   fields: RowSheetField[]

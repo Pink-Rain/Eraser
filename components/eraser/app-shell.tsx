@@ -99,7 +99,7 @@ function sameList(left: unknown[], right: unknown[]) {
   return left === right || (left.length === right.length && JSON.stringify(left) === JSON.stringify(right))
 }
 
-const ShellDataContext = createContext<{ characters: CharacterRecord[]; campaigns: CampaignRecord[]; /** Faux tant que les listes n'ont jamais répondu (elles arrivent après la page). */ listsLoaded: boolean; viewRole: SiteRole; user: ShellUser; avatarVersion: number; openAccount: () => void; /** La campagne choisie dans le menu (vue MJ). */ selectedCampaignId: string | null } | null>(null)
+const ShellDataContext = createContext<{ characters: CharacterRecord[]; campaigns: CampaignRecord[]; /** Faux tant que les listes n'ont jamais répondu (elles arrivent après la page). */ listsLoaded: boolean; viewRole: SiteRole; user: ShellUser; avatarVersion: number; openAccount: () => void; /** La campagne choisie dans le menu (vue MJ). */ selectedCampaignId: string | null; /** Le personnage choisi dans le menu (vue joueur). */ selectedCharacterId?: string | null } | null>(null)
 
 /**
  * Nomme la page (en-tête et onglet). Un PageLabel imbriqué l'emporte sur celui qui
@@ -125,6 +125,11 @@ const PageEditContext = createContext<(pageId: string | null) => void>(() => und
 export function usePageEditTarget(pageId: string | null) {
   const setTarget = useContext(PageEditContext)
   useEffect(() => { setTarget(pageId); return () => setTarget(null) }, [pageId, setTarget])
+}
+
+/** Les données du cadre, ou `null` hors du cadre (aperçus, pages publiques). */
+export function useOptionalShellData() {
+  return useContext(ShellDataContext)
 }
 
 export function useShellData() {
@@ -313,11 +318,12 @@ export function AppShell({
     [visibleCampaigns, selectedCampaignId],
   )
   const selectedCampaignInList = selectedCampaign?.id ?? null
+  const selectedCharacterInList = selectedCharacter?.id ?? null
   // Le compte ne change pas d'une page à l'autre : le même objet, tant que ses champs sont les mêmes.
   const { uid: userUid, email: userEmail, displayName: userDisplayName, role: userRole } = user
   const shellUser = useMemo<ShellUser>(() => ({ uid: userUid, email: userEmail, displayName: userDisplayName, role: userRole }), [userDisplayName, userEmail, userRole, userUid])
   // Les pages qui lisent ces données ne se redessinent que si elles changent vraiment.
-  const shellData = useMemo(() => ({ characters: visibleCharacters, campaigns: visibleCampaigns, listsLoaded, viewRole, user: shellUser, avatarVersion, openAccount, selectedCampaignId: selectedCampaignInList }), [avatarVersion, listsLoaded, openAccount, selectedCampaignInList, shellUser, viewRole, visibleCampaigns, visibleCharacters])
+  const shellData = useMemo(() => ({ characters: visibleCharacters, campaigns: visibleCampaigns, listsLoaded, viewRole, user: shellUser, avatarVersion, openAccount, selectedCampaignId: selectedCampaignInList, selectedCharacterId: selectedCharacterInList }), [avatarVersion, listsLoaded, openAccount, selectedCampaignInList, selectedCharacterInList, shellUser, viewRole, visibleCampaigns, visibleCharacters])
   // Au clic, la page de destination s'affiche aussitôt, sans ses données ; le titre d'un
   // personnage ou d'une campagne est déjà connu ici.
   const pendingPage = usePendingPage((to) => {

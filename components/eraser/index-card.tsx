@@ -5,7 +5,7 @@
  * d'accent et ses blocs, remplis avec une ligne. Le même composant sert à la grille de
  * cartes de l'index et à l'aperçu de l'éditeur, qui y choisit un bloc d'un clic.
  */
-import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
+import { createContext, memo, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 import { Check, ChevronDown, ChevronRight, ImageIcon, LayoutGrid, Plus, Table2, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -15,6 +15,7 @@ import { GaugeCell, GaugeView, IndexIconGlyph } from "@/components/eraser/index-
 import { IndexImage } from "@/components/eraser/index-image"
 import { IndexRichText, RowHover } from "@/components/eraser/index-references"
 import { columnStyleCss, pillStyle } from "@/components/eraser/index-style"
+import { useRolesOf } from "@/components/eraser/view-roles"
 import { characteristicShort, type CharacteristicName } from "@/lib/characteristics"
 import {
   cardListValues,
@@ -27,6 +28,7 @@ import {
   readableListValue,
   type CardAspect,
   type CardBlock,
+  type CardButton,
   type CardShape,
   type CardTemplate,
   type CardTextSize,
@@ -37,11 +39,35 @@ import {
 import { foldName, gaugeScaleOf, isCheckedValue, isImageSource, matchChoice, normalizeSpec, parseGaugeCell, parseGlyphValue, type IndexColumnSpec } from "@/lib/index-columns"
 import { formatIndexNumber, parseIndexNumber } from "@/lib/index-numbers"
 import { cn } from "@/lib/utils"
+import { allowedFor, type RoleRow, type ViewRole } from "@/lib/view-roles"
 
-/** Une ligne vue par une carte : la valeur de chaque colonne (comme le tableau la montre) et son type. */
+/** Une ligne vue par une carte : la valeur de chaque colonne (comme le tableau la montre) et son type ; sa clé dans la page qui la montre. */
 export type CardRowSource = {
   value: (header: string) => string
   spec: (header: string) => IndexColumnSpec | undefined
+  /** La ligne dans la page (pour ses boutons et son clic) ; absente : un aperçu. */
+  key?: string
+}
+
+/**
+ * Ce que la page sait faire d'une carte : exécuter un bouton du bloc « Boutons » (ses étapes,
+ * comme la colonne Boutons), savoir s'il s'affiche (sa condition), les rôles du lecteur pour la
+ * ligne, et le clic de la carte (un formulaire ici, la page). Absent (aperçu) : les boutons se
+ * montrent sans rien faire.
+ */
+export type CardActions = {
+  run: (rowKey: string, button: CardButton) => void
+  visible?: (rowKey: string, button: CardButton) => boolean
+  rolesOf?: (rowKey: string) => Set<ViewRole>
+  openForm?: (rowKey: string, form: string) => void
+  openPage?: (rowKey: string) => void
+}
+export const CardActionsContext = createContext<CardActions | null>(null)
+
+/** Une ligne vue par les rôles (lib/view-roles.ts) : son nom, son identifiant, ses cases. */
+export function roleRowOf(name: string, headers: string[], cell: (header: string) => string): RoleRow {
+  const idHeader = headers.find((header) => foldName(header) === "id")
+  return { name, id: idHeader ? cell(idHeader).replace(/<[^>]+>/g, "").trim() : undefined, cell, headers }
 }
 
 // ---------------------------------------------------------------------------
@@ -420,6 +446,8 @@ function BlockBody({ block, ctx }: { block: CardBlock; ctx: BlockContext }): Rea
     }
     case "space":
       return <div aria-hidden="true" style={{ height: block.height ?? 12 }} />
+    case "buttons":
+      return <CardButtons block={block} ctx={ctx} />
     case "details": {
       const columns = (block.columns ?? []).filter((column) => plainCardText(row.value(column) ?? ""))
       if (!columns.length) return null
@@ -431,6 +459,44 @@ function BlockBody({ block, ctx }: { block: CardBlock; ctx: BlockContext }): Rea
       </DetailsBlock>
     }
   }
+}
+
+/**
+ * Le bloc « Boutons » : chaque bouton visible pour les rôles du lecteur (et sa condition), à la
+ * couleur choisie (sinon l'accent), plein, au contour ou discret. Un clic ne rouvre pas la carte.
+ */
+function CardButtons({ block, ctx }: { block: CardBlock; ctx: BlockContext }) {
+  const actions = useContext(CardActionsContext)
+  const rolesOf = useRolesOf()
+  const rowKey = ctx.row.key
+  const buttons = block.buttons ?? []
+  if (!buttons.length) return null
+  // Les rôles du lecteur pour cette ligne (« Voir comme » dans un aperçu, qui n'a pas de ligne).
+  const held = rowKey && actions?.rolesOf ? actions.rolesOf(rowKey) : rolesOf()
+  const shown = buttons.filter((button) => allowedFor(button.roles, held) && (!rowKey || !actions?.visible || actions.visible(rowKey, button)))
+  if (!shown.length) return null
+  const align = block.align ?? (ctx.card.align === "center" ? "center" : "left")
+  return <div className={cn("flex min-w-0 flex-wrap gap-1.5", block.stretch && "[&>button]:flex-1", align === "center" && "justify-center", align === "right" && "justify-end")}>
+    {shown.map((button) => {
+      const color = button.color ?? ctx.accent
+      const look = button.look ?? "solid"
+      const live = Boolean(rowKey && actions)
+      const glyph = button.icon ? parseGlyphValue(button.icon) : null
+      return <button
+        key={button.id}
+        type="button"
+        title={button.iconOnly ? button.label : live ? undefined : "Dans l’index, ce bouton agit sur la ligne"}
+        aria-label={button.label || "Bouton"}
+        onClick={(event) => { event.stopPropagation(); event.preventDefault(); if (live) actions!.run(rowKey!, button) }}
+        onKeyDown={(event) => event.stopPropagation()}
+        className={cn("inline-flex h-7 min-w-0 items-center justify-center gap-1 rounded-md px-2 text-[11px] font-semibold transition", look === "solid" ? "text-white shadow-sm hover:brightness-110" : look === "outline" ? "border bg-background/70 hover:bg-background" : "hover:bg-foreground/5", button.iconOnly && "w-7 px-0")}
+        style={look === "solid" ? { backgroundColor: color } : look === "outline" ? { borderColor: `color-mix(in srgb, ${color} 55%, transparent)`, color } : { color }}
+      >
+        {glyph && (glyph.icon || glyph.emoji) && <IndexIconGlyph icon={glyph.icon} emoji={glyph.emoji} className="size-3.5 shrink-0" filled={Boolean(glyph.emoji)} />}
+        {!button.iconOnly && <span className="truncate">{button.label || "Bouton"}</span>}
+      </button>
+    })}
+  </div>
 }
 
 /** Des détails repliables : les déplier n'ouvre pas la fiche de la ligne. */
@@ -517,7 +583,15 @@ export const IndexCard = memo(function IndexCard({ card, row, onOpen, href, sele
     ...(surface === "glow" ? { backgroundImage: `linear-gradient(150deg, color-mix(in srgb, ${accent} 18%, transparent), color-mix(in srgb, ${accent} 4%, transparent) 45%, transparent 75%)` } : {}),
     ...(card.shadow ? { boxShadow: `0 12px 35px color-mix(in srgb, ${accent} 14%, transparent)` } : {}),
   }
-  const open = onOpen && !editing ? onOpen : undefined
+  // Le clic de la carte (« Survol et clic ») : sa fiche (d'office), un formulaire ici, sa page, rien.
+  const actions = useContext(CardActionsContext)
+  const rowKey = row.key
+  const click = card.click ?? "sheet"
+  const clicked = click === "none" ? undefined
+    : click === "form" && rowKey && actions?.openForm ? () => actions.openForm!(rowKey, card.clickForm || "principal")
+      : click === "page" && rowKey && actions?.openPage ? () => actions.openPage!(rowKey)
+        : onOpen
+  const open = clicked && !editing ? clicked : undefined
   const interactive = Boolean(open)
   const handleKey = (event: KeyboardEvent) => { if (open && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); open() } }
   const handleClick = (event: MouseEvent) => {
@@ -604,7 +678,8 @@ export const IndexCard = memo(function IndexCard({ card, row, onOpen, href, sele
 
 function blockPlaceholder(block: CardBlock) {
   const columns = [block.column, ...(block.columns ?? []), ...(block.parts ?? []).map((part) => part.column)].filter(Boolean)
-  const label = { title: "Titre", line: "Ligne", text: "Texte", pills: "Pastilles", field: "Libellé : valeur", bar: "Barre", stats: "Tuiles", image: "Image", value: "Valeur", divider: "Séparateur", details: "Détails", zone: "Zone de couleur", space: "Espace" }[block.type]
+  if (block.type === "buttons") return block.buttons?.length ? "Boutons : aucun pour ce rôle" : "Boutons : ajoute un bouton"
+  const label = { title: "Titre", line: "Ligne", text: "Texte", pills: "Pastilles", field: "Libellé : valeur", bar: "Barre", stats: "Tuiles", image: "Image", value: "Valeur", divider: "Séparateur", details: "Détails", zone: "Zone de couleur", space: "Espace", buttons: "Boutons" }[block.type]
   return columns.length ? `${label} : ${columns.join(", ")} (vide ici)` : `${label} : choisis une colonne`
 }
 

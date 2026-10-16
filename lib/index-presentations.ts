@@ -14,6 +14,7 @@
  */
 import { cellNumber, cellParts, cleanStats, type StatDefinition } from "@/lib/index-stats"
 import { parseCardTemplate, type CardTemplate } from "@/lib/index-cards"
+import { cleanViewRoles, isViewRole, type ViewRole } from "@/lib/view-roles"
 
 export { cellNumber }
 
@@ -282,8 +283,100 @@ export type Presentation = {
   laneColumn?: string
   /** Arborescence : une colonne grisant la ligne quand elle est vide ou « non » (lignée) ; les dates de début (`dateColumn`) et de fin (`endColumn`) sous le nom. */
   dimColumn?: string
+  /**
+   * Liste (les trois formes : liste, kanban, maître-détail) : l'en-tête de la vue (un titre, un
+   * texte, une icône, le nombre de lignes) et sa place : au-dessus, ou dans le détail.
+   */
+  header?: ListHeader
+  /** La barre d'outils : recherche, filtres épinglés, tri, regroupement, nombre, « Ajouter » ; au-dessus ou dans le détail. */
+  toolbar?: ListToolbar
+  /** Le pied : le nombre de lignes, des totaux qui suivent la recherche, « Charger plus ». */
+  footer?: ListFooter
+  /** Quand rien ne correspond : le texte écrit à la place des lignes. */
+  emptyText?: string
+  /** Couleurs selon une règle : une teinte, un signe ou une ligne grisée quand la condition est vraie (la première qui l'est). */
+  rules?: RowRule[]
+  /** Les groupes en onglets (`menu: "tabs"`) : en haut, sur le côté (écrits à la verticale), en bas ; leur dessin. */
+  groupTabs?: GroupTabs
+  /** Au clic, selon qui regarde : un clic par rôle (le plus précis l'emporte) ; absent : `click` pour tous. */
+  clickByRole?: Partial<Record<ViewRole, PresentationClick>>
+  /** Glisser une ligne d'une section à l'autre (sections empilées) change sa case, comme le kanban. */
+  dragSections?: boolean
+  /** Une ligne à plusieurs valeurs (« Allié, Marchand ») : dans chaque groupe, ou seulement dans celui de sa première valeur (d'office : chaque groupe pour une liste, la première pour un kanban). */
+  multiValue?: "each" | "first"
   /** L'apparence des éléments (Modifier › la vue › Apparence). */
   look?: PresentationLook
+}
+
+/** L'en-tête d'une liste : ce qu'il montre, et où. */
+export type ListHeader = { title?: string; text?: string; icon?: string; count?: boolean; place?: "top" | "detail"; hidden?: boolean }
+/** Un outil de la barre d'outils d'une liste. Ce que le lecteur y change ne touche que son écran. */
+export type ListTool =
+  | { type: "search"; placeholder?: string; columns?: string[] }
+  | { type: "filter"; column: string; multi?: boolean }
+  | { type: "sort"; columns: string[] }
+  | { type: "group"; columns: string[] }
+  | { type: "count"; word?: string }
+  | { type: "add"; label?: string; roles?: ViewRole[] }
+export type ListToolbar = { tools: ListTool[]; place?: "top" | "detail" }
+export type ListFooter = { count?: boolean; word?: string; totals?: TileFormula[]; limit?: number }
+export type RowRuleOp = "is" | "isnot" | "contains" | "empty" | "notempty" | "gt" | "lt"
+export type RowRule = { column: string; op: RowRuleOp; value?: string; tint?: string; icon?: string; dim?: boolean }
+export type GroupTabs = { place?: "top" | "left" | "right" | "bottom"; style?: "underline" | "pills" | "folder" | "ribbon"; vertical?: boolean }
+
+export const listToolTypes: Array<{ value: ListTool["type"]; label: string; hint: string }> = [
+  { value: "search", label: "Recherche", hint: "Une barre où le lecteur tape un mot : la liste se réduit à mesure." },
+  { value: "filter", label: "Filtre épinglé", hint: "Des pastilles pour ne garder qu’une ou plusieurs valeurs (Allié, Hostile…)." },
+  { value: "sort", label: "Tri au choix", hint: "Le lecteur choisit l’ordre : par nom, par niveau…" },
+  { value: "group", label: "Regroupement au choix", hint: "Le lecteur range autrement : par attitude, par faction, sans groupe." },
+  { value: "count", label: "Nombre de lignes", hint: "« 9 PNJ », qui suit la recherche et les filtres." },
+  { value: "add", label: "Bouton « Ajouter »", hint: "Crée une ligne dans l’onglet, réservé aux rôles choisis." },
+]
+export const rowRuleOps: Array<{ value: RowRuleOp; label: string; needsValue: boolean }> = [
+  { value: "is", label: "est", needsValue: true }, { value: "isnot", label: "n’est pas", needsValue: true }, { value: "contains", label: "contient", needsValue: true },
+  { value: "empty", label: "est vide", needsValue: false }, { value: "notempty", label: "n’est pas vide", needsValue: false },
+  { value: "gt", label: "supérieur à", needsValue: true }, { value: "lt", label: "inférieur à", needsValue: true },
+]
+
+/** La règle de couleur d'une ligne : la première dont la condition est vraie. */
+export function ruleFor<T>(rules: RowRule[] | undefined, row: T, valueOf: (row: T, column: string) => string): RowRule | undefined {
+  if (!rules?.length) return undefined
+  const fold = (value: string) => value.replace(/<[^>]+>/g, " ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").replace(/\s+/g, " ").trim()
+  return rules.find((rule) => {
+    const cell = valueOf(row, rule.column)
+    const text = fold(cell)
+    const wanted = fold(rule.value ?? "")
+    switch (rule.op) {
+      case "is": return cellParts(cell).some((part) => fold(part) === wanted) || text === wanted
+      case "isnot": return !cellParts(cell).some((part) => fold(part) === wanted) && text !== wanted
+      case "contains": return Boolean(wanted) && text.includes(wanted)
+      case "empty": return !text
+      case "notempty": return Boolean(text)
+      case "gt": case "lt": {
+        const number = cellNumber(cell.replace(/<[^>]+>/g, " "))
+        const limit = cellNumber(rule.value ?? "")
+        return number !== null && limit !== null && (rule.op === "gt" ? number > limit : number < limit)
+      }
+    }
+  })
+}
+
+/** Les lignes que garde la barre d'outils : la recherche (dans ses colonnes, sinon le nom) et les filtres épinglés. */
+export function toolbarRows<T>(rows: T[], toolbar: ListToolbar | undefined, state: { query: string; filters: Record<number, string[]> }, valueOf: (row: T, column: string) => string, nameOf: (row: T) => string): T[] {
+  if (!toolbar?.tools.length) return rows
+  const fold = (value: string) => value.replace(/<[^>]+>/g, " ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").replace(/\s+/g, " ").trim()
+  let kept = rows
+  toolbar.tools.forEach((tool, index) => {
+    if (tool.type === "search" && fold(state.query)) {
+      const wanted = fold(state.query)
+      kept = kept.filter((row) => (tool.columns?.length ? tool.columns.map((column) => valueOf(row, column)) : [nameOf(row)]).some((value) => fold(value).includes(wanted)))
+    }
+    if (tool.type === "filter" && state.filters[index]?.length) {
+      const chosen = state.filters[index].map(fold)
+      kept = kept.filter((row) => { const parts = cellParts(valueOf(row, tool.column)).map(fold); return chosen.some((value) => value === "" ? !parts.length : parts.includes(value)) })
+    }
+  })
+  return kept
 }
 
 export type CalendarScale = "year" | "month" | "week" | "day" | "agenda" | "seasons"
@@ -307,15 +400,23 @@ export const calendarFormChoices: { [K in CalendarScale]: ReadonlyArray<{ value:
 /** L'échelle d'un calendrier : celle réglée, sinon l'ancien « Agenda », sinon le mois. */
 export const calendarScaleOf = (layout: Pick<Presentation, "calendarScale" | "look">): CalendarScale => layout.calendarScale ?? (layout.look?.calendarMode === "agenda" ? "agenda" : "month")
 
-export type PresentationClick = "sheet" | "page" | "side" | "below" | "none"
+export type PresentationClick = "sheet" | "page" | "side" | "center" | "below" | "none"
 export const presentationClicks: Array<{ value: PresentationClick; label: string; hint: string }> = [
   { value: "sheet", label: "Ouvrir la fiche", hint: "Le formulaire étoilé de la ligne (d’office)." },
-  { value: "page", label: "Ouvrir la page", hint: "La page de la ligne, si l’index en a une." },
-  { value: "side", label: "Afficher à côté", hint: "La ligne choisie dans un panneau à côté : la vue devient un maître-détail." },
+  { value: "side", label: "Panneau à côté, toujours ouvert", hint: "La ligne choisie (la première d’office) dans un panneau à côté : la vue devient un maître-détail." },
+  { value: "center", label: "Fenêtre au centre", hint: "Le détail de la ligne dans une fenêtre, par-dessus la vue." },
   { value: "below", label: "Afficher dessous", hint: "La ligne choisie se déplie sous l’élément (ou sous la vue)." },
+  { value: "page", label: "Ouvrir la page", hint: "La page de la ligne, si l’index en a une." },
   { value: "none", label: "Rien", hint: "Les éléments ne réagissent pas au clic." },
 ]
-export type PresentationDetail = { kind?: "fields" | "form" | "card" | "children"; form?: string; card?: string; width?: "narrow" | "normal" | "wide"; nav?: boolean }
+const clickValues = presentationClicks.map((entry) => entry.value)
+/**
+ * Le détail (à côté, au centre, dessous, et le maître-détail) : les colonnes, un formulaire, une
+ * carte ; un formulaire en lecture, modifiable directement (`edit: "inline"`) ou après
+ * « Modifier » (`edit: "button"`), par les rôles choisis (aucun : tous ceux qui peuvent écrire),
+ * certains champs restant en lecture (`locked`) ; sa largeur ; précédent / suivant.
+ */
+export type PresentationDetail = { kind?: "fields" | "form" | "card" | "children"; form?: string; card?: string; width?: "narrow" | "normal" | "wide"; nav?: boolean; edit?: "inline" | "button"; editRoles?: ViewRole[]; locked?: string[] }
 export type GroupFormulaOp = "count" | "sum" | "avg" | "min" | "max"
 export const groupFormulaOps: Array<{ value: GroupFormulaOp; label: string }> = [
   { value: "count", label: "Nombre de lignes" }, { value: "sum", label: "Somme" }, { value: "avg", label: "Moyenne" }, { value: "min", label: "Plus petite valeur" }, { value: "max", label: "Plus grande valeur" },
@@ -544,8 +645,9 @@ export function cleanPresentation(value: unknown): Presentation | undefined {
   if (menu) layout.menu = menu
   if (text(raw.itemForm, 40)) layout.itemForm = text(raw.itemForm, 40)
   if (text(raw.hover, 40)) layout.hover = text(raw.hover, 40)
-  const click = oneOf(raw.click, ["sheet", "page", "side", "below", "none"] as const)
-  if (click && click !== "sheet") layout.click = click
+  // « Ouvrir la fiche » se garde quand il est choisi : il l'emporte alors sur le clic de la carte de l'élément.
+  const click = oneOf(raw.click, clickValues)
+  if (click) layout.click = click
   if (raw.detail && typeof raw.detail === "object") {
     const input = raw.detail as Record<string, unknown>
     const detail: PresentationDetail = {}
@@ -556,6 +658,12 @@ export function cleanPresentation(value: unknown): Presentation | undefined {
     const width = oneOf(input.width, ["narrow", "normal", "wide"] as const)
     if (width && width !== "normal") detail.width = width
     if (input.nav === true) detail.nav = true
+    const edit = oneOf(input.edit, ["inline", "button"] as const)
+    if (edit) detail.edit = edit
+    const editRoles = cleanViewRoles(input.editRoles)
+    if (editRoles) detail.editRoles = editRoles
+    const locked = Array.isArray(input.locked) ? input.locked.map((column) => text(column)).filter(Boolean).slice(0, 40) : []
+    if (locked.length) detail.locked = locked
     if (Object.keys(detail).length) layout.detail = detail
   }
   if (raw.groupFormula && typeof raw.groupFormula === "object") {
@@ -657,6 +765,84 @@ export function cleanPresentation(value: unknown): Presentation | undefined {
   if (raw.proseColumns === 2) layout.proseColumns = 2
   if (raw.chapterNumbers === true) layout.chapterNumbers = true
   if (raw.tocPosition === "top") layout.tocPosition = "top"
+  // La liste : en-tête, barre d'outils, pied, règles, onglets des groupes, clic par rôle, glisser.
+  if (raw.header && typeof raw.header === "object") {
+    const input = raw.header as Record<string, unknown>
+    const header: ListHeader = {}
+    if (text(input.title, 120)) header.title = text(input.title, 120)
+    if (typeof input.text === "string" && input.text.trim()) header.text = input.text.trim().slice(0, 600)
+    if (text(input.icon, 40)) header.icon = text(input.icon, 40)
+    if (input.count === true) header.count = true
+    if (input.place === "detail") header.place = "detail"
+    if (input.hidden === true) header.hidden = true
+    if (Object.keys(header).length) layout.header = header
+  }
+  if (raw.toolbar && typeof raw.toolbar === "object") {
+    const input = raw.toolbar as Record<string, unknown>
+    const columnList = (value: unknown, max = 8) => Array.isArray(value) ? value.map((column) => text(column)).filter(Boolean).slice(0, max) : []
+    const tools = (Array.isArray(input.tools) ? input.tools : []).flatMap((entry): ListTool[] => {
+      if (!entry || typeof entry !== "object") return []
+      const tool = entry as Record<string, unknown>
+      switch (tool.type) {
+        case "search": { const columns = columnList(tool.columns); return [{ type: "search", ...(text(tool.placeholder, 60) ? { placeholder: text(tool.placeholder, 60) } : {}), ...(columns.length ? { columns } : {}) }] }
+        case "filter": return text(tool.column) ? [{ type: "filter", column: text(tool.column), ...(tool.multi === true ? { multi: true } : {}) }] : []
+        case "sort": { const columns = columnList(tool.columns, 12); return columns.length ? [{ type: "sort", columns }] : [] }
+        case "group": { const columns = columnList(tool.columns, 12); return columns.length ? [{ type: "group", columns }] : [] }
+        case "count": return [{ type: "count", ...(text(tool.word, 30) ? { word: text(tool.word, 30) } : {}) }]
+        case "add": { const roles = cleanViewRoles(tool.roles); return [{ type: "add", ...(text(tool.label, 40) ? { label: text(tool.label, 40) } : {}), ...(roles ? { roles } : {}) }] }
+        default: return []
+      }
+    }).slice(0, 12)
+    if (tools.length) layout.toolbar = { tools, ...(input.place === "detail" ? { place: "detail" as const } : {}) }
+  }
+  if (raw.footer && typeof raw.footer === "object") {
+    const input = raw.footer as Record<string, unknown>
+    const footer: ListFooter = {}
+    if (input.count === true) footer.count = true
+    if (text(input.word, 30)) footer.word = text(input.word, 30)
+    const totals = Array.isArray(input.totals) ? input.totals.flatMap((entry): TileFormula[] => {
+      if (!entry || typeof entry !== "object") return []
+      const item = entry as Record<string, unknown>
+      const op = oneOf(item.op, ["count", "sum", "avg", "min", "max"] as const)
+      if (!op) return []
+      return [{ op, ...(text(item.column) ? { column: text(item.column) } : {}), ...(text(item.label, 40) ? { label: text(item.label, 40) } : {}), ...(text(item.unit, 12) ? { unit: text(item.unit, 12) } : {}) }]
+    }).slice(0, 4) : []
+    if (totals.length) footer.totals = totals
+    const limit = bounded(input.limit, 5, 500)
+    if (limit) footer.limit = limit
+    if (Object.keys(footer).length) layout.footer = footer
+  }
+  if (typeof raw.emptyText === "string" && raw.emptyText.trim()) layout.emptyText = raw.emptyText.trim().slice(0, 200)
+  const rules = Array.isArray(raw.rules) ? raw.rules.flatMap((entry): RowRule[] => {
+    if (!entry || typeof entry !== "object") return []
+    const item = entry as Record<string, unknown>
+    const op = oneOf(item.op, rowRuleOps.map((rule) => rule.value))
+    if (!text(item.column) || !op) return []
+    const rule: RowRule = { column: text(item.column), op }
+    if (text(item.value, 80)) rule.value = text(item.value, 80)
+    if (isHexColor(item.tint)) rule.tint = item.tint
+    if (text(item.icon, 40)) rule.icon = text(item.icon, 40)
+    if (item.dim === true) rule.dim = true
+    return [rule]
+  }).slice(0, 12) : []
+  if (rules.length) layout.rules = rules
+  if (raw.groupTabs && typeof raw.groupTabs === "object") {
+    const input = raw.groupTabs as Record<string, unknown>
+    const tabs: GroupTabs = {}
+    const place = oneOf(input.place, ["top", "left", "right", "bottom"] as const)
+    if (place && place !== "top") tabs.place = place
+    const style = oneOf(input.style, ["underline", "pills", "folder", "ribbon"] as const)
+    if (style && style !== "underline") tabs.style = style
+    if (input.vertical === true) tabs.vertical = true
+    if (Object.keys(tabs).length) layout.groupTabs = tabs
+  }
+  if (raw.clickByRole && typeof raw.clickByRole === "object") {
+    const byRole = Object.fromEntries(Object.entries(raw.clickByRole as Record<string, unknown>).filter(([role, click]) => isViewRole(role) && clickValues.includes(click as PresentationClick))) as Partial<Record<ViewRole, PresentationClick>>
+    if (Object.keys(byRole).length) layout.clickByRole = byRole
+  }
+  if (raw.dragSections === true) layout.dragSections = true
+  const multiValue = oneOf(raw.multiValue, ["each", "first"] as const)
+  if (multiValue) layout.multiValue = multiValue
   const look = cleanPresentationLook(raw.look)
   if (look) layout.look = look
   return layout.kind === "table" && !layout.groupBy ? undefined : layout

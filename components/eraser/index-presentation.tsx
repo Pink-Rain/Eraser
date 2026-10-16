@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react"
-import { BookOpen, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, ImageOff } from "lucide-react"
+import { BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, ImageOff, Pencil, Plus, Search, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { loadWorldIndexData } from "@/components/eraser/index-cells"
@@ -9,10 +9,14 @@ import { IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { addDays, addMonths, calendarsFromTables, compareCalendarDates, dateFromDayNumber, dayNumber, firstWeekdayOf, formatCalendarDate, monthLength, parseCalendarDate, realCalendar, REAL_CALENDAR, seasonOf, weekdayOf, weekStartOf, yearLength, type CalendarDate, type CalendarDefinition } from "@/lib/calendars"
 import { cardGridStyle, cardWidthRem, IndexCard, TypedValue, type CardRowSource } from "@/components/eraser/index-card"
 import { RowHover } from "@/components/eraser/index-references"
+import { useRolesOf } from "@/components/eraser/view-roles"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import { allowedFor, pickForRole, type RoleRow, type ViewRole } from "@/lib/view-roles"
 import type { CardTemplate } from "@/lib/index-cards"
 import { parseGlyphValue, type IndexColumnSpec } from "@/lib/index-columns"
 import { cellNumber, cellParts } from "@/lib/index-stats"
-import { calendarScaleOf, calendarScales, PRESENTATION_ITEM_CARD, type PresentationClick, dashboardTileKinds, dashboardTileValue, DEFAULT_ITEM_CARD, depthPalette, formatPresentationNumber, groupFormulaValue, groupRowsBy, linkedTiles, rowTree, sortLayoutRows, textWithFormulas, tileGaugeValue, timelineEntries, treeSize, allPresentationKinds, presentationPalette, type CalendarScale, type DashboardTile, type KanbanLane, type RowTreeNode, type TabPresentations, type Presentation, type PresentationLook } from "@/lib/index-presentations"
+import { calendarScaleOf, calendarScales, PRESENTATION_ITEM_CARD, type PresentationClick, dashboardTileKinds, dashboardTileValue, DEFAULT_ITEM_CARD, depthPalette, formatPresentationNumber, groupFormulaValue, groupRowsBy, linkedTiles, rowTree, ruleFor, sortLayoutRows, textWithFormulas, toolbarRows, tileGaugeValue, timelineEntries, treeSize, allPresentationKinds, presentationPalette, type CalendarScale, type DashboardTile, type GroupTabs, type KanbanLane, type RowTreeNode, type TabPresentations, type Presentation, type PresentationLook } from "@/lib/index-presentations"
 
 /**
  * Les présentations d'un onglet-fenêtre autres que le tableau et les cartes : liste,
@@ -58,6 +62,15 @@ export type PresentationProps = {
   specOf?: (header: string) => IndexColumnSpec | undefined
   /** La ligne citable (index, identifiant) : au passage de la souris, son survol (la version de `layout.hover`). */
   rowRef?: (rowKey: string) => { index: string; id: string } | null
+  /** Un formulaire de l'onglet ouvert ici sur la ligne (le clic d'une carte « Ouvrir un formulaire ») ; absent : la fiche. */
+  onOpenForm?: (rowKey: string, formId: string) => void
+  /** Le détail modifiable : le formulaire de la ligne, ses champs enregistrés d'eux-mêmes (`locked` : en lecture) ; absent : en lecture. */
+  renderEditForm?: (rowKey: string, formId: string, locked: string[]) => ReactNode
+  /** « Ajouter » de la barre d'outils : une ligne neuve dans l'onglet ; absent : pas de bouton. */
+  onAdd?: () => void
+  /** Réglé par la vue : le clic de cette ligne pour le lecteur (son rôle), et ce qui se pose au-dessus du détail (en-tête, barre d'outils). */
+  clickOf?: (rowKey: string) => PresentationClick
+  detailTop?: ReactNode
 }
 
 /**
@@ -116,14 +129,14 @@ function cardFor(props: Pick<PresentationProps, "layout" | "renderCard" | "rende
   } : null
   const draw = itemForm && props.renderForm ? (row: string) => props.renderForm!(row, itemForm) : drawCard
   if (!draw) return null
-  // Une carte ouvre la fiche d'elle-même : seulement quand « Au clic » dit autre chose, la vue reprend le clic.
-  const intercept = Boolean(itemForm) || (click ?? "sheet") !== "sheet"
+  // La vue reprend le clic de l'élément (`onOpen` décide : son « Au clic », celui du rôle du lecteur,
+  // sinon celui de la carte) ; les boutons, liens et replis dans la carte gardent le leur.
+  void click
   // eslint-disable-next-line react/display-name -- un rendu par ligne, pas un composant
   return (row: string) => {
     const node = draw(row)
     if (!node) return node
-    if (!intercept) return <WithRowHover row={row}>{node}</WithRowHover>
-    return <WithRowHover row={row}><div onClickCapture={(event) => { event.stopPropagation(); event.preventDefault(); if (!props.inert) props.onOpen(row) }} className={props.inert ? "" : "cursor-pointer"}>{node}</div></WithRowHover>
+    return <WithRowHover row={row}><div onClickCapture={(event) => { if ((event.target as HTMLElement).closest("button, a, input, select, textarea, [contenteditable=true]")) return; event.stopPropagation(); event.preventDefault(); if (!props.inert) props.onOpen(row) }} className={props.inert ? "" : "cursor-pointer"}>{node}</div></WithRowHover>
   }
 }
 
@@ -174,6 +187,11 @@ function plain(value: string) {
 
 const fold = (value: string) => value.toLocaleLowerCase("fr")
 
+/** Une ligne de la vue telle que les rôles la lisent (lib/view-roles.ts). */
+function roleRowFor(props: Pick<PresentationProps, "nameOf" | "valueOf" | "headers">, row: string): RoleRow {
+  return { name: plain(props.nameOf(row)), id: plain(props.valueOf(row, "ID")), cell: (header) => props.valueOf(row, header), headers: props.headers }
+}
+
 /** La couleur d'accent de la vue (Modifier › la vue › Couleurs), sinon l'or d'Eraser. */
 const accentOf = (look: PresentationLook) => look.color ?? "var(--primary)"
 
@@ -183,6 +201,9 @@ const accentOf = (look: PresentationLook) => look.color ?? "var(--primary)"
  * (liseré, teinte, point, nom coloré). Sans l'une ni l'autre : rien.
  */
 function rowColor(layout: Presentation, row: string, valueOf: PresentationProps["valueOf"], optionsOf?: PresentationProps["optionsOf"]) {
+  // Une règle de couleur vraie pour la ligne l'emporte (« PV < 15 » : en rouge).
+  const ruled = ruleFor(layout.rules, row, valueOf)?.tint
+  if (ruled) return ruled
   const fallback = layout.look?.color
   if (!layout.colorBy) return fallback
   const raw = (plain(valueOf(row, layout.colorBy)).split(/\s*[,;]\s*/)[0] ?? "").trim()
@@ -380,22 +401,89 @@ function SectionMenu({ names, accent, side }: { names: string[]; accent?: string
   </nav>
 }
 
-/** Les sections en onglets (« Menu des sections : onglets ») : une section à la fois, son nombre et sa formule dans l'onglet. */
+/**
+ * Les sections en onglets (« Menu des sections : onglets ») : une section à la fois, son nombre et
+ * sa formule dans l'onglet. Les onglets se posent en haut, sur le côté (écrits à la verticale, comme
+ * des intercalaires) ou en bas ; soulignés, en pastilles, en onglets de classeur ou en signets.
+ */
 function SectionTabs({ groups, layout, valueOf, accent, render }: { groups: Array<{ name: string; rows: string[]; color?: string }>; layout: Presentation; valueOf: PresentationProps["valueOf"]; accent?: string; render: (rows: string[]) => ReactNode }) {
   const [active, setActive] = useState(groups[0]?.name ?? "")
   const current = groups.find((group) => group.name === active) ?? groups[0]
-  return <div className="grid gap-4">
-    <div role="tablist" className="flex flex-wrap gap-0 border-b">
-      {groups.map((group) => <button key={group.name || "*"} type="button" role="tab" aria-selected={group === current} onClick={() => setActive(group.name)} className={`-mb-px inline-flex h-8 items-center gap-1.5 border-b-2 px-3 text-xs font-semibold uppercase tracking-[0.12em] transition ${group === current ? "border-current" : "border-transparent text-muted-foreground hover:text-foreground"}`} style={group === current ? { color: group.color ?? accent ?? "var(--primary)" } : undefined}>
-        {group.color && <span className="size-2 rounded-full" style={{ backgroundColor: group.color }} />}{group.name || "Sans valeur"}{!layout.hideCounts && <span className="font-normal normal-case tracking-normal text-muted-foreground">{group.rows.length}</span>}<GroupFormulaBadge layout={layout} rows={group.rows} valueOf={valueOf} color={group.color} />
-      </button>)}
-    </div>
-    {current && render(current.rows)}
+  const tabs: GroupTabs = layout.groupTabs ?? {}
+  const place = tabs.place ?? "top"
+  const style = tabs.style ?? "underline"
+  const side = place === "left" || place === "right"
+  const vertical = side && Boolean(tabs.vertical)
+  const edge = { top: "border-b-2", bottom: "border-t-2", left: "border-r-2", right: "border-l-2" }[place]
+  const bar = { top: "-mb-px", bottom: "-mt-px", left: "-mr-px", right: "-ml-px" }[place]
+  const tabClass = (on: boolean) => {
+    const base = `inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.12em] transition ${vertical ? "[writing-mode:vertical-rl] px-1.5 py-3" : "h-8 px-3"} ${place === "left" && vertical ? "rotate-180" : ""}`
+    if (style === "pills") return `${base} rounded-full ${vertical ? "" : ""} ${on ? "text-white shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`
+    if (style === "folder") return `${base} ${bar} border bg-card ${place === "top" ? "rounded-t-lg border-b-0" : place === "bottom" ? "rounded-b-lg border-t-0" : place === "left" ? "rounded-l-lg border-r-0" : "rounded-r-lg border-l-0"} ${on ? "z-[1] bg-background" : "bg-muted/50 text-muted-foreground hover:text-foreground"}`
+    if (style === "ribbon") return `${base} ${on ? "text-white" : "text-muted-foreground hover:text-foreground"} [clip-path:polygon(0_0,100%_0,100%_100%,50%_82%,0_100%)] ${vertical || side ? "" : "pb-2"}`
+    return `${base} ${bar} ${edge} ${on ? "border-current" : "border-transparent text-muted-foreground hover:text-foreground"}`
+  }
+  const tabStyle = (group: { color?: string }, on: boolean): CSSProperties | undefined => {
+    const tint = group.color ?? accent ?? "var(--primary)"
+    if (!on) return style === "ribbon" ? { backgroundColor: `color-mix(in srgb, ${tint} 14%, var(--muted))` } : undefined
+    if (style === "pills" || style === "ribbon") return { backgroundColor: tint }
+    return { color: tint }
+  }
+  const list = <div role="tablist" aria-orientation={side ? "vertical" : "horizontal"} className={`flex gap-0.5 ${side ? `flex-col ${style === "underline" || style === "folder" ? (place === "left" ? "border-r" : "border-l") : ""} sm:sticky sm:top-20 sm:self-start` : `flex-wrap ${style === "underline" || style === "folder" ? (place === "bottom" ? "border-t" : "border-b") : ""}`} ${style === "pills" ? "gap-1" : ""}`}>
+    {groups.map((group) => {
+      const on = group === current
+      return <button key={group.name || "*"} type="button" role="tab" aria-selected={on} onClick={() => setActive(group.name)} className={tabClass(on)} style={tabStyle(group, on)}>
+        {group.color && style !== "pills" && style !== "ribbon" && <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: group.color }} />}{group.name || "Sans valeur"}{!layout.hideCounts && <span className={`font-normal normal-case tracking-normal ${on && (style === "pills" || style === "ribbon") ? "opacity-80" : "text-muted-foreground"}`}>{group.rows.length}</span>}{!vertical && <GroupFormulaBadge layout={layout} rows={group.rows} valueOf={valueOf} color={group.color} inverted={on && (style === "pills" || style === "ribbon")} />}
+      </button>
+    })}
   </div>
+  const body = <div className="min-w-0">{current && render(current.rows)}</div>
+  if (side) return <div className={`grid gap-4 ${place === "left" ? "grid-cols-[auto_minmax(0,1fr)]" : "grid-cols-[minmax(0,1fr)_auto]"}`}>{place === "left" ? <>{list}{body}</> : <>{body}{list}</>}</div>
+  return <div className="grid gap-4">{place === "bottom" ? <>{body}{list}</> : <>{list}{body}</>}</div>
 }
 
-function Sections({ layout, rows, valueOf, nameOf, optionsOf, render }: { layout: Presentation; rows: string[]; valueOf: PresentationProps["valueOf"]; nameOf?: PresentationProps["nameOf"]; optionsOf?: PresentationProps["optionsOf"]; render: (rows: string[]) => ReactNode }) {
+/**
+ * Glisser une ligne d'une section à l'autre (« Glisser entre les sections ») : la section d'arrivée
+ * écrit sa valeur dans la case ; une case à plusieurs valeurs ne change que celle de la section quittée.
+ */
+type SectionDrag = { column: string; dragged: { row: string; from: string } | null; start: (row: string, from: string) => void; drop: (to: string) => void; movable: (row: string) => boolean }
+const SectionDragContext = createContext<SectionDrag | null>(null)
+
+/** La valeur réécrite d'une case quand une ligne passe de la section `from` à la section `to`. */
+function movedValue(raw: string, from: string, to: string) {
+  const parts = cellParts(raw)
+  if (!parts.length || !from) return to
+  const at = parts.findIndex((part) => fold(part) === fold(from))
+  const next = at < 0 ? [...parts, to] : parts.map((part, index) => index === at ? to : part)
+  return [...new Set(next.filter(Boolean))].join(", ")
+}
+
+/** Une ligne qu'on peut glisser entre sections : sa section de départ lui est donnée par `Sections`. */
+function DraggableRow({ row, from, children }: { row: string; from: string; children: ReactNode }) {
+  const drag = useContext(SectionDragContext)
+  if (!drag || !drag.movable(row)) return <>{children}</>
+  return <div draggable onDragStart={() => drag.start(row, from)} className={`cursor-grab active:cursor-grabbing ${drag.dragged?.row === row ? "opacity-50" : ""}`}>{children}</div>
+}
+const SectionOfRow = createContext("")
+function Movable({ row, children }: { row: string; children: ReactNode }) {
+  return <DraggableRow row={row} from={useContext(SectionOfRow)}>{children}</DraggableRow>
+}
+
+function Sections({ layout, rows, valueOf, nameOf, optionsOf, render, onCommit }: { layout: Presentation; rows: string[]; valueOf: PresentationProps["valueOf"]; nameOf?: PresentationProps["nameOf"]; optionsOf?: PresentationProps["optionsOf"]; render: (rows: string[]) => ReactNode; onCommit?: PresentationProps["onCommit"] }) {
   const look = layout.look ?? {}
+  const [dragged, setDragged] = useState<{ row: string; from: string } | null>(null)
+  const [over, setOver] = useState<string | null>(null)
+  const groupBy = layout.groupBy
+  // Glisser n'écrit qu'une case de texte simple (sans mise en forme) : rien n'est perdu.
+  const drag: SectionDrag | null = layout.dragSections && groupBy && onCommit && layout.menu !== "tabs" ? {
+    column: groupBy,
+    dragged,
+    start: (row, from) => setDragged({ row, from }),
+    drop: (to) => { if (dragged && fold(dragged.from) !== fold(to)) onCommit(dragged.row, groupBy, layout.multiValue === "first" ? to : movedValue(plain(valueOf(dragged.row, groupBy)), dragged.from, to)); setDragged(null); setOver(null) },
+    movable: (row) => { const raw = valueOf(row, groupBy).trim(); return plain(raw) === raw },
+  } : null
+  // Une ligne à plusieurs valeurs : dans chaque section (d'office), ou dans celle de sa première valeur.
+  const groupValue = (row: string) => layout.multiValue === "first" ? cellParts(valueOf(row, groupBy!))[0] ?? "" : valueOf(row, groupBy!)
   const heading = look.sectionStyle === "heading"
   const letter = look.sectionStyle === "letter"
   const spacing = heading ? "space-y-14" : letter ? "space-y-10" : "space-y-5"
@@ -411,10 +499,19 @@ function Sections({ layout, rows, valueOf, nameOf, optionsOf, render }: { layout
     groups = [...new Set(rows.map(first))].sort((left, right) => left === "#" ? 1 : right === "#" ? -1 : left.localeCompare(right, "fr")).map((name) => ({ name, rows: rows.filter((row) => first(row) === name) }))
   } else if (layout.groupBy) {
     const options = optionsOf?.(layout.groupBy) ?? []
-    groups = groupRowsBy(rows, (row) => valueOf(row, layout.groupBy!), options.map((option) => option.value)).filter((group) => group.name || !layout.hideEmpty).map((group) => ({ ...group, color: options.find((option) => fold(option.value) === fold(group.name))?.color }))
+    groups = groupRowsBy(rows, groupValue, options.map((option) => option.value)).filter((group) => group.name || !layout.hideEmpty).map((group) => ({ ...group, color: options.find((option) => fold(option.value) === fold(group.name))?.color }))
+    // Glisser vers une section encore vide : chaque choix de la liste a sa section.
+    if (drag) for (const option of options) if (!groups.some((group) => fold(group.name) === fold(option.value))) groups.push({ name: option.value, rows: [], color: option.color })
   } else return <>{render(rows)}</>
   if (layout.menu === "tabs") return <SectionTabs groups={groups} layout={layout} valueOf={valueOf} accent={look.color} render={render} />
-  return withMenu(groups.map((group) => group.name), <div className={spacing}>{groups.map((group) => <Section key={group.name || "*"} title={group.name} count={group.rows.length} collapsible={layout.collapsible} startCollapsed={layout.collapsed} hideCount={layout.hideCounts} heading={heading} letter={letter} icon={look.sectionIcon} accent={look.color} color={group.color} extra={formula(group.rows, group.color)}>{render(group.rows)}</Section>)}</div>)
+  const section = (group: { name: string; rows: string[]; color?: string }) => <Section key={group.name || "*"} title={group.name} count={group.rows.length} collapsible={layout.collapsible} startCollapsed={layout.collapsed} hideCount={layout.hideCounts} heading={heading} letter={letter} icon={look.sectionIcon} accent={look.color} color={group.color} extra={formula(group.rows, group.color)}>{group.rows.length ? <SectionOfRow.Provider value={group.name}>{render(group.rows)}</SectionOfRow.Provider> : drag ? <p className="rounded-lg border border-dashed px-3 py-3 text-center text-xs text-muted-foreground">Dépose une ligne ici</p> : null}</Section>
+  if (!drag) return withMenu(groups.map((group) => group.name), <div className={spacing}>{groups.map(section)}</div>)
+  return <SectionDragContext.Provider value={drag}>{withMenu(groups.map((group) => group.name), <div className={spacing}>{groups.map((group) => <div key={group.name || "*"}
+    onDragOver={(event) => { if (dragged) { event.preventDefault(); setOver(group.name) } }}
+    onDragLeave={() => setOver((current) => current === group.name ? null : current)}
+    onDrop={(event) => { event.preventDefault(); drag.drop(group.name) }}
+    onDragEnd={() => { setDragged(null); setOver(null) }}
+    className={`rounded-xl transition ${over === group.name ? "ring-2 ring-primary ring-offset-2" : ""}`}>{section(group)}</div>)}</div>)}</SectionDragContext.Provider>
 }
 
 const PAGE = 60
@@ -448,7 +545,7 @@ function ListLayout(props: PresentationProps) {
   const number = (index: number) => layout.numbered ? <span className="w-6 shrink-0 text-right font-display text-sm font-semibold tabular-nums" style={{ color: accentOf(look) }}>{index + 1}.</span> : null
   if (card) {
     // Chaque élément est une carte : une, deux ou trois par rangée, sections comprises.
-    return <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} render={(group) => <Paged rows={group} render={(shown) => <div className={`grid items-start ${layout.compact || look.density === "compact" ? "gap-1.5" : "gap-3"} ${cardTemplate ? "" : columnsClass}`} style={cardTemplate ? cardGridStyle(cardTemplate) : undefined}>{shown.map((row, index) => <div key={row} className="flex min-w-0 items-start gap-1.5">{number(index)}<div className="min-w-0 flex-1">{card(row) ?? <Item row={row} props={props} framed />}{layout.click === "below" && props.chosen === row && <div className="mt-2"><DetailPanel row={row} rows={rows} props={props} inline /></div>}</div></div>)}</div>} />} />
+    return <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} onCommit={props.onCommit} render={(group) => <Paged rows={group} render={(shown) => <div className={`grid items-start ${layout.compact || look.density === "compact" ? "gap-1.5" : "gap-3"} ${cardTemplate ? "" : columnsClass}`} style={cardTemplate ? cardGridStyle(cardTemplate) : undefined}>{shown.map((row, index) => <Movable key={row} row={row}><div className="flex min-w-0 items-start gap-1.5">{number(index)}<div className={`min-w-0 flex-1 ${props.chosen === row && props.clickOf?.(row) !== "below" ? "rounded-xl ring-2 ring-primary/45 ring-offset-2 ring-offset-background" : ""}`}>{card(row) ?? <Item row={row} props={props} framed />}{props.chosen === row && props.clickOf?.(row) === "below" && <div className="mt-2"><DetailPanel row={row} rows={rows} props={props} inline /></div>}</div></div></Movable>)}</div>} />} />
   }
   const boxed = look.surface === "boxed"
   const zebra = look.surface === "zebra"
@@ -459,21 +556,23 @@ function ListLayout(props: PresentationProps) {
     const folding = layout.collapsible && !layout.compact && !layout.groupBy && !layout.alphabet
     // Zigzag : l'image change de côté une ligne sur deux.
     const flipped = Boolean(look.zigzag) && index % 2 === 1
-    const chosenBelow = layout.click === "below" && props.chosen === row
-    return <li key={row} className={`min-w-0 ${paddings[layout.compact ? "compact" : look.density ?? "normal"]} ${boxed ? `border bg-card ${boxClass(look)}` : columnsClass ? "border-b" : ""} ${zebra && index % 2 === 1 ? "bg-muted/35" : ""} ${chosenBelow ? "ring-1 ring-primary/40" : ""} ${frame.className}`} style={frame.style}>
-      <WithRowHover row={row}><div className={`flex min-w-0 items-center ${look.density === "airy" ? "gap-3" : "gap-2"} ${flipped ? "flex-row-reverse text-right" : ""}`}>
+    const chosenBelow = props.chosen === row && props.clickOf?.(row) === "below"
+    // La ligne montrée dans le panneau à côté : marquée dans la liste.
+    const chosenSide = props.chosen === row && !chosenBelow
+    return <li key={row} aria-current={chosenSide || undefined} className={`min-w-0 ${paddings[layout.compact ? "compact" : look.density ?? "normal"]} ${boxed ? `border bg-card ${boxClass(look)}` : columnsClass ? "border-b" : ""} ${zebra && index % 2 === 1 ? "bg-muted/35" : ""} ${chosenBelow ? "ring-1 ring-primary/40" : ""} ${chosenSide ? "bg-primary/[0.07] ring-1 ring-inset ring-primary/35" : ""} ${frame.className}`} style={frame.style}>
+      <Movable row={row}><WithRowHover row={row}><div className={`flex min-w-0 items-center ${look.density === "airy" ? "gap-3" : "gap-2"} ${flipped ? "flex-row-reverse text-right" : ""}`}>
         {number(index)}
         <RowImage src={rowImage(layout, row, valueOf)} look={look} size={layout.compact ? "sm" : undefined} />
         {folding && <button type="button" aria-expanded={expanded} aria-label={expanded ? "Replier" : "Déplier"} onClick={() => toggle(row)} className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted"><ChevronDown className={`size-4 transition-transform ${expanded ? "" : "-rotate-90"}`} /></button>}
         {layout.compact
           ? <><ItemTitle row={row} look={look} color={color} nameOf={nameOf} onOpen={onOpen} inert={props.inert} truncate icon={<RowIcon layout={layout} row={row} valueOf={valueOf} color={color} />} badge={<RowBadge layout={layout} row={row} valueOf={valueOf} optionsOf={optionsOf} />} /><ItemFields fields={fields} row={row} look={look} valueOf={valueOf} optionsOf={optionsOf} compact /><RowGauge layout={layout} row={row} valueOf={valueOf} color={color} /></>
           : <div className={`grid min-w-0 flex-1 ${look.density === "compact" ? "gap-0.5" : "gap-1"} ${flipped ? "justify-items-end" : ""}`}><ItemTitle row={row} look={look} color={color} nameOf={nameOf} onOpen={onOpen} inert={props.inert} icon={<RowIcon layout={layout} row={row} valueOf={valueOf} color={color} />} badge={<RowBadge layout={layout} row={row} valueOf={valueOf} optionsOf={optionsOf} />} /><ItemFields fields={fields} row={row} look={look} valueOf={valueOf} optionsOf={optionsOf} /><RowGauge layout={layout} row={row} valueOf={valueOf} color={color} /></div>}
-      </div></WithRowHover>
+      </div></WithRowHover></Movable>
       {expanded && <dl className="mt-2 grid gap-x-4 gap-y-1 rounded-lg bg-muted/30 p-2.5 pl-8 text-xs sm:grid-cols-2">{others.map((header) => { const value = plain(valueOf(row, header)); return value ? <div key={header} className="min-w-0"><dt className="font-semibold text-muted-foreground">{header}</dt><dd className="min-w-0 break-words"><TypedValue row={{ value: (column) => valueOf(row, column), spec: specOf }} column={header} accent={accentOf(look)} compact /></dd></div> : null })}</dl>}
       {chosenBelow && <div className="mt-2"><DetailPanel row={row} rows={rows} props={props} inline /></div>}
     </li>
   }
-  return <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} render={(group) => <Paged rows={group} render={(shown) => boxed
+  return <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} onCommit={props.onCommit} render={(group) => <Paged rows={group} render={(shown) => boxed
     ? <ul className={`grid ${gaps[look.density ?? "normal"]} ${columnsClass}`}>{shown.map(element)}</ul>
     : <ul className={`overflow-hidden border bg-card/70 ${radii[look.radius ?? "md"]} ${look.shadow ? "shadow-md" : ""} ${columnsClass ? `grid gap-x-4 ${columnsClass}` : zebra ? "" : "divide-y"}`}>{shown.map(element)}</ul>} />} />
 }
@@ -486,22 +585,26 @@ function KanbanLayout(props: PresentationProps) {
   const card = cardFor(props)
   const column = layout.kanbanColumn ?? ""
   const [dragged, setDragged] = useState("")
+  const [draggedFrom, setDraggedFrom] = useState("")
   const [over, setOver] = useState<string | null>(null)
   const [folded, setFolded] = useState<Set<string>>(() => new Set())
   const options = column ? optionsOf?.(column) ?? [] : []
   const settings = (name: string): KanbanLane | undefined => layout.lanes?.find((lane) => fold(lane.value) === fold(name))
   const firstValue = (row: string) => plain(valueOf(row, column)).split(/\s*[,;]\s*/)[0] ?? ""
-  // Glisser réécrit toute la case : seulement si elle tient une seule valeur, sans mise en forme
-  // (« Commun, Elfique » ou un texte en gras ne perdent jamais une partie de leur contenu).
+  // Une case à plusieurs valeurs : dans la colonne de sa première valeur (d'office), ou dans chacune.
+  const each = layout.multiValue === "each"
+  const valuesOf = (row: string) => each ? cellParts(plain(valueOf(row, column))) : [firstValue(row)].filter(Boolean)
+  // Glisser réécrit la case : seulement sans mise en forme ; d'office, une seule valeur (« Commun,
+  // Elfique » ne perd rien) ; « dans chaque colonne », seule la valeur de la colonne quittée change.
   const movable = (row: string) => {
     const raw = valueOf(row, column).trim()
-    return Boolean(onCommit) && plain(raw) === raw && !/[,;\n]/.test(raw)
+    return Boolean(onCommit) && plain(raw) === raw && (each || !/[,;\n]/.test(raw))
   }
   // Les colonnes : les choix de la liste dans leur ordre, puis les valeurs écrites, puis « Sans valeur ».
-  const names = [...new Set([...options.map((option) => option.value), ...(layout.lanes ?? []).map((lane) => lane.value), ...rows.map(firstValue).filter(Boolean)])]
+  const names = [...new Set([...options.map((option) => option.value), ...(layout.lanes ?? []).map((lane) => lane.value), ...rows.flatMap(valuesOf)])]
   const allLanes = [...names, ""].map((name) => {
     const own = settings(name)
-    return { name, label: own?.label || name, color: own?.color ?? options.find((option) => option.value === name)?.color, icon: own?.icon ?? look.sectionIcon, limit: own?.limit, hidden: Boolean(own?.hidden), rows: rows.filter((row) => fold(firstValue(row)) === fold(name)) }
+    return { name, label: own?.label || name, color: own?.color ?? options.find((option) => option.value === name)?.color, icon: own?.icon ?? look.sectionIcon, limit: own?.limit, hidden: Boolean(own?.hidden), rows: rows.filter((row) => { const values = valuesOf(row); return name ? values.some((value) => fold(value) === fold(name)) : !values.length }) }
   }).filter((lane) => !lane.hidden && (!layout.hideEmpty || lane.rows.length)).filter((lane) => lane.name || lane.rows.length)
   const width = layout.laneWidth === "narrow" ? "w-52" : layout.laneWidth === "wide" ? "w-80" : "w-64"
   const laneStyle = look.laneStyle ?? "plain"
@@ -526,7 +629,7 @@ function KanbanLayout(props: PresentationProps) {
       return <section key={lane.name || "*"}
         onDragOver={(event) => { if (dragged && accepts(dragged)) { event.preventDefault(); setOver(target) } }}
         onDragLeave={() => setOver((current) => current === target ? null : current)}
-        onDrop={(event) => { event.preventDefault(); setOver(null); if (onCommit && dragged && accepts(dragged) && fold(firstValue(dragged)) !== fold(lane.name)) onCommit(dragged, column, lane.name); setDragged("") }}
+        onDrop={(event) => { event.preventDefault(); setOver(null); if (onCommit && dragged && accepts(dragged) && fold(draggedFrom) !== fold(lane.name)) onCommit(dragged, column, each ? movedValue(plain(valueOf(dragged, column)), draggedFrom, lane.name) : lane.name); setDragged("") }}
         style={laneLook}
         className={`flex ${closed ? "w-12" : width} shrink-0 flex-col ${gaps[look.density ?? "normal"]} overflow-hidden ${radii[look.radius ?? "md"]} border ${laneStyle === "plain" ? "bg-muted/30" : ""} ${laneStyle === "header" ? "bg-muted/20 pb-2" : "p-2"} transition-[width,colors] ${over === target ? "ring-2 ring-primary" : ""}`}>
         {layout.laneCollapse
@@ -535,9 +638,9 @@ function KanbanLayout(props: PresentationProps) {
         {!closed && <div className={`grid ${gaps[look.density ?? "normal"]} ${laneStyle === "header" ? "px-2" : ""}`}>
           {lane.rows.map((row) => {
             const drawn = card?.(row)
-            const drag = { draggable: movable(row), onDragStart: () => setDragged(row), onDragEnd: () => { setDragged(""); setOver(null) }, title: onCommit && !movable(row) ? "Plusieurs valeurs ou texte mis en forme : modifie la case dans la fiche" : undefined }
+            const drag = { draggable: movable(row), onDragStart: () => { setDragged(row); setDraggedFrom(lane.name) }, onDragEnd: () => { setDragged(""); setOver(null) }, title: onCommit && !movable(row) ? "Plusieurs valeurs ou texte mis en forme : modifie la case dans la fiche" : undefined }
             const cursor = `${movable(row) ? "cursor-grab active:cursor-grabbing" : ""} ${dragged === row ? "opacity-50" : ""}`
-            return <div key={row} {...drag} className={`min-w-0 ${cursor}`}>{drawn ?? <Item row={row} props={props} fields={(layout.fields ?? []).filter((field) => field !== column)} framed={look.surface !== "plain"} className={look.surface === "plain" ? "border-b border-border/70" : ""} />}{layout.click === "below" && props.chosen === row && <div className="mt-1.5"><DetailPanel row={row} rows={rows} props={props} inline /></div>}</div>
+            return <div key={row} {...drag} className={`min-w-0 ${cursor}`}>{drawn ?? <Item row={row} props={props} fields={(layout.fields ?? []).filter((field) => field !== column)} framed={look.surface !== "plain"} className={look.surface === "plain" ? "border-b border-border/70" : ""} />}{props.chosen === row && props.clickOf?.(row) === "below" && <div className="mt-1.5"><DetailPanel row={row} rows={rows} props={props} inline /></div>}</div>
           })}
         </div>}
       </section>
@@ -582,6 +685,11 @@ function DetailPanel({ row, rows, props, inline = false }: { row: string; rows: 
   const { layout, renderCard, renderForm, onChoose } = props
   const look = layout.look ?? {}
   const detail = layout.detail ?? {}
+  // Le formulaire du détail se modifie ici (directement, ou après « Modifier ») pour les rôles choisis.
+  const rolesOf = useRolesOf()
+  const [editing, setEditing] = useState("")
+  const canEdit = detail.kind === "form" && Boolean(detail.edit) && Boolean(props.renderEditForm) && !props.inert && allowedFor(detail.editRoles, rolesOf(roleRowFor(props, row)))
+  const editNow = canEdit && (detail.edit === "inline" || editing === row)
   const kind = detail.kind ?? (layout.kind === "master-detail" && layout.itemCard && !layout.itemForm ? "card" : "fields")
   const color = rowColor(layout, row, props.valueOf, props.optionsOf)
   const open = props.openSheet ?? props.onOpen
@@ -593,13 +701,21 @@ function DetailPanel({ row, rows, props, inline = false }: { row: string; rows: 
   </div> : null
   // Le détail en carte : celle choisie, sinon l'élément de la vue (son élément sur mesure, ou sa carte).
   const ownCard = kind === "card" && !detail.card && layout.itemCard === PRESENTATION_ITEM_CARD && layout.itemTemplate ? layout.itemTemplate : null
-  const drawn = kind === "form" && renderForm ? renderForm(row, detail.form || "principal")
+  const drawn = editNow ? props.renderEditForm!(row, detail.form || "principal", detail.locked ?? [])
+    : kind === "form" && renderForm ? renderForm(row, detail.form || "principal")
     : ownCard ? <IndexCard card={ownCard} row={{ value: (header) => props.valueOf(row, header), spec: props.specOf ?? noSpecs }} />
     : kind === "card" && renderCard ? renderCard(row, detail.card || (layout.itemCard === PRESENTATION_ITEM_CARD ? "*" : layout.itemCard) || "*") : null
   const body = drawn
     ? <div className={inline ? "p-2" : look.density === "compact" ? "p-3" : "p-4"}>{kind === "card" ? <div className="mx-auto w-full max-w-xl">{drawn}</div> : drawn}</div>
     : <DetailFields row={row} props={props} />
-  const footer = !props.inert && open ? <div className={`flex justify-end gap-2 border-t px-3 py-2`}><Button type="button" size="sm" variant="outline" onClick={() => open(row)}><ExternalLink />Ouvrir la fiche</Button></div> : null
+  const editButton = canEdit && detail.edit === "button" ? editing === row
+    ? <Button type="button" size="sm" onClick={() => setEditing("")}><Check />Terminé</Button>
+    : <Button type="button" size="sm" variant="outline" onClick={() => setEditing(row)}><Pencil />Modifier</Button> : null
+  const footer = !props.inert && (open || editButton) ? <div className={`flex flex-wrap items-center justify-end gap-2 border-t px-3 py-2`}>
+    {editNow && <span className="mr-auto text-[11px] text-muted-foreground">Chaque champ s’enregistre quand tu le quittes.</span>}
+    {editButton}
+    {open && <Button type="button" size="sm" variant="outline" onClick={() => open(row)}><ExternalLink />Ouvrir la fiche</Button>}
+  </div> : null
   return <article className={`min-w-0 overflow-hidden border bg-card/80 ${boxClass(look)}`} style={color && look.accent === "tint" ? { backgroundColor: `color-mix(in srgb, ${color} 8%, var(--card))` } : color && (look.accent ?? "border") === "border" ? { borderTop: `4px solid ${color}` } : undefined}>
     {nav}
     {body}
@@ -622,7 +738,9 @@ function MasterDetailLayout(props: PresentationProps) {
         const rowTint = rowColor(layout, row, valueOf, optionsOf)
         const current = row === selected
         const frame = current ? { className: "" } : accentFrame(look, rowTint)
-        return <WithRowHover key={row} row={row}><button type="button" aria-current={current} onClick={() => setChosen(row)} style={current ? { backgroundColor: accentOf(look), ...frame.style } : frame.style} className={`block w-full text-left ${look.surface === "boxed" ? `border ${current ? "border-transparent" : "bg-card"} ${boxClass(look)}` : "rounded-lg"} ${paddings[look.density ?? "compact"]} ${frame.className} ${current ? "text-white" : "hover:bg-muted"}`}>
+        // Au clic : la ligne s'affiche dans le détail (d'office) ; un rôle peut avoir un autre clic (la fiche, la page, rien).
+        const choose = () => { const action = props.clickOf?.(row) ?? "side"; if (action === "side" || action === "below" || action === "center") setChosen(row); else onOpen(row) }
+        return <WithRowHover key={row} row={row}><button type="button" aria-current={current} onClick={choose} style={current ? { backgroundColor: accentOf(look), ...frame.style } : frame.style} className={`block w-full text-left ${look.surface === "boxed" ? `border ${current ? "border-transparent" : "bg-card"} ${boxClass(look)}` : "rounded-lg"} ${paddings[look.density ?? "compact"]} ${frame.className} ${current ? "text-white" : "hover:bg-muted"}`}>
           <span className="flex min-w-0 items-center gap-2">
             <RowIcon layout={layout} row={row} valueOf={valueOf} color={current ? undefined : rowTint} />
             <RowImage src={rowImage(layout, row, valueOf)} look={look} size={look.imageSize ?? "sm"} />
@@ -635,9 +753,12 @@ function MasterDetailLayout(props: PresentationProps) {
         </button></WithRowHover>
       })}</div>} />
     </div>
-    {selected
-      ? <DetailPanel row={selected} rows={rows} props={{ ...props, openSheet: props.openSheet ?? onOpen, onChoose: setChosen }} />
-      : <article className={`min-w-0 overflow-hidden border bg-card/80 ${boxClass(look)}`}><p className="py-10 text-center text-sm text-muted-foreground">Aucune ligne.</p></article>}
+    <div className={`grid min-w-0 content-start gap-3 ${right ? "md:order-1" : ""}`}>
+      {props.detailTop}
+      {selected
+        ? <DetailPanel row={selected} rows={rows} props={{ ...props, openSheet: props.openSheet ?? onOpen, onChoose: setChosen }} />
+        : <article className={`min-w-0 overflow-hidden border bg-card/80 ${boxClass(look)}`}><p className="py-10 text-center text-sm text-muted-foreground">Aucune ligne.</p></article>}
+    </div>
   </div>
 }
 
@@ -1505,29 +1626,209 @@ function DashboardLayout(props: PresentationProps) {
 
 /**
  * La présentation d'un onglet-fenêtre (hors tableau et cartes, que la page dessine elle-même).
- * « Au clic » se décide ici, pour toutes les vues : ouvrir la fiche (d'office), ouvrir la page,
- * afficher à côté (la vue devient un maître-détail), afficher dessous, rien.
+ * « Au clic » se décide ici, pour toutes les vues : celui du rôle du lecteur s'il en a un (le
+ * plus précis l'emporte), sinon celui de la vue, sinon celui de la carte de l'élément (sa fiche
+ * d'office) : ouvrir la fiche, un formulaire, la page, le panneau à côté (la vue devient un
+ * maître-détail), une fenêtre au centre, dessous, rien. Autour de la vue, ce que la liste règle :
+ * l'en-tête, la barre d'outils (recherche, filtres, tri, regroupement, nombre, « Ajouter »), le pied
+ * (nombre, totaux, « Charger plus ») ; ce que le lecteur y change ne touche que son écran.
  */
 export function IndexPresentation(input: PresentationProps) {
-  const [chosen, setChosen] = useState("")
-  const click = input.layout.click ?? "sheet"
-  const panel = click === "side" || click === "below"
-  const openSheet = input.onOpen
-  const onOpen = click === "none" ? () => undefined
-    : click === "page" ? (input.onOpenPage ?? input.onOpen)
-      : panel ? (row: string) => setChosen((current) => current === row && click === "below" ? "" : row)
-        : input.onOpen
-  const props: PresentationProps = { ...input, rows: sortLayoutRows(input.rows, input.layout, input.valueOf), onOpen, openSheet, inert: click === "none", ...(panel ? { chosen: input.rows.includes(chosen) ? chosen : (click === "side" ? input.rows[0] ?? "" : ""), onChoose: setChosen } : {}) }
+  const [chosen, setChosen] = useState<{ row: string; mode: PresentationClick } | null>(null)
+  const [query, setQuery] = useState("")
+  const [filters, setFilters] = useState<Record<number, string[]>>({})
+  const [sortChoice, setSortChoice] = useState<{ column: string; desc: boolean } | null>(null)
+  const [groupChoice, setGroupChoice] = useState<string | null>(null)
+  const [more, setMore] = useState(0)
+  const rolesOf = useRolesOf()
+  const base = input.layout
+  const tools = useMemo(() => base.toolbar?.tools ?? [], [base.toolbar])
+  // Ce que le lecteur a choisi dans la barre d'outils : son tri, son regroupement.
+  const layout = useMemo((): Presentation => {
+    const next = { ...base }
+    if (sortChoice && tools.some((tool) => tool.type === "sort")) { next.sortBy = sortChoice.column; next.sortDesc = sortChoice.desc || undefined }
+    if (groupChoice !== null && tools.some((tool) => tool.type === "group")) {
+      if (base.kind === "kanban") next.kanbanColumn = groupChoice || base.kanbanColumn
+      else { next.groupBy = groupChoice || undefined; if (groupChoice) next.alphabet = undefined }
+    }
+    return next
+  }, [base, groupChoice, sortChoice, tools])
+  const { nameOf, valueOf, headers } = input
+  const pageRoles = rolesOf()
+  // Le clic de la page (le panneau à côté, ou rien) pour le rôle du lecteur ; celui de chaque ligne (son propriétaire…).
+  const structural = pickForRole(layout.clickByRole, pageRoles, layout.click) ?? "sheet"
+  const itemCard = layout.itemForm ? undefined : layout.itemCard
+  const { cardOf } = input
+  const actionOf = useCallback((row: string): PresentationClick | "form" => {
+    const own = layout.clickByRole ? pickForRole(layout.clickByRole, rolesOf(roleRowFor({ nameOf, valueOf, headers }, row)), layout.click) : layout.click
+    if (own) return own
+    // Absent : le clic de la carte de l'élément (« Survol et clic »), sinon la fiche.
+    const card = itemCard && itemCard !== PRESENTATION_ITEM_CARD ? cardOf?.(row, itemCard) : null
+    return card?.click ?? "sheet"
+  }, [cardOf, headers, itemCard, layout.click, layout.clickByRole, nameOf, rolesOf, valueOf])
+  const clickOf = useCallback((row: string): PresentationClick => { const action = actionOf(row); return action === "form" ? "sheet" : action }, [actionOf])
+  const onOpen = (row: string) => {
+    const action = actionOf(row)
+    if (action === "none") return
+    if (action === "page") return (input.onOpenPage ?? input.onOpen)(row)
+    if (action === "form") { const card = itemCard ? cardOf?.(row, itemCard) : null; return input.onOpenForm ? input.onOpenForm(row, card?.clickForm || "principal") : input.onOpen(row) }
+    if (action === "side" || action === "below" || action === "center") return setChosen((current) => current?.row === row && action === "below" ? null : { row, mode: action })
+    input.onOpen(row)
+  }
+  // Les lignes : celles que gardent la recherche et les filtres épinglés, dans l'ordre de la vue, jusqu'à la limite du pied.
+  const kept = useMemo(() => sortLayoutRows(toolbarRows(input.rows, layout.toolbar, { query, filters }, valueOf, nameOf), layout, valueOf), [filters, input.rows, layout, nameOf, query, valueOf])
+  const limit = layout.footer?.limit ? layout.footer.limit + more : 0
+  const rows = limit ? kept.slice(0, limit) : kept
+  const sidePanel = structural === "side" && layout.kind !== "master-detail"
+  const picked = chosen && rows.includes(chosen.row) ? chosen : null
+  const panelRow = picked?.mode === "side" || picked?.mode === "below" ? picked.row : sidePanel ? rows[0] ?? "" : ""
+  const props: PresentationProps = {
+    ...input, layout, rows, onOpen, openSheet: input.onOpen, clickOf,
+    inert: structural === "none" && !layout.clickByRole,
+    chosen: panelRow, onChoose: (row) => setChosen({ row, mode: structural === "side" ? "side" : "below" }),
+    empty: layout.emptyText || input.empty,
+  }
   const { rowRef } = input
-  const hover = input.layout.hover
+  // Le survol : celui de la vue ; sinon (absent) celui de la carte de l'élément ; sinon l'étoilé.
+  // Une règle de couleur vraie pour la ligne y pose son signe, ou la grise.
+  const hover = layout.hover
+  const rules = layout.rules
   const wrap = useCallback<RowHoverWrap>((row, node, className) => {
-    const ref = hover === NO_ROW_HOVER ? null : rowRef?.(row)
-    return ref?.id ? <RowHover index={ref.index} id={ref.id} hover={hover} className={className}>{node}</RowHover> : node
-  }, [hover, rowRef])
-  return <ViewSpecs.Provider value={input.specOf ?? noSpecs}><RowHovers.Provider value={wrap}><ViewLayoutBody props={props} click={click} /></RowHovers.Provider></ViewSpecs.Provider>
+    const shown = hover ?? (itemCard && itemCard !== PRESENTATION_ITEM_CARD ? cardOf?.(row, itemCard)?.hover : undefined)
+    const ref = shown === NO_ROW_HOVER ? null : rowRef?.(row)
+    const hovered = ref?.id ? <RowHover index={ref.index} id={ref.id} hover={shown} className={className}>{node}</RowHover> : node
+    const rule = ruleFor(rules, row, valueOf)
+    if (!rule || (!rule.icon && !rule.dim && !(rule.tint && itemCard))) return hovered
+    return <div className="relative min-w-0" style={{ ...(rule.dim ? { opacity: 0.5, filter: "grayscale(0.6)" } : {}), ...(rule.tint && itemCard ? { boxShadow: `0 0 0 2px ${rule.tint}`, borderRadius: 12 } : {}) }}>
+      {hovered}
+      {rule.icon && <span aria-hidden className="pointer-events-none absolute right-1.5 top-1.5 z-[2] grid size-5 place-items-center rounded-full border bg-card shadow-sm"><Glyph value={rule.icon} className="size-3" color={rule.tint} /></span>}
+    </div>
+  }, [cardOf, hover, itemCard, rowRef, rules, valueOf])
+  // L'en-tête et la barre d'outils : au-dessus de la vue, ou au-dessus du détail (maître-détail, panneau à côté).
+  const withDetail = layout.kind === "master-detail" || sidePanel
+  const header = <ListHeaderView layout={layout} count={kept.length} />
+  const toolbar = tools.length ? <ListToolbarView layout={layout} base={base} rows={input.rows} count={kept.length} valueOf={valueOf} optionsOf={input.optionsOf} headers={headers} state={{ query, filters, sort: sortChoice, group: groupChoice }} set={{ query: (value) => { setQuery(value); setMore(0) }, filters: (value) => { setFilters(value); setMore(0) }, sort: setSortChoice, group: setGroupChoice }} onAdd={input.onAdd} canAdd={(roles) => allowedFor(roles, pageRoles)} /> : null
+  const top = <>{(layout.header?.place !== "detail" || !withDetail) && header}{(layout.toolbar?.place !== "detail" || !withDetail) && toolbar}</>
+  const detailTop = withDetail && (layout.header?.place === "detail" || layout.toolbar?.place === "detail") ? <>{layout.header?.place === "detail" && header}{layout.toolbar?.place === "detail" && toolbar}</> : null
+  const footer = <ListFooterView layout={layout} rows={kept} shown={rows.length} valueOf={valueOf} onMore={() => setMore((current) => current + (layout.footer?.limit ?? 0))} />
+  const center = picked?.mode === "center" ? picked.row : ""
+  return <ViewSpecs.Provider value={input.specOf ?? noSpecs}><RowHovers.Provider value={wrap}>
+    <div className="grid min-w-0 gap-3">
+      {top}
+      <ViewLayoutBody props={{ ...props, detailTop }} click={structural} />
+      {footer}
+    </div>
+    {center && <Dialog open onOpenChange={(open) => { if (!open) setChosen(null) }}>
+      <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-3xl">
+        <DialogHeader><DialogTitle className="font-display text-2xl">{plain(nameOf(center)) || "Sans nom"}</DialogTitle><DialogDescription className="sr-only">Le détail de la ligne</DialogDescription></DialogHeader>
+        <DetailPanel row={center} rows={rows} props={{ ...props, onChoose: (row) => setChosen({ row, mode: "center" }) }} />
+      </DialogContent>
+    </Dialog>}
+  </RowHovers.Provider></ViewSpecs.Provider>
 }
 
 const noSpecs = () => undefined
+
+/** L'en-tête d'une liste : son icône, son titre, le nombre de lignes, son texte. */
+function ListHeaderView({ layout, count }: { layout: Presentation; count: number }) {
+  const header = layout.header
+  if (!header || header.hidden || (!header.title && !header.text && !header.count)) return null
+  const accent = accentOf(layout.look ?? {})
+  return <header className="grid min-w-0 gap-1">
+    {(header.title || header.icon || header.count) && <h2 className="flex min-w-0 flex-wrap items-center gap-2 font-display text-2xl font-semibold tracking-[-0.01em]">
+      <Glyph value={header.icon} className="size-6" color={accent} />
+      {header.title && <span className="min-w-0">{header.title}</span>}
+      {header.count && <span className="rounded-full bg-muted px-2 py-0.5 font-sans text-xs font-semibold tabular-nums text-muted-foreground">{count}</span>}
+    </h2>}
+    {header.text && <p className="whitespace-pre-line text-sm leading-6 text-muted-foreground">{header.text}</p>}
+  </header>
+}
+
+/** La barre d'outils d'une liste : chaque outil réglé, dans l'ordre. Ce que le lecteur y change ne touche que son écran. */
+function ListToolbarView({ layout, base, rows, count, valueOf, optionsOf, headers, state, set, onAdd, canAdd }: {
+  layout: Presentation
+  base: Presentation
+  rows: string[]
+  count: number
+  valueOf: PresentationProps["valueOf"]
+  optionsOf?: PresentationProps["optionsOf"]
+  headers: string[]
+  state: { query: string; filters: Record<number, string[]>; sort: { column: string; desc: boolean } | null; group: string | null }
+  set: { query: (value: string) => void; filters: (value: Record<number, string[]>) => void; sort: (value: { column: string; desc: boolean } | null) => void; group: (value: string | null) => void }
+  onAdd?: () => void
+  canAdd: (roles: ViewRole[] | undefined) => boolean
+}) {
+  const accent = accentOf(layout.look ?? {})
+  const tools = layout.toolbar?.tools ?? []
+  const known = (column: string) => headers.some((header) => fold(header) === fold(column))
+  return <div role="toolbar" aria-label="Outils de la liste" className="flex min-w-0 flex-wrap items-center gap-2 rounded-xl border bg-card/70 px-2 py-1.5">
+    {tools.map((tool, index) => {
+      switch (tool.type) {
+        case "search": return <label key={index} className="flex h-8 min-w-40 flex-1 items-center gap-1.5 rounded-lg border bg-background px-2 focus-within:ring-2 focus-within:ring-ring/30">
+          <Search className="size-3.5 shrink-0 text-muted-foreground" />
+          <input type="search" value={state.query} onChange={(event) => set.query(event.target.value)} placeholder={tool.placeholder || "Chercher…"} aria-label={tool.placeholder || "Chercher"} className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none [&::-webkit-search-cancel-button]:hidden" />
+          {state.query && <button type="button" onClick={() => set.query("")} aria-label="Effacer la recherche" className="grid size-5 place-items-center rounded text-muted-foreground hover:bg-muted"><X className="size-3" /></button>}
+        </label>
+        case "filter": {
+          if (!known(tool.column)) return null
+          const options = optionsOf?.(tool.column) ?? []
+          const values = [...new Set([...options.map((option) => option.value), ...rows.flatMap((row) => cellParts(plain(valueOf(row, tool.column))))])].slice(0, 24)
+          const on = state.filters[index] ?? []
+          const toggle = (value: string) => {
+            const next = on.some((item) => fold(item) === fold(value)) ? on.filter((item) => fold(item) !== fold(value)) : tool.multi ? [...on, value] : [value]
+            set.filters({ ...state.filters, [index]: next })
+          }
+          return <span key={index} className="flex min-w-0 flex-wrap items-center gap-1" role="group" aria-label={`Filtre ${tool.column}`}>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{tool.column}</span>
+            {values.map((value) => {
+              const active = on.some((item) => fold(item) === fold(value))
+              const color = options.find((option) => fold(option.value) === fold(value))?.color ?? accent
+              const total = rows.filter((row) => cellParts(plain(valueOf(row, tool.column))).some((part) => fold(part) === fold(value))).length
+              return <button key={value} type="button" aria-pressed={active} onClick={() => toggle(value)} className="inline-flex h-6 items-center gap-1 rounded-full border px-2 text-[11px] font-medium transition" style={active ? { backgroundColor: color, borderColor: color, color: "#fff" } : { borderColor: `color-mix(in srgb, ${color} 40%, var(--border))` }}>{value}<span className="tabular-nums opacity-70">{total}</span></button>
+            })}
+            {on.length > 0 && <button type="button" onClick={() => set.filters({ ...state.filters, [index]: [] })} className="text-[11px] font-semibold text-primary hover:underline">Tout</button>}
+          </span>
+        }
+        case "sort": {
+          const columns = tool.columns.filter(known)
+          if (!columns.length) return null
+          const current = state.sort ?? (base.sortBy ? { column: base.sortBy, desc: Boolean(base.sortDesc) } : null)
+          return <span key={index} className="flex items-center gap-1">
+            <NativeSelect value={current?.column ?? ""} onChange={(event) => set.sort(event.target.value ? { column: event.target.value, desc: current?.desc ?? false } : null)} className="h-8 py-0 text-xs" aria-label="Trier par">
+              <NativeSelectOption value="">Ordre de la vue</NativeSelectOption>
+              {columns.map((column) => <NativeSelectOption key={column} value={column}>Par {column.toLocaleLowerCase("fr")}</NativeSelectOption>)}
+            </NativeSelect>
+            {current && <Button type="button" size="icon-sm" variant="ghost" onClick={() => set.sort({ column: current.column, desc: !current.desc })} aria-label={current.desc ? "Ordre croissant" : "Ordre décroissant"} title={current.desc ? "Décroissant" : "Croissant"}><ChevronDown className={`size-4 transition-transform ${current.desc ? "" : "rotate-180"}`} /></Button>}
+          </span>
+        }
+        case "group": {
+          const columns = tool.columns.filter(known)
+          if (!columns.length) return null
+          const current = state.group ?? (base.kind === "kanban" ? base.kanbanColumn ?? "" : base.groupBy ?? "")
+          return <NativeSelect key={index} value={current} onChange={(event) => set.group(event.target.value)} className="h-8 py-0 text-xs" aria-label="Regrouper par">
+            {base.kind !== "kanban" && <NativeSelectOption value="">Sans groupe</NativeSelectOption>}
+            {columns.map((column) => <NativeSelectOption key={column} value={column}>Par {column.toLocaleLowerCase("fr")}</NativeSelectOption>)}
+          </NativeSelect>
+        }
+        case "count": return <span key={index} className="text-xs font-semibold tabular-nums text-muted-foreground">{count} {tool.word || (count > 1 ? "lignes" : "ligne")}</span>
+        case "add": return onAdd && canAdd(tool.roles) ? <Button key={index} type="button" size="sm" className="ml-auto h-8" onClick={onAdd} style={{ backgroundColor: layout.look?.color }}><Plus />{tool.label || "Ajouter"}</Button> : null
+      }
+    })}
+  </div>
+}
+
+/** Le pied d'une liste : le nombre de lignes, des totaux (qui suivent la recherche), « Charger plus ». */
+function ListFooterView({ layout, rows, shown, valueOf, onMore }: { layout: Presentation; rows: string[]; shown: number; valueOf: PresentationProps["valueOf"]; onMore: () => void }) {
+  const footer = layout.footer
+  if (!footer) return null
+  const hasMore = Boolean(footer.limit) && shown < rows.length
+  if (!footer.count && !footer.totals?.length && !hasMore) return null
+  return <footer className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 border-t px-1 pt-2 text-xs text-muted-foreground">
+    {footer.count && <span className="font-semibold tabular-nums">{rows.length} {footer.word || (rows.length > 1 ? "lignes" : "ligne")}</span>}
+    {footer.totals?.map((total, index) => <span key={index} className="tabular-nums"><b className="text-foreground">{formatPresentationNumber(groupFormulaValue(total, rows, valueOf))}{total.unit ? ` ${total.unit}` : ""}</b> {total.label ?? (total.op === "count" ? "lignes" : total.column ?? "")}</span>)}
+    {hasMore && <button type="button" onClick={onMore} className="ml-auto font-semibold text-primary hover:underline">Charger plus ({shown} / {rows.length})</button>}
+  </footer>
+}
 
 function ViewLayoutBody({ props, click }: { props: PresentationProps; click: PresentationClick }) {
   if (!props.rows.length && props.layout.kind !== "dashboard") return <div className="rounded-xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">{props.empty}</div>
@@ -1537,11 +1838,11 @@ function ViewLayoutBody({ props, click }: { props: PresentationProps; click: Pre
     const selected = props.chosen || props.rows[0]
     return <div className={`grid gap-4 ${detailWidths[props.layout.detail?.width ?? "normal"]}`}>
       <div className="min-w-0">{body}</div>
-      {selected && <div className="min-w-0 md:sticky md:top-4 md:self-start"><DetailPanel row={selected} rows={props.rows} props={props} /></div>}
+      <div className="eraser-narrow grid min-w-0 content-start gap-3 md:sticky md:top-4 md:self-start">{props.detailTop}{selected && <DetailPanel row={selected} rows={props.rows} props={props} />}</div>
     </div>
   }
   // « Dessous » : la liste et le kanban déplient la ligne à sa place ; les autres vues, sous la vue.
-  if (click === "below" && props.chosen && props.layout.kind !== "list" && props.layout.kind !== "kanban" && props.layout.kind !== "master-detail") return <div className="grid gap-4">{body}<DetailPanel row={props.chosen} rows={props.rows} props={props} /></div>
+  if (props.chosen && props.clickOf?.(props.chosen) === "below" && props.layout.kind !== "list" && props.layout.kind !== "kanban" && props.layout.kind !== "master-detail") return <div className="grid gap-4">{body}<DetailPanel row={props.chosen} rows={props.rows} props={props} /></div>
   return body
 }
 

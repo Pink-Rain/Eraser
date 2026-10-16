@@ -22,7 +22,7 @@ import { findUnit, formatAmount, formatIndexNumber } from "@/lib/index-numbers"
 
 export type ActionStepType = ActionStep["type"]
 
-type StepField = { key: string; label: string; kind: "column" | "text" | "formula" | "number-formula" | "tab" | "index" | "mapping" | "audience" | "boolean"; hint?: string }
+type StepField = { key: string; label: string; kind: "column" | "text" | "formula" | "number-formula" | "tab" | "index" | "mapping" | "audience" | "boolean" | "form" | "card"; hint?: string }
 
 export type ActionStepInfo = {
   type: ActionStepType
@@ -39,6 +39,12 @@ export const actionStepCatalog: ActionStepInfo[] = [
   { type: "open-sheet", group: "Ouvrir", label: "Ouvrir la fiche", description: "Ouvre la fiche complète de la ligne (tous ses champs, y compris ceux du formulaire seulement).", fields: [] },
   { type: "open-linked", group: "Ouvrir", label: "Ouvrir la ligne liée", description: "Ouvre l’index d’en face sur le premier nom d’une colonne liée ↔ ou d’une liste liée.", fields: [{ key: "column", label: "Relation", kind: "column" }], only: "world" },
   { type: "open-index", group: "Ouvrir", label: "Ouvrir un index", description: "Ouvre la page d’un autre index.", fields: [{ key: "index", label: "Index", kind: "index" }] },
+  { type: "open-form", group: "Ouvrir", label: "Ouvrir un formulaire, ici", description: "Ouvre un formulaire de l’onglet sur la ligne, dans une fenêtre, sans quitter la page (la fiche courte, la fiche de combat…).", fields: [{ key: "form", label: "Formulaire", kind: "form", hint: "Vide : le formulaire à l’étoile" }], only: "world" },
+  { type: "open-page", group: "Ouvrir", label: "Ouvrir la page de la ligne", description: "Ouvre la page de la ligne (celle d’un personnage, d’une campagne…), sinon sa fiche.", fields: [], only: "world" },
+  { type: "open-row", group: "Ouvrir", label: "Ouvrir une ligne d’un autre index", description: "Ouvre la fiche d’une ligne d’un autre index, par son nom : un nom écrit (« Valombre ») ou pris dans une colonne (« {Lieu} »). Un formulaire de cet index peut être choisi.", fields: [{ key: "index", label: "Index", kind: "index" }, { key: "row", label: "Ligne (son nom)", kind: "text", hint: "{Lieu}, ou un nom écrit" }, { key: "form", label: "Formulaire", kind: "text", hint: "Vide : sa fiche" }], only: "world" },
+  { type: "open-eraser", group: "Ouvrir", label: "Ouvrir une page d’Eraser", description: "Ouvre une page d’Eraser : l’accueil, un index, une page créée, le tabletop…", fields: [{ key: "href", label: "Page", kind: "text", hint: "/ressources/index/lieux" }] },
+  { type: "show-card", group: "Afficher", label: "Montrer une carte", description: "Dessine la ligne avec une carte de l’onglet (« Modifier › Cartes »), dans une fenêtre.", fields: [{ key: "card", label: "Carte", kind: "card" }], only: "world" },
+  { type: "random-row", group: "Jeu", label: "Ouvrir une ligne au hasard", description: "Tire une ligne au hasard, dans cet onglet ou dans un autre index, et ouvre sa fiche : une rencontre, un trésor, un PNJ de passage.", fields: [{ key: "index", label: "Index", kind: "index", hint: "Vide : cet index" }, { key: "tab", label: "Onglet", kind: "tab", hint: "Vide : celui de la ligne" }], only: "world" },
   { type: "open-url", group: "Ouvrir", label: "Ouvrir une adresse", description: "Ouvre une adresse web, qui peut être calculée : https://www.aidedd.org/…/{Nom}.", fields: [{ key: "url", label: "Adresse", kind: "text", hint: "Colonnes entre accolades, ou formule commençant par =" }] },
   { type: "set", group: "Modifier la ligne", label: "Mettre une valeur", description: "Écrit une valeur dans une colonne de la ligne : un texte (« Mort »), une colonne ({Statut}) ou une formule (« ={PV max} »). Pour une case à cocher : Oui / Non, ou une condition.", fields: [{ key: "column", label: "Colonne", kind: "column" }, { key: "value", label: "Valeur", kind: "text", hint: "Texte, {Colonne} ou =formule" }] },
   { type: "increment", group: "Modifier la ligne", label: "Augmenter / diminuer", description: "Ajoute un nombre à une colonne (−1 pour retirer une charge), avec des bornes facultatives. Le nombre peut être une formule : {Bonus}, DES(\"1d6\")…", fields: [{ key: "column", label: "Colonne", kind: "column" }, { key: "amount", label: "De combien", kind: "number-formula", hint: "1, -1, {Bonus}…" }, { key: "min", label: "Minimum", kind: "number-formula" }, { key: "max", label: "Maximum", kind: "number-formula", hint: "{PV max}…" }] },
@@ -66,6 +72,35 @@ export const buttonPresets: Array<{ key: string; label: string; description: str
   { key: "inventory", label: "Envoyer dans un inventaire", description: "Une icône ➤ : au clic, choisir la campagne, le personnage, le PNJ ou la créature.", button: { label: "Envoyer dans un inventaire", icon: "send", iconOnly: true, color: "#7a2e2a", steps: [{ type: "campaign-inventory" }] }, only: "objects" },
 ]
 
+const stepTypes = new Set<string>(actionStepCatalog.map((step) => step.type))
+const stepText = (value: unknown, max = 400) => typeof value === "string" ? value.slice(0, max) : ""
+
+/**
+ * Une étape lue d'un enregistrement (un bouton de carte) : un type connu et ses champs, bornés ;
+ * `null` sinon. Les champs inconnus tombent : rien d'autre ne s'exécute.
+ */
+export function cleanActionStep(input: unknown): ActionStep | null {
+  if (!input || typeof input !== "object") return null
+  const raw = input as Record<string, unknown>
+  const type = typeof raw.type === "string" && stepTypes.has(raw.type) ? raw.type as ActionStepType : null
+  if (!type) return null
+  const step = newStep(type) as Record<string, unknown>
+  const info = stepInfo(type)
+  for (const field of info.fields) {
+    const value = raw[field.key]
+    if (field.kind === "boolean") { if (value === true) step[field.key] = true; continue }
+    if (field.kind === "mapping") {
+      if (value && typeof value === "object" && !Array.isArray(value)) step[field.key] = Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, 60).flatMap(([key, item]) => typeof item === "string" ? [[key.slice(0, 120), item.slice(0, 400)]] : []))
+      continue
+    }
+    const text = stepText(value)
+    if (text) step[field.key] = text
+    // Les champs facultatifs restent absents ; les autres gardent leur valeur vide de départ.
+    else if (["min", "max", "form"].includes(field.key) || (type === "random-row" && (field.key === "tab" || field.key === "index"))) delete step[field.key]
+  }
+  return step as ActionStep
+}
+
 export function stepInfo(type: ActionStepType) {
   return actionStepCatalog.find((step) => step.type === type)!
 }
@@ -86,6 +121,9 @@ export function newStep(type: ActionStepType): ActionStep {
     case "copy": return { type, value: "" }
     case "notify": return { type, message: "" }
     case "chat": return { type, message: "", audience: "public" }
+    case "open-row": return { type, index: "", row: "" }
+    case "open-eraser": return { type, href: "" }
+    case "show-card": return { type, card: "" }
     default: return { type } as ActionStep
   }
 }
@@ -112,6 +150,12 @@ export function describeStep(step: ActionStep): string {
     case "notify": return `Message : ${step.message || "…"}`
     case "chat": return `Chat${step.audience === "gm" ? " (MJ)" : ""} : ${step.message || "…"}`
     case "campaign-inventory": return "Ajouter à un inventaire (campagne, personnage, PNJ)"
+    case "open-form": return step.form && step.form !== "principal" ? `Ouvrir le formulaire « ${step.form} », ici` : "Ouvrir le formulaire, ici"
+    case "open-page": return "Ouvrir la page de la ligne"
+    case "open-row": return `Ouvrir « ${step.row || "?"} » dans ${step.index || "?"}`
+    case "open-eraser": return `Ouvrir ${step.href || "une page d’Eraser"}`
+    case "show-card": return `Montrer la carte « ${step.card || "?"} »`
+    case "random-row": return `Une ligne au hasard${step.index ? ` de ${step.index}` : ""}${step.tab ? ` · ${step.tab}` : ""}`
   }
 }
 
@@ -182,6 +226,16 @@ export type ActionRuntime = {
   card?: () => { text: string; html: string }
   chat?: (message: string, audience: "public" | "gm") => Promise<void>
   campaignInventory?: () => Promise<void>
+  /** Un formulaire de l'onglet ouvert ici sur la ligne (« principal » : l'étoilé). */
+  openForm?: (form: string) => void
+  /** La page de la ligne (sinon sa fiche). */
+  openPage?: () => void
+  /** La fiche d'une ligne d'un autre index, par son nom (un formulaire de cet index, si choisi). */
+  openRow?: (index: string, name: string, form?: string) => Promise<void>
+  /** Une carte de l'onglet, dessinée avec la ligne dans une fenêtre. */
+  showCard?: (card: string) => void
+  /** Une ligne au hasard (de cet onglet, ou d'un autre index et onglet), ouverte dans sa fiche. */
+  randomRow?: (index?: string, tab?: string, form?: string) => Promise<void>
 }
 
 /** Le bouton s'affiche-t-il sur cette ligne ? (condition vide : toujours) */
@@ -266,6 +320,22 @@ async function runStep(step: ActionStep, runtime: ActionRuntime) {
       return runtime.notify("Message envoyé.")
     }
     case "move-ask": return runtime.moveAsk ? runtime.moveAsk() : unavailable("Envoyer dans un autre onglet")
+    case "open-form": return runtime.openForm ? runtime.openForm(step.form || "principal") : unavailable("Ouvrir un formulaire")
+    case "open-page": return runtime.openPage ? runtime.openPage() : runtime.openSheet ? runtime.openSheet() : unavailable("Ouvrir la page")
+    case "open-row": {
+      if (!runtime.openRow) return unavailable("Ouvrir une ligne d’un autre index")
+      const name = resolveText(step.row, context).replace(/<[^>]+>/g, " ").split(/\s*[,;\n]\s*/)[0]?.trim() ?? ""
+      if (!name) throw new Error("Aucune ligne à ouvrir : le nom est vide.")
+      if (!step.index) throw new Error("Choisis l’index de la ligne à ouvrir.")
+      return runtime.openRow(step.index, name, step.form || undefined)
+    }
+    case "open-eraser": {
+      const href = resolveText(step.href, context).trim()
+      if (!href.startsWith("/")) throw new Error(`« ${href || "(vide)"} » n’est pas une page d’Eraser (elle commence par « / »).`)
+      return runtime.navigate(href)
+    }
+    case "show-card": return runtime.showCard ? runtime.showCard(step.card || "*") : unavailable("Montrer une carte")
+    case "random-row": return runtime.randomRow ? runtime.randomRow(step.index || undefined, step.tab || undefined, step.form || undefined) : unavailable("Ouvrir une ligne au hasard")
     case "campaign-inventory": {
       if (!runtime.campaignInventory) return unavailable("Ajouter à l’inventaire")
       await runtime.campaignInventory()

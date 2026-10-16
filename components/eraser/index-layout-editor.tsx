@@ -453,6 +453,7 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
       {page === "look" && <div className={cn(group, "sm:grid-cols-2")}>
         <span className={smallLabel}>Couleur d’accent <span className="font-normal">— titres de sections, séparateurs, boutons</span><ColorPick label="Couleur d’accent" value={layout.accent} columns={colorColumns} disabled={disabled} allowAccent={false} onChange={(accent) => set({ ...layout, accent })} /></span>
         <span className={cn(smallLabel, "self-end")}><label className="flex items-center gap-1.5 pb-1.5 text-[11px]"><Checkbox disabled={disabled} checked={Boolean(layout.tabs)} onCheckedChange={(checked) => set({ ...layout, tabs: checked === true || undefined })} />Sections en onglets <span className="font-normal text-muted-foreground">— une section à la fois, la colonne latérale reste</span></label></span>
+        {layout.tabs && layout.sections.length > 1 && <TabsByEditor layout={layout} columns={columns} samples={samples?.length ? samples : [sample]} disabled={disabled} onChange={(tabsBy) => set({ ...layout, tabsBy })} />}
         {/* Le style d'ensemble : le fond, l'allure de tous les libellés. Le réglage d'un champ (sa couleur) l'emporte. */}
         {(() => {
           const look = layout.look ?? {}
@@ -687,6 +688,56 @@ function LayoutPreview({ kind, layout, columns, sample = {}, sampleRow }: { kind
         render={(item, field) => previewField(item, field)}
         renderRest={(rest) => <div className="grid gap-2 md:grid-cols-2">{rest.map((item) => <div key={item.header}>{previewField(item, { column: item.header })}</div>)}</div>}
       />
+  </div>
+}
+
+/**
+ * « Onglet ouvert d'abord » : une colonne de la ligne (« Type »), ses valeurs (sa liste de
+ * choix, puis celles des lignes de l'onglet), et pour chacune l'onglet qui s'ouvre. Une
+ * valeur laissée sur « Le premier onglet » n'est pas enregistrée.
+ */
+function TabsByEditor({ layout, columns, samples, disabled, onChange }: { layout: IndexLayout; columns: LayoutColumn[]; samples: Array<Record<string, string>>; disabled?: boolean; onChange: (tabsBy: IndexLayout["tabsBy"]) => void }) {
+  const tabsBy = layout.tabsBy
+  const choosable = columns.filter((column) => !["id", "actions", "archived"].includes(normalizeSpec(column.spec).kind))
+  const column = tabsBy ? columns.find((item) => foldName(item.header) === foldName(tabsBy.column)) : undefined
+  const values = useMemo(() => {
+    if (!tabsBy) return []
+    const seen = new Map<string, string>()
+    const add = (value: string) => { const clean = value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(); if (clean && !seen.has(foldName(clean)) && seen.size < 60) seen.set(foldName(clean), clean) }
+    for (const option of column ? normalizeSpec(column.spec).options ?? [] : []) add(option.value)
+    for (const sample of samples) {
+      const cell = sample[tabsBy.column] ?? sample[Object.keys(sample).find((key) => foldName(key) === foldName(tabsBy.column)) ?? ""] ?? ""
+      for (const part of cell.replace(/<[^>]+>/g, " ").split(/\s*[,;\n]\s*/)) add(part)
+    }
+    for (const entry of tabsBy.map) add(entry.value)
+    return [...seen.values()]
+  }, [column, samples, tabsBy])
+  const sectionOf = (value: string) => tabsBy?.map.find((entry) => foldName(entry.value) === foldName(value))?.section ?? ""
+  const link = (value: string, section: string) => {
+    if (!tabsBy) return
+    const map = tabsBy.map.filter((entry) => foldName(entry.value) !== foldName(value))
+    onChange({ ...tabsBy, map: section ? [...map, { value, section }] : map })
+  }
+  return <div className="grid gap-2 rounded-lg border border-dashed bg-background/40 p-2 sm:col-span-2">
+    <p className={groupTitle}><Bookmark className="size-3.5" />Onglet ouvert d’abord <span className="font-normal normal-case tracking-normal">— selon une colonne de la ligne</span></p>
+    <label className={smallLabel}>Selon la colonne
+      <NativeSelect disabled={disabled} value={tabsBy?.column ?? ""} onChange={(event) => onChange(event.target.value ? { column: event.target.value, map: [] } : undefined)} className="h-8 py-0 text-xs">
+        <NativeSelectOption value="">— Toujours le premier onglet —</NativeSelectOption>
+        {choosable.map((item) => <NativeSelectOption key={item.header} value={item.header}>{item.header}</NativeSelectOption>)}
+      </NativeSelect>
+    </label>
+    {tabsBy && (values.length
+      ? <div className="grid gap-1.5">
+        {values.map((value) => <label key={value} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] items-center gap-2 text-xs">
+          <span className="truncate font-medium" title={value}>{value}</span>
+          <NativeSelect disabled={disabled} value={sectionOf(value)} onChange={(event) => link(value, event.target.value)} className="h-7 py-0 text-[11px]" aria-label={`Onglet ouvert pour ${value}`}>
+            <NativeSelectOption value="">Le premier onglet</NativeSelectOption>
+            {layout.sections.map((section, index) => <NativeSelectOption key={section.id} value={section.id}>{section.title || `Section ${index + 1}`}</NativeSelectOption>)}
+          </NativeSelect>
+        </label>)}
+      </div>
+      : <p className="text-[11px] text-muted-foreground">Aucune valeur dans « {tabsBy.column} » pour l’instant : remplis quelques lignes, elles apparaîtront ici.</p>)}
+    {tabsBy && <p className="text-[11px] text-muted-foreground">Une valeur sans onglet ouvre le premier. Une case à plusieurs valeurs ouvre l’onglet de la première qui en a un.</p>}
   </div>
 }
 

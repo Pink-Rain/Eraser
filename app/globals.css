@@ -747,3 +747,11 @@ a[href^="/reference/"]:not([data-slot]) {
 .eraser-origin > .w-full.flex-1 {
   padding: 0;
 }
+
+/*
+ * Un formulaire dans un panneau étroit (le détail « à côté » d'une vue) : sa colonne latérale
+ * passe au-dessus des sections, comme sur un téléphone, au lieu de les serrer à côté d'elle.
+ */
+.eraser-narrow [class*="md:grid-cols-["] {
+  grid-template-columns: minmax(0, 1fr);
+}

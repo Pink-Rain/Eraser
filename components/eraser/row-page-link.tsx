@@ -19,6 +19,13 @@ function loadTemplates() {
 
 const fold = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim()
 
+/** L'adresse de la page d'une ligne, si un modèle de page existe pour son index (ou son onglet) ; sinon `null`. */
+export async function rowPageFor(index: string, tab: string, id: string) {
+  if (!id) return null
+  const list = await loadTemplates()
+  return list.some((template) => template.index === index && (!template.tab || fold(template.tab) === fold(tab))) ? rowPageHref(index, id) : null
+}
+
 /**
  * « Page de la ligne » dans la fiche d'une ligne d'index, quand un modèle de page de ligne
  * existe pour son index (ou son onglet) : elle s'ouvre à son adresse stable /fiche/<index>/<ID>.

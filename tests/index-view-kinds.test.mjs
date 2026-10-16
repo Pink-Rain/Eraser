@@ -129,8 +129,11 @@ test("lot B : élément, au clic, détail, formule par groupe, jauge, onglets, z
   const starters = await vite.ssrLoadModule("/lib/index-presentation-starters.ts");
   const layout = views.cleanPresentation({ kind: "list", itemForm: "principal", click: "side", detail: { kind: "form", form: "court", width: "wide", nav: true }, groupFormula: { op: "sum", column: "Prix", target: 100, label: "Σ", style: "bar" }, gauge: { column: "Vie", style: "charges", max: 5, maxColumn: "Vie totale", label: "PV" }, menu: "tabs", look: { zigzag: true } });
   assert.deepEqual(layout, { kind: "list", menu: "tabs", itemForm: "principal", click: "side", detail: { kind: "form", form: "court", width: "wide", nav: true }, groupFormula: { op: "sum", column: "Prix", target: 100, label: "Σ", style: "bar" }, gauge: { column: "Vie", style: "charges", max: 5, maxColumn: "Vie totale", label: "PV" }, look: { zigzag: true } });
-  // « Ouvrir la fiche » est l'office : rien n'est écrit ; une formule sans opération connue ou une jauge sans colonne disparaissent.
-  assert.equal(views.cleanPresentation({ kind: "list", click: "sheet", groupFormula: { op: "median" }, gauge: { style: "bar" } }).click, undefined);
+  // « Ouvrir la fiche » choisi se garde : il l'emporte sur le clic de la carte de l'élément (absent :
+  // « comme la carte », qui ouvre la fiche d'office). Un clic inconnu, une formule sans opération
+  // connue ou une jauge sans colonne disparaissent.
+  assert.equal(views.cleanPresentation({ kind: "list", click: "sheet", groupFormula: { op: "median" }, gauge: { style: "bar" } }).click, "sheet");
+  assert.equal(views.cleanPresentation({ kind: "list", click: "fly" }).click, undefined);
   assert.equal(views.cleanPresentation({ kind: "list", groupFormula: { op: "median" } }).groupFormula, undefined);
   assert.equal(views.cleanPresentation({ kind: "list", gauge: { style: "bar" } }).gauge, undefined);
   // Appliquée à un autre onglet : la formule et la jauge ne gardent que les colonnes connues.

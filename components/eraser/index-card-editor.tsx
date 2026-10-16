@@ -29,6 +29,7 @@ import {
   ListTree,
   Minus,
   Monitor,
+  MousePointerClick,
   PanelBottom,
   PanelLeft,
   PanelRight,
@@ -45,8 +46,10 @@ import {
   X,
 } from "lucide-react"
 
+import { CardButtonsEditor, CardHoverClick, type CardEditorExtras } from "@/components/eraser/card-buttons-editor"
 import { IndexCard, cardGridStyle, cardWidthRem, type CardRowSource } from "@/components/eraser/index-card"
-import { Choice, HoverChoice, IconPick, ImageBoxControls, SettingsRow, Tabs } from "@/components/eraser/editor-controls"
+import { ViewAsContext, ViewAsPicker } from "@/components/eraser/view-roles"
+import { Choice, IconPick, ImageBoxControls, SettingsRow, Tabs } from "@/components/eraser/editor-controls"
 import { useIndexSettings } from "@/components/eraser/index-windows"
 import { CopyToTabsDialog, ManagePresetsDialog, NamePresetDialog, PreviewDialog, PreviewExpandButton, VariantsPanel } from "@/components/eraser/index-variants-panel"
 import { Button } from "@/components/ui/button"
@@ -80,6 +83,7 @@ import {
 } from "@/lib/index-cards"
 import { foldName, indexColumnKinds, normalizeSpec } from "@/lib/index-columns"
 import { cn } from "@/lib/utils"
+import type { ViewRole } from "@/lib/view-roles"
 
 // ---------------------------------------------------------------------------
 // Petits contrôles
@@ -244,6 +248,7 @@ const blockIcons: Record<CardBlockType, ReactNode> = {
   divider: <span className="text-[10px] font-bold">—</span>,
   zone: <span className="block size-3 rounded-sm bg-current opacity-70" />,
   space: <span className="text-[10px] font-bold">␣</span>,
+  buttons: <MousePointerClick className="size-3.5" />,
 }
 
 const blockLabel = (type: CardBlockType) => cardBlockTypes.find((entry) => entry.value === type)?.label ?? type
@@ -257,6 +262,7 @@ function blockSummary(block: CardBlock): string {
     case "divider": return ""
     case "zone": return zoneLabels[block.zone ?? "block"]
     case "space": return `${block.height ?? 12} px`
+    case "buttons": return (block.buttons ?? []).map((button) => button.label || "Bouton").join(", ") || "Aucun bouton"
     default: return block.column ?? "Aucune colonne"
   }
 }
@@ -279,6 +285,7 @@ function newBlock(type: CardBlockType, columns: CardColumn[]): CardBlock {
     case "divider": return { id, type }
     case "zone": return { id, type, zone: "block", height: 6, width: 40 }
     case "space": return { id, type, height: 12 }
+    case "buttons": return { id, type, buttons: [{ id: cardId("btn"), label: "Ouvrir", icon: "file-text", steps: [{ type: "open-form" }] }] }
   }
 }
 
@@ -303,7 +310,7 @@ function PartEditor({ part, columns, onChange, onRemove, onMove, first, last, di
 }
 
 /** Les réglages d'un bloc : seulement ceux de son type. */
-function BlockSettings({ block, columns, onChange, disabled }: { block: CardBlock; columns: CardColumn[]; onChange: (block: CardBlock) => void; disabled?: boolean }) {
+function BlockSettings({ block, columns, onChange, disabled, extras }: { block: CardBlock; columns: CardColumn[]; onChange: (block: CardBlock) => void; disabled?: boolean; extras?: CardEditorExtras }) {
   const set = (changes: Partial<CardBlock>) => onChange({ ...block, ...changes })
   // Les colonnes d'où prendre une couleur : celles de type Couleur, ou des listes à choix colorés.
   const colorColumns = columns.filter((column) => { const kind = normalizeSpec(column.spec).kind; return kind === "color" || (kind === "choice" && (column.spec.options ?? []).some((option) => option.color)) }).map((column) => column.header)
@@ -452,6 +459,8 @@ function BlockSettings({ block, columns, onChange, disabled }: { block: CardBloc
         <p className={hintClass}>Pour composer : un trait sous un titre, une pastille de couleur à côté d’un nom, un aplat qui sépare deux zones de la carte…</p>
       </div>
     }
+    case "buttons":
+      return <CardButtonsEditor block={block} columns={columns} extras={extras} onChange={onChange} disabled={disabled} />
     case "space":
       return <div className="grid gap-3">
         <Range text="Hauteur" value={block.height ?? 12} min={1} max={400} step={1} format={(value) => `${value} px`} onChange={(height) => set({ height })} disabled={disabled} />
@@ -464,7 +473,7 @@ function BlockSettings({ block, columns, onChange, disabled }: { block: CardBloc
 // Les blocs : la liste et leurs réglages
 // ---------------------------------------------------------------------------
 
-function BlocksPage({ card, columns, selectedBlock, onSelectBlock, onChange, disabled }: { card: CardTemplate; columns: CardColumn[]; selectedBlock: string | null; onSelectBlock: (id: string | null) => void; onChange: (card: CardTemplate) => void; disabled?: boolean }) {
+function BlocksPage({ card, columns, selectedBlock, onSelectBlock, onChange, disabled, extras }: { card: CardTemplate; columns: CardColumn[]; selectedBlock: string | null; onSelectBlock: (id: string | null) => void; onChange: (card: CardTemplate) => void; disabled?: boolean; extras?: CardEditorExtras }) {
   const set = (changes: Partial<CardTemplate>) => onChange({ ...card, ...changes })
   const [dragging, setDragging] = useState<string | null>(null)
   const [over, setOver] = useState<string | null>(null)
@@ -555,7 +564,7 @@ function BlocksPage({ card, columns, selectedBlock, onSelectBlock, onChange, dis
               <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" disabled={disabled} onClick={() => removeBlock(block.id)} aria-label="Retirer le bloc" title="Retirer"><Trash2 /></Button>
             </span>
           </div>
-          {selected && <div className="border-t px-3 py-3"><BlockSettings block={block} columns={columns} onChange={updateBlock} disabled={disabled} /></div>}
+          {selected && <div className="border-t px-3 py-3"><BlockSettings block={block} columns={columns} onChange={updateBlock} disabled={disabled} extras={extras} /></div>}
         </div>
       })}
     </div>
@@ -659,7 +668,7 @@ function CompositionPage({ card, selectedBlock, onSelectBlock, onChange, disable
 
 const radiusOf = { sm: 8, md: 16, lg: 22 } as const
 
-function CardPage({ card, columns, onChange, disabled }: { card: CardTemplate; columns: CardColumn[]; onChange: (card: CardTemplate) => void; disabled?: boolean }) {
+function CardPage({ card, columns, onChange, disabled, extras }: { card: CardTemplate; columns: CardColumn[]; onChange: (card: CardTemplate) => void; disabled?: boolean; extras?: CardEditorExtras }) {
   const set = (changes: Partial<CardTemplate>) => onChange({ ...card, ...changes })
   const accentColumns = columns.filter((column) => { const spec = normalizeSpec(column.spec); return spec.kind === "color" || ((spec.kind === "choice" || spec.kind === "linked-choice") && (spec.options ?? []).some((option) => option.color)) || /couleur|color/i.test(column.header) })
   const list = card.width === "full" && !card.widthRem
@@ -732,6 +741,7 @@ function CardPage({ card, columns, onChange, disabled }: { card: CardTemplate; c
       </div>
       <label className={label}>Pastille dans le coin (« Nouveau », un rang…)<ColumnSelect value={card.corner} columns={columns} onChange={(corner) => set({ corner })} disabled={disabled} ariaLabel="Colonne de la pastille du coin" /></label>
     </div>
+    {extras?.hovers && <CardHoverClick card={card} extras={extras} onChange={onChange} disabled={disabled} />}
   </div>
 }
 
@@ -814,6 +824,9 @@ const screens = { phone: "22rem", tablet: "40rem", desktop: "100%" } as const
 
 function CardPreview({ card, columns, samples, selectedBlock, onSelectBlock }: { card: CardTemplate; columns: CardColumn[]; samples: Array<Record<string, string>>; selectedBlock: string | null; onSelectBlock: (id: string) => void }) {
   const rows = useMemo(() => previewSamples(samples, columns), [columns, samples])
+  // « Voir comme » : les boutons réservés à certains rôles, tels que chacun les voit.
+  const [viewAs, setViewAs] = useState<ViewRole>("mj-owner")
+  const withButtons = card.blocks.some((block) => block.type === "buttons" && block.buttons?.some((button) => button.roles?.length))
   const [at, setAt] = useState(0)
   const [grid, setGrid] = useState(false)
   const [screen, setScreen] = useState<keyof typeof screens>("desktop")
@@ -832,14 +845,15 @@ function CardPreview({ card, columns, samples, selectedBlock, onSelectBlock }: {
         <Button type="button" variant={grid ? "secondary" : "ghost"} size="sm" className="h-7 text-xs" onClick={() => setGrid(!grid)} title="Toutes les lignes, dans la grille : pour voir combien de cartes tiennent par ligne"><LayoutGrid />{grid ? "Une" : "Grille"}</Button>
       </span>
     </div>
+    {withButtons && <div className="grid gap-1 text-[11px] font-semibold text-muted-foreground">Voir comme<ViewAsPicker value={viewAs} onChange={setViewAs} /></div>}
     {grid && <Segmented ariaLabel="Largeur d’écran simulée" value={screen} options={[{ value: "phone", label: "", icon: <Smartphone className="size-3.5" />, title: "Téléphone" }, { value: "tablet", label: "", icon: <Tablet className="size-3.5" />, title: "Tablette" }, { value: "desktop", label: "", icon: <Monitor className="size-3.5" />, title: "Toute la largeur" }]} onChange={setScreen} />}
-    {grid
+    <ViewAsContext.Provider value={viewAs}>{grid
       ? <div className={cn("grid items-start gap-2", screen === "phone" && card.grid?.phone !== 2 && "!grid-cols-1", screen === "phone" && card.grid?.phone === 2 && "!grid-cols-2")} style={{ ...cardGridStyle(card), maxWidth: screens[screen] }}>
         {(rows.length > 1 ? rows : [rows[0], rows[0], rows[0]]).map((sample, position) => <IndexCard key={position} card={card} row={sampleSource(sample, columns)} />)}
       </div>
       : <div className="mx-auto w-full" style={card.width === "full" && !card.widthRem ? undefined : { maxWidth: `${rem + 2}rem` }}>
         <IndexCard card={card} row={sampleSource(rows[index], columns)} selectedBlock={selectedBlock} onSelectBlock={onSelectBlock} />
-      </div>}
+      </div>}</ViewAsContext.Provider>
     <p className="text-[10px] leading-4 text-muted-foreground">Clique sur un bloc de l’aperçu pour le régler. Un bloc vide pour cette ligne reste en pointillés ici, et disparaît sur la vraie carte.</p>
     {expanded && <CardsLivePreview card={card} columns={columns} rows={rows} onClose={() => setExpanded(false)} />}
   </aside>
@@ -1039,7 +1053,7 @@ const cardPages: Array<{ value: CardPageKey; label: string; icon: ReactNode }> =
 ]
 
 /** L'éditeur de la carte choisie : ses réglages en pages, et l'aperçu en direct. */
-export function IndexCardEditor({ tabName, columns, value, builtins, samples, selected, onSelect, onChange, hovers, disabled = false }: {
+export function IndexCardEditor({ tabName, columns, value, builtins, samples, selected, onSelect, onChange, hovers, extras, disabled = false }: {
   tabName: string
   columns: CardColumn[]
   /** Les cartes de l'onglet (brouillon). */
@@ -1052,6 +1066,8 @@ export function IndexCardEditor({ tabName, columns, value, builtins, samples, se
   onChange: (value: TabCards) => void
   /** Les survols de l'onglet : la carte en choisit un au passage de la souris (vue Cartes) ; absent : pas de choix. */
   hovers?: Array<{ id: string; name: string }>
+  /** Ce qu'il faut aux boutons et au clic de la carte : formulaires, cartes, index de l'onglet. */
+  extras?: Omit<CardEditorExtras, "hovers" | "cards">
   disabled?: boolean
 }) {
   const [creating, setCreating] = useState(false)
@@ -1069,8 +1085,7 @@ export function IndexCardEditor({ tabName, columns, value, builtins, samples, se
   </div>
 
   return <div className="grid min-h-0 gap-2 lg:h-full lg:grid-rows-[auto_minmax(0,1fr)]">
-    {hovers && <div className="max-w-md"><HoverChoice value={card.hover} hovers={hovers} onChange={(hover) => updateCard({ ...card, hover })} disabled={disabled} /></div>}
-    <SingleCardEditor key={card.id} card={card} columns={columns} samples={samples} onChange={updateCard} disabled={disabled} />
+    <SingleCardEditor key={card.id} card={card} columns={columns} samples={samples} onChange={updateCard} disabled={disabled} extras={{ ...extras, hovers: hovers ?? [], cards: value.cards.filter((entry) => entry.id !== card.id).map((entry) => ({ id: entry.id, name: entry.name })) }} />
   </div>
 }
 
@@ -1079,16 +1094,16 @@ export function IndexCardEditor({ tabName, columns, value, builtins, samples, se
  * direct à droite, chacun avec sa barre de défilement. « Modifier › Cartes » s'en sert pour la
  * carte choisie, et les vues pour leur élément sur mesure.
  */
-export function SingleCardEditor({ card, columns, samples, onChange, disabled = false }: { card: CardTemplate; columns: CardColumn[]; samples: Array<Record<string, string>>; onChange: (card: CardTemplate) => void; disabled?: boolean }) {
+export function SingleCardEditor({ card, columns, samples, onChange, disabled = false, extras }: { card: CardTemplate; columns: CardColumn[]; samples: Array<Record<string, string>>; onChange: (card: CardTemplate) => void; disabled?: boolean; /** Formulaires, cartes, survols de l'onglet (boutons, survol et clic) ; sans survols, pas de « Survol et clic ». */ extras?: CardEditorExtras }) {
   const [selectedBlock, setSelectedBlock] = useState<string | null>(null)
   const [page, setPage] = useState<CardPageKey>("card")
   const selectBlock = (id: string | null) => { setSelectedBlock(id); if (id) setPage("blocks") }
   return <div className="grid min-h-0 gap-3 lg:h-full lg:grid-cols-[minmax(0,1fr)_minmax(18rem,26rem)]">
     <section className="grid min-w-0 content-start gap-3 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
       <Tabs ariaLabel="Réglages de la carte" value={page} options={cardPages} onChange={setPage} />
-      {page === "card" && <CardPage card={card} columns={columns} onChange={onChange} disabled={disabled} />}
+      {page === "card" && <CardPage card={card} columns={columns} onChange={onChange} disabled={disabled} extras={extras} />}
       {page === "image" && <ImagePage card={card} columns={columns} onChange={onChange} disabled={disabled} />}
-      {page === "blocks" && <BlocksPage card={card} columns={columns} selectedBlock={selectedBlock} onSelectBlock={setSelectedBlock} onChange={onChange} disabled={disabled} />}
+      {page === "blocks" && <BlocksPage card={card} columns={columns} selectedBlock={selectedBlock} onSelectBlock={setSelectedBlock} onChange={onChange} disabled={disabled} extras={extras} />}
       {page === "composition" && <CompositionPage card={card} selectedBlock={selectedBlock} onSelectBlock={selectBlock} onChange={onChange} disabled={disabled} />}
     </section>
     <CardPreview card={card} columns={columns} samples={samples} selectedBlock={selectedBlock} onSelectBlock={selectBlock} />

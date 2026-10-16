@@ -148,6 +148,11 @@ export type IndexLayout = {
   width?: "sm" | "md" | "lg"
   /** Les sections deviennent des onglets (une à la fois, la première ouverte) ; la colonne latérale reste. */
   tabs?: boolean
+  /**
+   * Onglets : celui qui s'ouvre d'abord selon la valeur d'une colonne de la ligne (« Type » :
+   * Guerrier → l'onglet Combat, Mage → l'onglet Magie) ; une valeur sans onglet ouvre le premier.
+   */
+  tabsBy?: TabsByColumn
   /** Le style d'ensemble : le fond, l'allure des libellés. Le réglage d'un champ l'emporte toujours. */
   look?: LayoutLook
 }
@@ -163,6 +168,24 @@ export type LayoutLook = {
   labelSize?: "sm" | "md" | "lg"
   labelCase?: "upper" | "normal"
   labelWeight?: "normal" | "bold"
+}
+
+/** L'onglet ouvert d'abord selon une colonne : chaque valeur (« Guerrier ») mène à une section (son identifiant). */
+export type TabsByColumn = { column: string; map: Array<{ value: string; section: string }> }
+
+/**
+ * L'onglet à ouvrir d'abord pour une ligne : celui de la première valeur de sa case qui en a
+ * un (une case à plusieurs valeurs : « Guerrier, Mage » ouvre l'onglet de Guerrier) ; sinon
+ * `undefined` (le premier onglet).
+ */
+export function firstTabFor(tabsBy: TabsByColumn | undefined, readColumn: ((column: string) => string) | undefined, sectionIds: string[]) {
+  if (!tabsBy || !readColumn) return undefined
+  const values = readColumn(tabsBy.column).split(/\s*[,;\n]\s*/).map(foldName).filter(Boolean)
+  for (const value of values) {
+    const entry = tabsBy.map.find((item) => foldName(item.value) === value && sectionIds.includes(item.section))
+    if (entry) return entry.section
+  }
+  return undefined
 }
 
 /** Les colonnes du sous-titre d'un survol (la nouvelle liste, sinon l'ancien sous-titre seul). */
@@ -416,6 +439,23 @@ export function parseIndexLayout(input: unknown, options: { keepEmpty?: boolean 
   if (raw.nameInAccent === true) layout.nameInAccent = true
   if (raw.width === "sm" || raw.width === "lg") layout.width = raw.width
   if (raw.tabs === true) layout.tabs = true
+  if (raw.tabsBy && typeof raw.tabsBy === "object") {
+    const input = raw.tabsBy as Record<string, unknown>
+    const column = cleanText(input.column, 120)
+    const sectionIds = new Set(sections.map((section) => section.id))
+    const seen = new Set<string>()
+    const map = (Array.isArray(input.map) ? input.map : []).flatMap((entry) => {
+      if (!entry || typeof entry !== "object") return []
+      const item = entry as Record<string, unknown>
+      const value = cleanText(item.value, 80)
+      const section = cleanText(item.section, 40)
+      if (!value || !sectionIds.has(section) || seen.has(foldName(value))) return []
+      seen.add(foldName(value))
+      return [{ value, section }]
+    }).slice(0, 60)
+    // Gardé même sans valeur reliée : la colonne choisie reste à l'écran de l'éditeur.
+    if (column) layout.tabsBy = { column, map }
+  }
   const look = cleanLook(raw.look)
   if (look) layout.look = look
   // Vide gardé seulement pour une vraie mise en page (des sections ou une colonne de côté), pas un objet quelconque.
@@ -490,6 +530,7 @@ export function renameLayoutColumns(layout: IndexLayout, renames: Map<string, st
     ...(layout.icon ? { icon: rename(layout.icon) } : {}),
     ...(layout.medallion?.column ? { medallion: { ...layout.medallion, column: rename(layout.medallion.column) } } : {}),
     ...(layout.banner?.column ? { banner: { ...layout.banner, column: rename(layout.banner.column) } } : {}),
+    ...(layout.tabsBy ? { tabsBy: { ...layout.tabsBy, column: rename(layout.tabsBy.column) } } : {}),
   }
 }
 
@@ -513,8 +554,9 @@ export type ArrangedLayout<T> = {
   accent?: string
   look?: LayoutLook
   sections: Array<ArrangedSection<T>>
-  /** Les sections en onglets. */
+  /** Les sections en onglets ; celui ouvert d'abord selon une colonne. */
   tabs?: boolean
+  tabsBy?: TabsByColumn
   /** Les éléments que la mise en page ne place pas (affichés à la suite, sauf « masquées »). */
   rest: T[]
 }
@@ -553,7 +595,7 @@ export function arrangeLayout<T>(layout: IndexLayout, items: T[], keyOf: (item: 
     rows: section.rows.map((row) => ({ id: row.id, fields: row.fields.flatMap(take) })).filter((row) => row.fields.length),
   })).filter((section) => section.rows.length || section.title)
   const rest = layout.rest === "hide" ? [] : items.filter((item) => !used.has(foldName(keyOf(item))))
-  return { aside, asideWidth: layout.asideWidth ?? "md", asideSide: layout.asideSide ?? "left", ...(layout.accent ? { accent: layout.accent } : {}), ...(layout.look ? { look: layout.look } : {}), sections, ...(layout.tabs ? { tabs: true } : {}), rest }
+  return { aside, asideWidth: layout.asideWidth ?? "md", asideSide: layout.asideSide ?? "left", ...(layout.accent ? { accent: layout.accent } : {}), ...(layout.look ? { look: layout.look } : {}), sections, ...(layout.tabs ? { tabs: true } : {}), ...(layout.tabs && layout.tabsBy ? { tabsBy: layout.tabsBy } : {}), rest }
 }
 
 /** La clé d'un nouveau bloc. */

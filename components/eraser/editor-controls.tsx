@@ -207,11 +207,12 @@ export function ImageBoxControls({ value, defaults, onChange, disabled, radius, 
  * Au passage de la souris sur un élément : le survol de sa ligne, dans la version choisie
  * (« Modifier › Survol ») ; d'office, celui à l'étoile ; ou aucun.
  */
-export function HoverChoice({ value, hovers, onChange, disabled }: { value: string | undefined; hovers: Array<{ id: string; name: string }>; onChange: (hover: string | undefined) => void; disabled?: boolean }) {
-  const known = !value || value === "-" || hovers.some((hover) => hover.id === value)
+export function HoverChoice({ value, hovers, onChange, disabled, fromCard = false }: { value: string | undefined; hovers: Array<{ id: string; name: string }>; onChange: (hover: string | undefined) => void; disabled?: boolean; /** L'élément est une carte : absent, c'est son survol (« Survol et clic ») qui vaut. */ fromCard?: boolean }) {
+  const known = !value || value === "-" || value === "principal" || hovers.some((hover) => hover.id === value)
   return <label className={fieldLabel}>Au passage de la souris sur un élément
     <NativeSelect value={value ?? ""} disabled={disabled} onChange={(event) => onChange(event.target.value || undefined)} className="h-8 py-0 text-xs">
-      <NativeSelectOption value="">Le survol à l’étoile de l’onglet</NativeSelectOption>
+      {fromCard && <NativeSelectOption value="">Comme la carte</NativeSelectOption>}
+      <NativeSelectOption value={fromCard ? "principal" : ""}>Le survol à l’étoile de l’onglet</NativeSelectOption>
       {hovers.filter((hover) => hover.id !== "principal").map((hover) => <NativeSelectOption key={hover.id} value={hover.id}>Le survol « {hover.name} »</NativeSelectOption>)}
       {!known && <NativeSelectOption value={value}>Survol supprimé (celui à l’étoile le remplace)</NativeSelectOption>}
       <NativeSelectOption value="-">Aucun survol</NativeSelectOption>

@@ -13,7 +13,9 @@
  * Sans dépendance : l'éditeur, la grille de cartes, le serveur et les tests s'en servent.
  * Gardé sur le serveur partagé d'Eraser (lib/index-cards-store.ts), jamais dans Google Sheets.
  */
-import { foldName, isNameColumnSpec, normalizeSpec, type IndexColumnSpec } from "@/lib/index-columns"
+import { cleanActionStep } from "@/lib/index-actions"
+import { foldName, isNameColumnSpec, normalizeSpec, type ActionButton, type ActionStep, type IndexColumnSpec } from "@/lib/index-columns"
+import { cleanViewRoles, type ViewRole } from "@/lib/view-roles"
 
 // ---------------------------------------------------------------------------
 // Le modèle
@@ -29,7 +31,23 @@ export type CardShape = "rect" | "rounded" | "circle"
 /** Un morceau d'une ligne : une colonne, avec ce qu'on écrit avant et après sa valeur. */
 export type CardPart = { column: string; prefix?: string; suffix?: string; tone?: CardTone; bold?: boolean; italic?: boolean }
 
-export type CardBlockType = "title" | "line" | "text" | "pills" | "field" | "bar" | "stats" | "image" | "value" | "divider" | "details" | "zone" | "space"
+export type CardBlockType = "title" | "line" | "text" | "pills" | "field" | "bar" | "stats" | "image" | "value" | "divider" | "details" | "zone" | "space" | "buttons"
+
+/**
+ * Un bouton du bloc « Boutons » : un bouton de la colonne Boutons (libellé, icône, couleur,
+ * confirmation, condition, étapes), avec les rôles qui le voient et peuvent s'en servir
+ * (aucun : tout le monde) et son allure.
+ */
+export type CardButton = ActionButton & { roles?: ViewRole[]; look?: "solid" | "outline" | "ghost" }
+
+/** Au clic sur la carte : sa fiche (d'office), un formulaire choisi ici, sa page, rien. La forme qui contient la carte (une vue, un bloc de page) l'emporte quand elle règle le sien. */
+export type CardClick = "sheet" | "form" | "page" | "none"
+export const cardClicks: Array<{ value: CardClick; label: string; hint: string }> = [
+  { value: "sheet", label: "Ouvrir la fiche", hint: "Le formulaire à l’étoile de la ligne (d’office)." },
+  { value: "form", label: "Ouvrir un formulaire, ici", hint: "Un formulaire de l’onglet, choisi ci-dessous, dans une fenêtre." },
+  { value: "page", label: "Ouvrir la page", hint: "La page de la ligne, si l’index en a une (sinon sa fiche)." },
+  { value: "none", label: "Rien", hint: "La carte ne réagit pas au clic (ses boutons, si elle en a, restent)." },
+]
 
 /**
  * Un bloc de la carte. Un seul type d'objet, dont chaque type de bloc lit les réglages qui
@@ -89,6 +107,9 @@ export type CardBlock = {
   zone?: "block" | "line" | "pill" | "dot"
   /** Détails : ouverts d'emblée. */
   open?: boolean
+  /** Boutons : les boutons, dans l'ordre ; étirés sur toute la largeur. */
+  buttons?: CardButton[]
+  stretch?: boolean
 } & ImageBox
 
 /** Une case d'une ligne de la carte : des blocs côte à côte, chacune sa largeur et son alignement. */
@@ -157,6 +178,9 @@ export type CardTemplate = {
   name: string
   /** Au passage de la souris sur la carte (vue Cartes) : cette version du survol de la ligne ; absent : l'étoilée ; « - » : aucun. */
   hover?: string
+  /** Au clic sur la carte : absent, sa fiche ; « form » : le formulaire `clickForm` (« principal » : l'étoilé). */
+  click?: CardClick
+  clickForm?: string
   media?: CardMedia
   /** La couleur d'accent : prise dans une colonne (couleur, choix coloré) et, sinon, celle-ci. */
   accent?: { column?: string; color?: string }
@@ -253,6 +277,7 @@ export const cardBlockTypes: Array<{ value: CardBlockType; label: string; hint: 
   { value: "divider", label: "Séparateur", hint: "Un trait fin." },
   { value: "zone", label: "Zone de couleur", hint: "Un aplat, un trait, une pastille ou un point à la couleur de l'accent (ou une autre) : pour composer." },
   { value: "space", label: "Espace", hint: "Un peu d'air, de la hauteur voulue." },
+  { value: "buttons", label: "Boutons", hint: "Des boutons : un formulaire ouvert ici, une page, une carte, une ligne au hasard, supprimer… réservés aux rôles choisis." },
 ]
 
 export const cardAspects: Array<{ value: CardAspect; label: string }> = [
@@ -429,8 +454,32 @@ function cleanBlock(input: unknown): CardBlock | null {
   const zone = oneOf<"block" | "line" | "pill" | "dot">(raw.zone, ["block", "line", "pill", "dot"])
   if (zone) block.zone = zone
   if (raw.open === true) block.open = true
+  if (type === "buttons") {
+    const buttons = (Array.isArray(raw.buttons) ? raw.buttons : []).map(cleanCardButton).filter((button): button is CardButton => Boolean(button)).slice(0, 8)
+    if (buttons.length) block.buttons = buttons
+    if (raw.stretch === true) block.stretch = true
+  }
   Object.assign(block, cleanImageBox(raw))
   return block
+}
+
+/** Un bouton de carte propre : ses textes bornés, ses rôles connus, ses étapes connues. */
+export function cleanCardButton(input: unknown): CardButton | null {
+  if (!input || typeof input !== "object") return null
+  const raw = input as Record<string, unknown>
+  const steps = (Array.isArray(raw.steps) ? raw.steps : []).map(cleanActionStep).filter((step): step is ActionStep => Boolean(step)).slice(0, 8)
+  const button: CardButton = { id: text(raw.id, 20) || cardId("btn"), label: typeof raw.label === "string" ? raw.label.slice(0, 60) : "", steps }
+  const icon = text(raw.icon, 40)
+  if (icon) button.icon = icon
+  if (typeof raw.color === "string" && /^#[0-9a-f]{6}$/i.test(raw.color)) button.color = raw.color
+  if (raw.iconOnly === true) button.iconOnly = true
+  if (typeof raw.confirm === "string" && raw.confirm.trim()) button.confirm = raw.confirm.slice(0, 200)
+  if (typeof raw.condition === "string" && raw.condition.trim()) button.condition = raw.condition.slice(0, 400)
+  const roles = cleanViewRoles(raw.roles)
+  if (roles) button.roles = roles
+  const look = oneOf<"solid" | "outline" | "ghost">(raw.look, ["solid", "outline", "ghost"])
+  if (look && look !== "solid") button.look = look
+  return button
 }
 
 function cleanCell(input: unknown): CardCell | null {
@@ -504,6 +553,9 @@ export function parseCardTemplate(input: unknown): CardTemplate | null {
   if (!blocks.length && !media && !text(raw.id, 40)) return null
   const card: CardTemplate = { id: text(raw.id, 40) || cardId(), name: text(raw.name, 60) || "Carte", blocks }
   if (text(raw.hover, 40)) card.hover = text(raw.hover, 40)
+  const click = oneOf<CardClick>(raw.click, ["sheet", "form", "page", "none"])
+  if (click && click !== "sheet") card.click = click
+  if (click === "form" && text(raw.clickForm, 40)) card.clickForm = text(raw.clickForm, 40)
   if (media) card.media = media
   if (raw.accent && typeof raw.accent === "object") {
     const accent = raw.accent as Record<string, unknown>

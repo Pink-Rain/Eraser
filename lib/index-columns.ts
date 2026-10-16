@@ -369,6 +369,18 @@ export type ActionStep =
   | { type: "chat"; message: string; audience?: "public" | "gm" }
   | { type: "campaign-inventory" }
   | { type: "move-ask" }
+  /** Un formulaire de l'onglet (« principal » : l'étoilé), ouvert ici sur la ligne, sans quitter la page. */
+  | { type: "open-form"; form?: string }
+  /** La page de la ligne (celle de « Ouvrir la page »), sinon sa fiche. */
+  | { type: "open-page" }
+  /** Une ligne d'un autre index (son nom, qui peut venir d'une colonne : « {Lieu} »), ouverte dans sa fiche ou un formulaire. */
+  | { type: "open-row"; index: string; row: string; form?: string }
+  /** Une page d'Eraser (« /ressources/index/lieux », une page créée…). */
+  | { type: "open-eraser"; href: string }
+  /** Une carte de l'onglet, dessinée avec la ligne dans une fenêtre. */
+  | { type: "show-card"; card: string }
+  /** Une ligne tirée au hasard (de cet onglet, ou d'un autre index), ouverte dans sa fiche. */
+  | { type: "random-row"; index?: string; tab?: string; form?: string }
 
 export type ActionButton = {
   id: string

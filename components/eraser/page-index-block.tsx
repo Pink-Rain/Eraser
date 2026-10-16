@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation"
 import { createContext, useCallback, useContext, useDeferredValue, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react"
 import { ChevronRight, LoaderCircle, RotateCcw, Search, TriangleAlert, X } from "lucide-react"
 
-import { IndexCard, IndexCardGrid, type CardRowSource } from "@/components/eraser/index-card"
+import { CardActionsContext, IndexCard, IndexCardGrid, roleRowOf, type CardActions, type CardRowSource } from "@/components/eraser/index-card"
+import { useRolesOf } from "@/components/eraser/view-roles"
 import { IndexFormView } from "@/components/eraser/index-form-view"
 import { primeWorldIndexData } from "@/components/eraser/index-cells"
 import { IndexStats } from "@/components/eraser/index-stats"
@@ -140,10 +141,25 @@ function ViewContent({ data, block, searching = false }: { data: ViewData; block
   const column = useMemo(() => new Map(data.headers.map((header, index) => [foldName(header), index])), [data.headers])
   const valueOf = useCallback((rowKey: string, header: string) => { const at = column.get(foldName(header)); return at === undefined ? "" : byKey.get(rowKey)?.cells[at] ?? "" }, [byKey, column])
   const specOf = useCallback((header: string) => data.specs[header] ?? Object.entries(data.specs).find(([name]) => foldName(name) === foldName(header))?.[1], [data.specs])
-  const rowSource = useCallback((rowKey: string): CardRowSource => ({ value: (header) => valueOf(rowKey, header), spec: specOf }), [specOf, valueOf])
+  const rowSource = useCallback((rowKey: string): CardRowSource => ({ key: rowKey, value: (header) => valueOf(rowKey, header), spec: specOf }), [specOf, valueOf])
   const open = useCallback((href?: string) => { if (href) router.push(href) }, [router])
   const openRow = useCallback((rowKey: string) => open(byKey.get(rowKey)?.href), [byKey, open])
   const hrefOf = useCallback((rowKey: string) => byKey.get(rowKey)?.href, [byKey])
+  // Les boutons d'une carte dans une page : ceux qui mènent ailleurs (une page web, une page
+  // d'Eraser) partent d'ici ; ceux qui touchent la ligne l'ouvrent dans son index, où ils agissent.
+  const rolesOf = useRolesOf()
+  const cardActions = useMemo<CardActions>(() => ({
+    run: (rowKey, button) => {
+      const fill = (text: string) => text.replace(/\{([^{}]+)\}/g, (_match, name: string) => strip(valueOf(rowKey, name.trim())))
+      const step = button.steps[0]
+      if (step?.type === "open-url" && /^https?:\/\//i.test(fill(step.url).trim())) { window.open(fill(step.url).trim(), "_blank", "noopener,noreferrer"); return }
+      if (step?.type === "open-eraser" && fill(step.href).trim().startsWith("/")) { router.push(fill(step.href).trim()); return }
+      openRow(rowKey)
+    },
+    rolesOf: (rowKey) => rolesOf(roleRowOf(byKey.get(rowKey)?.name ?? "", data.headers, (header) => valueOf(rowKey, header))),
+    openForm: (rowKey) => openRow(rowKey),
+    openPage: (rowKey) => openRow(rowKey),
+  }), [byKey, data.headers, openRow, rolesOf, router, valueOf])
   // Le calendrier lit l'Index des calendriers : la page le lui donne (un joueur ne peut pas le lire).
   useEffect(() => { if (data.calendars) primeWorldIndexData("calendars", { tables: data.calendars }) }, [data.calendars])
   const card = data.cards ? pickCard(data.cards, null) : null
@@ -162,6 +178,8 @@ function ViewContent({ data, block, searching = false }: { data: ViewData; block
     return stat ? <IndexStats stats={[{ ...stat, pinned: true }]} groups={data.statGroups} pinnedOnly single rows={data.rows.map((row) => row.key)} columns={data.headers} tabs={[data.tab]} valueOf={valueOf} tabOf={() => data.tab} nameOf={(rowKey) => byKey.get(rowKey)?.name ?? ""} optionsOf={(header) => (specOf(header)?.options ?? []).map((option) => ({ value: option.value, color: option.color }))} onOpen={data.rows.some((row) => row.href) ? (rowKey) => openRow(rowKey) : undefined} canEdit={false} onSave={async () => undefined} /> : null
   }, [byKey, data.headers, data.rows, data.statGroups, data.stats, data.tab, openRow, specOf, valueOf])
   const empty = searching ? "Aucune ligne ne correspond à la recherche." : "Aucune ligne dans cette vue pour le moment."
+  return <CardActionsContext.Provider value={cardActions}>{viewContent()}</CardActionsContext.Provider>
+  function viewContent() {
   if (data.view === "cards") return card
     ? <IndexCardGrid card={card} rows={data.rows} rowSource={rowSource} onOpen={openRow} hrefOf={hrefOf} rowRef={rowRefOf} empty={empty} />
     : <Placeholder>Cet onglet n’a pas encore de cartes : elles se règlent dans l’index (Modifier › Cartes).</Placeholder>
@@ -186,6 +204,7 @@ function ViewContent({ data, block, searching = false }: { data: ViewData; block
   if (!data.rows.length) return <Placeholder>{empty}</Placeholder>
   void block
   return <ReadTable data={data} open={open} />
+  }
 }
 
 function Frame({ heading, children, footer, height }: { heading: string; children: React.ReactNode; footer?: React.ReactNode; height?: number | null }) {

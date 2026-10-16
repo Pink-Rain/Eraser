@@ -10,7 +10,7 @@
  * montrent avec ces réglages.
  */
 import { useMemo, useState, type ReactNode } from "react"
-import { ArrowDown, ArrowUp, BookOpen, Bookmark, Check, Columns3, Gauge, Image as ImageIcon, LayoutGrid, LayoutList, ListTree, Monitor, MousePointerClick, Palette, PanelsLeftRight, Pencil, Plus, RotateCcw, Sigma, Smartphone, Sparkles, Star, Tablet, X } from "lucide-react"
+import { ArrowDown, ArrowUp, BookOpen, Bookmark, Check, Columns3, Gauge, Heading, Image as ImageIcon, LayoutGrid, LayoutList, ListTree, Monitor, MousePointerClick, Palette, Pencil, Plus, RotateCcw, Search, SearchX, Sigma, Smartphone, Sparkles, Star, Tablet, Users, X } from "lucide-react"
 
 import { IndexCard } from "@/components/eraser/index-card"
 import { NewCardDialog, SingleCardEditor } from "@/components/eraser/index-card-editor"
@@ -20,17 +20,20 @@ import { IndexPresentation } from "@/components/eraser/index-presentation"
 import { layoutIcons, useIndexSettings } from "@/components/eraser/index-windows"
 import { CopyToTabsDialog, ManagePresetsDialog, NamePresetDialog, PreviewDialog, PreviewExpandButton, VariantsPanel } from "@/components/eraser/index-variants-panel"
 import { accentOptions, Choice, HoverChoice, ColorSwatches, ColumnField, ColumnsPicker, densityOptions, fieldLabel, fieldStyleOptions, hintText, IconPick, ImageBoxControls, imageShapeOptions, radiusOptions, Range, Segmented, settingsGroup, settingsTitle, SettingsRow, sizeOptions, Tabs, Toggle } from "@/components/eraser/editor-controls"
+import { RolesPicker } from "@/components/eraser/view-roles"
 import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from "@/components/ui/native-select"
 import { loadWorldIndexData } from "@/components/eraser/index-cells"
 import { calendarsFromTables, REAL_CALENDAR } from "@/lib/calendars"
-import { pickCard, type CardColumn, type CardTemplate } from "@/lib/index-cards"
-import { foldName } from "@/lib/index-columns"
+import { cardId, pickCard, type CardColumn, type CardTemplate } from "@/lib/index-cards"
+import { foldName, isNameColumnSpec } from "@/lib/index-columns"
+import { viewRoles, type ViewRole } from "@/lib/view-roles"
 import type { StatDefinition } from "@/lib/index-stats"
 import type { NamedLayout } from "@/lib/index-layouts"
-import { builtinPresentationPresets, calendarFormChoices, calendarScaleOf, calendarScales, dashboardTileKinds, DEFAULT_ITEM_CARD, PRESENTATION_ITEM_CARD, fitLayoutToColumns, groupFormulaOps, namedPresentationsOf, presentationKinds, presentationClicks, type CalendarForms, type CalendarScale, type DashboardTile, type KanbanLane, type NamedPresentation, type PresentationKind, type TabPresentations, type TileFormula, type Presentation, type PresentationLook, type PresentationPreset } from "@/lib/index-presentations"
+import { builtinPresentationPresets, calendarFormChoices, calendarScaleOf, calendarScales, dashboardTileKinds, DEFAULT_ITEM_CARD, PRESENTATION_ITEM_CARD, fitLayoutToColumns, groupFormulaOps, listToolTypes, namedPresentationsOf, presentationKinds, presentationClicks, rowRuleOps, type CalendarForms, type CalendarScale, type DashboardTile, type KanbanLane, type ListTool, type NamedPresentation, type PresentationClick, type PresentationKind, type RowRule, type TabPresentations, type TileFormula, type Presentation, type PresentationLook, type PresentationPreset } from "@/lib/index-presentations"
 import { presentationStartersFor } from "@/lib/index-presentation-starters"
 import { cn } from "@/lib/utils"
 import { useEffect } from "react"
@@ -119,14 +122,18 @@ function GaugeSettings({ ctx }: { ctx: Ctx }) {
 function ClickSettings({ ctx }: { ctx: Ctx }) {
   const { kind, layout, set, cards, forms, disabled } = ctx
   const master = kind === "master-detail"
-  const click = master ? "side" : layout.click ?? "sheet"
-  const panel = click === "side" || click === "below"
+  // Une carte de l'onglet dessine l'élément : absent, c'est son clic (« Survol et clic ») qui vaut.
+  const cardItem = Boolean(layout.itemCard && layout.itemCard !== PRESENTATION_ITEM_CARD && !layout.itemForm)
+  const click = master ? "side" : layout.click ?? (cardItem ? "" : "sheet")
+  // Un clic par rôle peut ouvrir le détail même si celui de tous ne l'ouvre pas : son contenu se règle alors aussi.
+  const panel = click === "side" || click === "below" || click === "center" || Object.values(layout.clickByRole ?? {}).some((value) => value === "side" || value === "below" || value === "center")
   const detail = layout.detail ?? {}
   const update = (changes: Partial<NonNullable<Presentation["detail"]>>) => { const next = { ...detail, ...changes }; for (const key of Object.keys(next) as Array<keyof typeof next>) if (next[key] === undefined) delete next[key]; set({ detail: Object.keys(next).length ? next : undefined }) }
   return <div className="grid gap-1.5 rounded-lg border border-dashed bg-background/50 p-2.5">
     <SettingsRow>
       {!master && <label className={fieldLabel}><span className="flex items-center gap-1"><MousePointerClick className="size-3" />Au clic sur un élément</span>
-        <NativeSelect value={click} disabled={disabled} onChange={(event) => set({ click: event.target.value === "sheet" ? undefined : event.target.value as Presentation["click"] })} className="h-8 py-0 text-xs" title={presentationClicks.find((entry) => entry.value === click)?.hint}>
+        <NativeSelect value={click} disabled={disabled} onChange={(event) => set({ click: !event.target.value || (event.target.value === "sheet" && !cardItem) ? undefined : event.target.value as Presentation["click"] })} className="h-8 py-0 text-xs" title={presentationClicks.find((entry) => entry.value === click)?.hint ?? "Ce que règle la carte (Modifier › Cartes › Survol et clic)"}>
+          {cardItem && <NativeSelectOption value="">Comme la carte</NativeSelectOption>}
           {presentationClicks.map((entry) => <NativeSelectOption key={entry.value} value={entry.value}>{entry.label}</NativeSelectOption>)}
         </NativeSelect>
       </label>}
@@ -145,8 +152,233 @@ function ClickSettings({ ctx }: { ctx: Ctx }) {
       {click === "side" && !master && <Choice label="Largeur du panneau" value={detail.width ?? "normal"} options={[{ value: "narrow", label: "Étroit" }, { value: "normal", label: "Normal" }, { value: "wide", label: "Large" }]} onChange={(width) => update({ width: width === "normal" ? undefined : width })} disabled={disabled} />}
       {panel && <span className={cn(fieldLabel, "self-end pb-1.5")}><Toggle checked={Boolean(detail.nav)} onChange={(nav) => update({ nav: nav || undefined })} disabled={disabled}>Précédent / suivant</Toggle></span>}
     </SettingsRow>
-    <HoverChoice value={layout.hover} hovers={ctx.hovers} onChange={(hover) => set({ hover })} disabled={disabled} />
+    {panel && detail.kind === "form" && <DetailEditSettings ctx={ctx} />}
+    <ClickByRoleSettings ctx={ctx} />
+    <HoverChoice value={layout.hover} hovers={ctx.hovers} onChange={(hover) => set({ hover })} disabled={disabled} fromCard={cardItem} />
   </div>
+}
+
+/** Le formulaire du détail : en lecture, modifiable directement, ou après « Modifier » ; par qui ; les champs qui restent en lecture. */
+function DetailEditSettings({ ctx }: { ctx: Ctx }) {
+  const { layout, set, columns, disabled } = ctx
+  const detail = layout.detail ?? {}
+  const update = (changes: Partial<NonNullable<Presentation["detail"]>>) => { const next = { ...detail, ...changes }; for (const key of Object.keys(next) as Array<keyof typeof next>) if (next[key] === undefined) delete next[key]; set({ detail: Object.keys(next).length ? next : undefined }) }
+  return <div className="grid gap-2 rounded-lg border bg-background/60 p-2">
+    <Choice label="Le formulaire du détail" value={detail.edit ?? "read"} options={[{ value: "read", label: "En lecture" }, { value: "inline", label: "Modifiable directement" }, { value: "button", label: "Avec « Modifier »" }]} onChange={(edit) => update({ edit: edit === "read" ? undefined : edit, ...(edit === "read" ? { editRoles: undefined, locked: undefined } : {}) })} disabled={disabled} />
+    {detail.edit && <>
+      <RolesPicker label="Qui peut modifier" value={detail.editRoles} onChange={(editRoles) => update({ editRoles })} disabled={disabled} />
+      <span className={fieldLabel}>Champs toujours en lecture <span className="font-normal">(les notes du MJ…)</span><ColumnsPicker value={detail.locked ?? []} columns={columns} onChange={(locked) => update({ locked: locked.length ? locked : undefined })} disabled={disabled} ariaLabel="Champs en lecture" max={40} /></span>
+      <p className={hintText}>Chaque champ s’écrit dans la feuille quand on le quitte, comme dans la fiche. Les rôles qui ne peuvent pas modifier lisent le formulaire.</p>
+    </>}
+  </div>
+}
+
+/** Au clic, selon qui regarde : un clic par rôle ; « Comme pour tous » garde celui de la vue. */
+function ClickByRoleSettings({ ctx }: { ctx: Ctx }) {
+  const { kind, layout, set, disabled } = ctx
+  const master = kind === "master-detail"
+  const [open, setOpen] = useState(Boolean(layout.clickByRole))
+  const byRole = layout.clickByRole ?? {}
+  const choices = master ? presentationClicks.filter((entry) => ["sheet", "page", "none"].includes(entry.value)) : presentationClicks
+  const update = (role: ViewRole, value: string) => {
+    const next = { ...byRole, [role]: value || undefined } as Partial<Record<ViewRole, PresentationClick>>
+    for (const key of Object.keys(next) as ViewRole[]) if (!next[key]) delete next[key]
+    set({ clickByRole: Object.keys(next).length ? next : undefined })
+  }
+  if (!open) return <Button type="button" size="sm" variant="ghost" className="h-7 justify-self-start text-[11px]" disabled={disabled} onClick={() => setOpen(true)}><Users className="size-3.5" />Un clic différent selon le rôle…</Button>
+  return <div className="grid gap-1.5 rounded-lg border bg-background/60 p-2">
+    <p className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground"><Users className="size-3.5" />Selon qui regarde <span className="font-normal">— le rôle le plus précis l’emporte</span></p>
+    {viewRoles.map((role) => <label key={role.value} className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)] items-center gap-2 text-xs" title={role.hint}>
+      <span className="truncate font-medium">{role.label}</span>
+      <NativeSelect value={byRole[role.value] ?? ""} disabled={disabled} onChange={(event) => update(role.value, event.target.value)} className="h-7 py-0 text-[11px]" aria-label={`Au clic, pour ${role.label}`}>
+        <NativeSelectOption value="">{master ? "Le détail (comme pour tous)" : "Comme pour tous"}</NativeSelectOption>
+        {choices.map((entry) => <NativeSelectOption key={entry.value} value={entry.value}>{entry.label}</NativeSelectOption>)}
+      </NativeSelect>
+    </label>)}
+  </div>
+}
+
+/** L'en-tête d'une liste : un titre, un texte, une icône, le nombre de lignes ; au-dessus ou dans le détail. */
+function HeaderSettings({ ctx }: { ctx: Ctx }) {
+  const { kind, layout, set, disabled } = ctx
+  const header = layout.header ?? {}
+  const update = (changes: Partial<NonNullable<Presentation["header"]>>) => { const next = { ...header, ...changes }; for (const key of Object.keys(next) as Array<keyof typeof next>) if (next[key] === undefined || next[key] === "") delete next[key]; set({ header: Object.keys(next).length ? next : undefined }) }
+  const withDetail = kind === "master-detail" || layout.click === "side"
+  return <div className={settingsGroup}>
+    <p className={settingsTitle}><Heading className="size-3.5" />En-tête</p>
+    <SettingsRow>
+      <label className={cn(fieldLabel, "min-w-40 flex-1")}>Titre<Input value={header.title ?? ""} disabled={disabled} maxLength={120} placeholder="PNJ de Valombre" onChange={(event) => update({ title: event.target.value || undefined })} className="h-8 text-xs" /></label>
+      <span className={fieldLabel}>Icône<IconPick value={header.icon} onChange={(icon) => update({ icon })} disabled={disabled} /></span>
+    </SettingsRow>
+    <label className={fieldLabel}>Texte<textarea value={header.text ?? ""} disabled={disabled} maxLength={600} rows={2} placeholder="Les personnages que le groupe a croisés…" onChange={(event) => update({ text: event.target.value || undefined })} className="min-h-14 rounded-md border bg-background px-2 py-1.5 text-xs font-normal text-foreground" /></label>
+    <SettingsRow>
+      <span className="self-end pb-1.5"><Toggle checked={Boolean(header.count)} onChange={(count) => update({ count: count || undefined })} disabled={disabled}>Le nombre de lignes</Toggle></span>
+      <Choice label="Place" value={header.place ?? "top"} options={[{ value: "top", label: "Au-dessus" }, { value: "detail", label: "Dans le détail" }]} onChange={(place) => update({ place: place === "top" ? undefined : place })} disabled={disabled || !withDetail} hint={withDetail ? undefined : "« Dans le détail » : avec un maître-détail ou le panneau à côté"} />
+    </SettingsRow>
+  </div>
+}
+
+/** Un outil neuf de la barre d'outils, avec ses réglages de départ. */
+function newTool(type: ListTool["type"], columns: string[], layout: Presentation): ListTool {
+  switch (type) {
+    case "search": return { type, placeholder: "Chercher…" }
+    case "filter": return { type, column: layout.groupBy ?? layout.kanbanColumn ?? columns[1] ?? columns[0] ?? "", multi: true }
+    case "sort": return { type, columns: columns.slice(0, 3) }
+    case "group": return { type, columns: columns.slice(1, 4) }
+    case "count": return { type }
+    case "add": return { type }
+  }
+}
+
+/** La barre d'outils : des outils qu'on ajoute, règle et range ; au-dessus de la vue ou dans le détail. */
+function ToolbarSettings({ ctx }: { ctx: Ctx }) {
+  const { kind, layout, set, columns, disabled } = ctx
+  const tools = layout.toolbar?.tools ?? []
+  const [adding, setAdding] = useState(false)
+  const setTools = (next: ListTool[], place = layout.toolbar?.place) => set({ toolbar: next.length ? { tools: next, ...(place ? { place } : {}) } : undefined })
+  const update = (index: number, tool: ListTool) => setTools(tools.map((item, at) => at === index ? tool : item))
+  const move = (index: number, delta: number) => { const next = [...tools]; const to = index + delta; if (to < 0 || to >= next.length) return; next.splice(to, 0, next.splice(index, 1)[0]); setTools(next) }
+  const withDetail = kind === "master-detail" || layout.click === "side"
+  const label = (type: ListTool["type"]) => listToolTypes.find((entry) => entry.value === type)?.label ?? type
+  return <div className={settingsGroup}>
+    <div className="flex items-center justify-between gap-2">
+      <p className={settingsTitle}><Search className="size-3.5" />Barre d’outils</p>
+      <Popover open={adding} onOpenChange={setAdding}>
+        <PopoverTrigger asChild><Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={disabled || tools.length >= 12}><Plus />Ajouter un outil</Button></PopoverTrigger>
+        <PopoverContent align="end" className="w-80 p-1.5">
+          {listToolTypes.map((entry) => <button key={entry.value} type="button" onClick={() => { setTools([...tools, newTool(entry.value, columns, layout)]); setAdding(false) }} className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted">
+            <span className="min-w-0"><span className="block text-sm font-medium">{entry.label}</span><span className="block text-[11px] leading-4 text-muted-foreground">{entry.hint}</span></span>
+          </button>)}
+        </PopoverContent>
+      </Popover>
+    </div>
+    {!tools.length && <p className={hintText}>Aucun outil : la vue montre ses lignes telles quelles. Ajoute une recherche, des filtres épinglés, un tri au choix… Ce que le lecteur y change ne touche que son écran.</p>}
+    <div className="grid gap-1.5">
+      {tools.map((tool, index) => <div key={index} className="grid gap-2 rounded-lg border bg-background/70 p-2">
+        <div className="flex items-center gap-1">
+          <span className="min-w-0 flex-1 text-xs font-semibold">{label(tool.type)}</span>
+          <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || index === 0} onClick={() => move(index, -1)} aria-label="Avancer l’outil"><ArrowUp /></Button>
+          <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || index === tools.length - 1} onClick={() => move(index, 1)} aria-label="Reculer l’outil"><ArrowDown /></Button>
+          <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" disabled={disabled} onClick={() => setTools(tools.filter((_, at) => at !== index))} aria-label="Retirer l’outil"><X /></Button>
+        </div>
+        {tool.type === "search" && <>
+          <label className={fieldLabel}>Texte d’invite<Input value={tool.placeholder ?? ""} disabled={disabled} maxLength={60} placeholder="Chercher…" onChange={(event) => update(index, { ...tool, placeholder: event.target.value || undefined })} className="h-8 text-xs" /></label>
+          <span className={fieldLabel}>Cherche dans <span className="font-normal">(aucune : le nom)</span><ColumnsPicker value={tool.columns ?? []} columns={columns} onChange={(picked) => update(index, { ...tool, columns: picked.length ? picked : undefined })} disabled={disabled} ariaLabel="Colonnes de la recherche" /></span>
+        </>}
+        {tool.type === "filter" && <SettingsRow>
+          <ColumnField label="Colonne" value={tool.column} columns={columns} onChange={(column) => column && update(index, { ...tool, column })} empty={null} disabled={disabled} />
+          <span className="self-end pb-1.5"><Toggle checked={Boolean(tool.multi)} onChange={(multi) => update(index, { ...tool, multi: multi || undefined })} disabled={disabled}>Plusieurs valeurs à la fois</Toggle></span>
+        </SettingsRow>}
+        {(tool.type === "sort" || tool.type === "group") && <span className={fieldLabel}>{tool.type === "sort" ? "Le lecteur trie par" : kind === "kanban" ? "Le lecteur choisit les colonnes du kanban parmi" : "Le lecteur regroupe par"}<ColumnsPicker value={tool.columns} columns={columns} onChange={(picked) => picked.length && update(index, { ...tool, columns: picked })} disabled={disabled} ariaLabel="Colonnes au choix" max={12} /></span>}
+        {tool.type === "count" && <label className={fieldLabel}>Le mot <span className="font-normal">(« PNJ » : 9 PNJ)</span><Input value={tool.word ?? ""} disabled={disabled} maxLength={30} placeholder="lignes" onChange={(event) => update(index, { ...tool, word: event.target.value || undefined })} className="h-8 w-40 text-xs" /></label>}
+        {tool.type === "add" && <>
+          <label className={fieldLabel}>Libellé<Input value={tool.label ?? ""} disabled={disabled} maxLength={40} placeholder="Ajouter" onChange={(event) => update(index, { ...tool, label: event.target.value || undefined })} className="h-8 w-48 text-xs" /></label>
+          <RolesPicker value={tool.roles} onChange={(roles) => update(index, { ...tool, roles })} disabled={disabled} />
+          <p className={hintText}>Ouvre le formulaire d’ajout de l’index. Sur une page, seuls ceux qui peuvent écrire dans l’index le voient.</p>
+        </>}
+      </div>)}
+    </div>
+    {tools.length > 0 && <Choice label="Place" value={layout.toolbar?.place ?? "top"} options={[{ value: "top", label: "Au-dessus" }, { value: "detail", label: "Dans le détail" }]} onChange={(place) => setTools(tools, place === "top" ? undefined : place)} disabled={disabled || !withDetail} hint={withDetail ? undefined : "« Dans le détail » : avec un maître-détail ou le panneau à côté"} />}
+  </div>
+}
+
+/** Le pied : le nombre de lignes, des totaux qui suivent la recherche, « Charger plus ». */
+function FooterSettings({ ctx }: { ctx: Ctx }) {
+  const { layout, set, columns, disabled } = ctx
+  const footer = layout.footer ?? {}
+  const update = (changes: Partial<NonNullable<Presentation["footer"]>>) => { const next = { ...footer, ...changes }; for (const key of Object.keys(next) as Array<keyof typeof next>) if (next[key] === undefined) delete next[key]; set({ footer: Object.keys(next).length ? next : undefined }) }
+  const totals = footer.totals ?? []
+  const setTotals = (next: TileFormula[]) => update({ totals: next.length ? next : undefined })
+  return <div className={settingsGroup}>
+    <p className={settingsTitle}><Sigma className="size-3.5" />Pied</p>
+    <SettingsRow>
+      <span className="self-end pb-1.5"><Toggle checked={Boolean(footer.count)} onChange={(count) => update({ count: count || undefined })} disabled={disabled}>Le nombre de lignes</Toggle></span>
+      {footer.count && <label className={fieldLabel}>Le mot<Input value={footer.word ?? ""} disabled={disabled} maxLength={30} placeholder="lignes" onChange={(event) => update({ word: event.target.value || undefined })} className="h-8 w-32 text-xs" /></label>}
+    </SettingsRow>
+    {totals.map((total, index) => <SettingsRow key={index}>
+      <label className={fieldLabel}>Total<NativeSelect value={total.op} disabled={disabled} onChange={(event) => setTotals(totals.map((item, at) => at === index ? { ...item, op: event.target.value as TileFormula["op"] } : item))} className="h-8 py-0 text-xs">{groupFormulaOps.map((op) => <NativeSelectOption key={op.value} value={op.value}>{op.label}</NativeSelectOption>)}</NativeSelect></label>
+      {total.op !== "count" && <ColumnField label="De la colonne" value={total.column} columns={columns} onChange={(column) => setTotals(totals.map((item, at) => at === index ? { ...item, column } : item))} empty="— Choisir… —" disabled={disabled} />}
+      <label className={fieldLabel}>Libellé<Input value={total.label ?? ""} disabled={disabled} maxLength={40} placeholder="niveaux au total" onChange={(event) => setTotals(totals.map((item, at) => at === index ? { ...item, label: event.target.value || undefined } : item))} className="h-8 w-36 text-xs" /></label>
+      <Button type="button" size="icon-sm" variant="ghost" className="self-end" disabled={disabled} onClick={() => setTotals(totals.filter((_, at) => at !== index))} aria-label="Retirer le total"><X /></Button>
+    </SettingsRow>)}
+    {totals.length < 4 && <Button type="button" size="sm" variant="ghost" className="h-7 justify-self-start text-[11px]" disabled={disabled} onClick={() => setTotals([...totals, { op: "sum", column: columns.find((column) => /niveau|pv|prix|or\b/i.test(column)) }])}><Plus />Un total</Button>}
+    <Range text="Lignes montrées, puis « Charger plus »" value={footer.limit ?? 0} min={0} max={200} step={5} format={(value) => value ? String(value) : "toutes"} onChange={(value) => update({ limit: value >= 5 ? value : undefined })} disabled={disabled} />
+  </div>
+}
+
+/** Quand rien ne correspond (une recherche, un filtre, une vue vide) : le texte écrit à la place des lignes. */
+function EmptySettings({ ctx }: { ctx: Ctx }) {
+  const { layout, set, disabled } = ctx
+  return <div className={settingsGroup}>
+    <p className={settingsTitle}><SearchX className="size-3.5" />Quand rien ne correspond</p>
+    <label className={fieldLabel}>Le texte<Input value={layout.emptyText ?? ""} disabled={disabled} maxLength={200} placeholder="Aucun PNJ ne correspond. Essaie un autre mot, ou retire un filtre." onChange={(event) => set({ emptyText: event.target.value || undefined })} className="h-8 text-xs" /></label>
+  </div>
+}
+
+/** Les couleurs selon une règle : une condition sur une colonne, et ce qu'elle fait (une teinte, un signe, grisé). */
+function RulesSettings({ ctx }: { ctx: Ctx }) {
+  const { layout, set, columns, disabled } = ctx
+  const rules = layout.rules ?? []
+  const setRules = (next: RowRule[]) => set({ rules: next.length ? next : undefined })
+  const update = (index: number, changes: Partial<RowRule>) => setRules(rules.map((rule, at) => at === index ? { ...rule, ...changes } : rule))
+  return <div className="grid gap-2">
+    <p className="text-[11px] font-semibold text-muted-foreground">Couleurs selon une règle <span className="font-normal">— la première vraie l’emporte</span></p>
+    {rules.map((rule, index) => {
+      const needsValue = rowRuleOps.find((op) => op.value === rule.op)?.needsValue
+      return <div key={index} className="grid gap-2 rounded-lg border bg-background/70 p-2">
+        <div className="flex flex-wrap items-end gap-1.5">
+          <ColumnField label="Si" value={rule.column} columns={columns} onChange={(column) => column && update(index, { column })} empty={null} disabled={disabled} />
+          <label className={fieldLabel}>&nbsp;<NativeSelect value={rule.op} disabled={disabled} onChange={(event) => update(index, { op: event.target.value as RowRule["op"] })} className="h-8 py-0 text-xs">{rowRuleOps.map((op) => <NativeSelectOption key={op.value} value={op.value}>{op.label}</NativeSelectOption>)}</NativeSelect></label>
+          {needsValue && <label className={fieldLabel}>&nbsp;<Input value={rule.value ?? ""} disabled={disabled} maxLength={80} placeholder="15" onChange={(event) => update(index, { value: event.target.value || undefined })} className="h-8 w-24 text-xs" /></label>}
+          <Button type="button" size="icon-sm" variant="ghost" className="ml-auto" disabled={disabled} onClick={() => setRules(rules.filter((_, at) => at !== index))} aria-label="Retirer la règle"><X /></Button>
+        </div>
+        <span className={fieldLabel}>Teinte<ColorSwatches value={rule.tint} onChange={(tint) => update(index, { tint })} disabled={disabled} none="Aucune" ariaLabel="Teinte de la règle" /></span>
+        <SettingsRow>
+          <span className={fieldLabel}>Signe<IconPick value={rule.icon} onChange={(icon) => update(index, { icon })} disabled={disabled} /></span>
+          <span className="self-end pb-1.5"><Toggle checked={Boolean(rule.dim)} onChange={(dim) => update(index, { dim: dim || undefined })} disabled={disabled}>Grisée</Toggle></span>
+        </SettingsRow>
+      </div>
+    })}
+    {rules.length < 12 && <Button type="button" size="sm" variant="ghost" className="h-7 justify-self-start text-[11px]" disabled={disabled || !columns.length} onClick={() => setRules([...rules, { column: columns.find((column) => /pv|vie|etat|état|statut/i.test(column)) ?? columns[0], op: "lt", value: "15", tint: "#b3261e" }])}><Plus />Une règle</Button>}
+  </div>
+}
+
+/** Glisser une ligne entre les groupes, et la place d'une ligne à plusieurs valeurs. */
+function DragSettings({ ctx }: { ctx: Ctx }) {
+  const { kind, layout, set, disabled } = ctx
+  const column = kind === "kanban" ? layout.kanbanColumn : layout.groupBy
+  if (!column || (kind === "master-detail")) return null
+  // D'office : une liste range une ligne dans chacun de ses groupes, le kanban dans la colonne de sa première valeur.
+  const fallback = kind === "kanban" ? "first" : "each"
+  return <div className="grid gap-2 rounded-lg border border-dashed bg-background/50 p-2.5">
+    {kind === "list" && <Toggle checked={Boolean(layout.dragSections)} onChange={(dragSections) => set({ dragSections: dragSections || undefined })} disabled={disabled || layout.menu === "tabs"} title={layout.menu === "tabs" ? "Avec les groupes en onglets, on ne voit qu’un groupe à la fois" : "Déposer une ligne dans une autre section écrit sa valeur, comme le kanban"}>Glisser une ligne d’une section à l’autre change « {column} »</Toggle>}
+    <Choice label={`Une ligne à plusieurs valeurs de « ${column} »`} value={layout.multiValue ?? fallback} options={[{ value: "each", label: "Dans chaque groupe" }, { value: "first", label: "Dans celui de sa première valeur" }]} onChange={(multiValue) => set({ multiValue: multiValue === fallback ? undefined : multiValue })} disabled={disabled} />
+    <p className={hintText}>Glissée, une ligne à plusieurs valeurs ne change que celle du groupe qu’elle quitte. Une case mise en forme (gras, liens) ne se glisse pas : elle se modifie dans la fiche.</p>
+  </div>
+}
+
+/** Une carte faite des réglages d'un élément simple (nom, colonnes, icône, image, pastille) : la conversion réversible. */
+function elementFromSettings(layout: Presentation, columns: CardColumn[], kindLabel: string): CardTemplate {
+  const named = columns.find((column) => isNameColumnSpec(column.spec))?.header ?? columns.find((column) => /^nom\b/i.test(column.header))?.header ?? columns[0]?.header ?? "Nom"
+  const look = layout.look ?? {}
+  const fields = (layout.fields ?? []).filter((field) => foldName(field) !== foldName(named))
+  const pills = look.fieldStyle === "pills"
+  const blocks: CardTemplate["blocks"] = [
+    { id: cardId("b"), type: "title", column: named, size: look.titleSize === "lg" ? "lg" : look.titleSize === "md" ? "md" : "sm", font: look.titleFont === "display" ? "display" : "sans", ...(layout.itemIcon ? { icon: layout.itemIcon } : {}), ...(layout.badgeColumn ? { badges: [layout.badgeColumn] } : {}) },
+    ...(fields.length ? [pills ? { id: cardId("b"), type: "pills" as const, columns: fields } : { id: cardId("b"), type: "line" as const, parts: fields.map((column) => ({ column })), separator: " · ", size: "xs" as const, tone: "muted" as const }] : []),
+  ]
+  const side = look.imageWidth ?? { sm: 24, md: 36, lg: 56 }[look.imageSize ?? "md"]
+  return {
+    id: cardId("vue"),
+    name: `Élément · ${kindLabel}`,
+    width: "full",
+    density: look.density ?? (layout.compact ? "compact" : "normal"),
+    border: look.surface === "boxed" ? "subtle" : "none",
+    ...(look.surface === "boxed" ? {} : { surface: "plain" as const }),
+    ...(layout.colorBy ? { accent: { column: layout.colorBy } } : {}),
+    ...(layout.imageColumn ? { media: { column: layout.imageColumn, position: "left" as const, shape: look.imageShape === "circle" ? "circle" as const : look.imageShape === "square" ? "rect" as const : "rounded" as const, widthPct: Math.max(8, Math.min(40, Math.round(side / 4))), heightPct: Math.max(8, Math.min(40, Math.round(side / 4))), edges: [], tint: true } } : {}),
+    blocks,
+  }
 }
 
 /**
@@ -213,11 +445,11 @@ function ColorLook({ ctx, modes = accentOptions, withRows = true }: { ctx: Ctx; 
 }
 
 /** Les sections : une par valeur d'une colonne (ou par lettre), repliables, avec leur style et leur icône. */
-function SectionsSettings({ ctx, withAlphabet = false }: { ctx: Ctx; withAlphabet?: boolean }) {
+function SectionsSettings({ ctx, withAlphabet = false, title = "Sections" }: { ctx: Ctx; withAlphabet?: boolean; title?: string }) {
   const { layout, look, set, setLook, columns, disabled } = ctx
   const grouped = Boolean(layout.groupBy) || Boolean(layout.alphabet)
   return <div className={settingsGroup}>
-    <p className={settingsTitle}><LayoutList className="size-3.5" />Sections</p>
+    <p className={settingsTitle}><LayoutList className="size-3.5" />{title}</p>
     <div className="grid gap-2">
       <ColumnField label="Ranger en sections par" value={layout.groupBy} columns={columns} onChange={(groupBy) => set({ groupBy, ...(groupBy ? { alphabet: undefined } : {}) })} empty="— Pas de sections —" disabled={disabled} />
       {withAlphabet && <span className={cn(fieldLabel, "self-end pb-1.5")}><Toggle checked={Boolean(layout.alphabet)} onChange={(alphabet) => set({ alphabet: alphabet || undefined, ...(alphabet ? { groupBy: undefined } : {}) })} disabled={disabled}>…ou par première lettre (annuaire)</Toggle></span>}
@@ -234,8 +466,23 @@ function SectionsSettings({ ctx, withAlphabet = false }: { ctx: Ctx; withAlphabe
         <Choice label="Menu des sections" value={layout.menu ?? "none"} options={[{ value: "none", label: "Aucun" }, { value: "top", label: "En haut" }, { value: "side", label: "Sur le côté" }, { value: "tabs", label: "Onglets" }]} onChange={(menu) => set({ menu: menu === "none" ? undefined : menu })} disabled={disabled} />
         <span className={fieldLabel}>Icône des sections<IconPick value={look.sectionIcon} onChange={(sectionIcon) => setLook({ sectionIcon })} disabled={disabled} /></span>
       </div>
+      {layout.menu === "tabs" && <GroupTabsSettings ctx={ctx} />}
       <GroupFormulaSettings ctx={ctx} />
     </>}
+  </div>
+}
+
+/** Les groupes en onglets : en haut, sur le côté (écrits à la verticale, comme des intercalaires), en bas ; leur dessin. */
+function GroupTabsSettings({ ctx }: { ctx: Ctx }) {
+  const { layout, set, disabled } = ctx
+  const tabs = layout.groupTabs ?? {}
+  const update = (changes: Partial<NonNullable<Presentation["groupTabs"]>>) => { const next = { ...tabs, ...changes }; for (const key of Object.keys(next) as Array<keyof typeof next>) if (next[key] === undefined) delete next[key]; set({ groupTabs: Object.keys(next).length ? next : undefined }) }
+  const side = tabs.place === "left" || tabs.place === "right"
+  return <div className="grid gap-2 rounded-lg border border-dashed bg-background/50 p-2.5">
+    <p className="text-[11px] font-semibold text-muted-foreground">Les onglets des groupes</p>
+    <Choice label="Place" value={tabs.place ?? "top"} options={[{ value: "top", label: "En haut" }, { value: "left", label: "À gauche" }, { value: "right", label: "À droite" }, { value: "bottom", label: "En bas" }]} onChange={(place) => update({ place: place === "top" ? undefined : place, ...(place === "left" || place === "right" ? {} : { vertical: undefined }) })} disabled={disabled} />
+    <Choice label="Dessin" value={tabs.style ?? "underline"} options={[{ value: "underline", label: "Soulignés" }, { value: "pills", label: "Pastilles" }, { value: "folder", label: "Classeur" }, { value: "ribbon", label: "Signets" }]} onChange={(style) => update({ style: style === "underline" ? undefined : style })} disabled={disabled} />
+    {side && <Toggle checked={Boolean(tabs.vertical)} onChange={(vertical) => update({ vertical: vertical || undefined })} disabled={disabled}>Noms écrits à la verticale (intercalaires)</Toggle>}
   </div>
 }
 
@@ -273,7 +520,7 @@ function SortSettings({ ctx }: { ctx: Ctx }) {
 }
 
 /** L'élément : chaque ligne dessinée avec les réglages de la vue, une carte de « Modifier › Cartes », ou un formulaire de l'onglet en lecture ; puis « Au clic ». */
-function CardChoice({ ctx }: { ctx: Ctx }) {
+function CardChoice({ ctx, withClick = true }: { ctx: Ctx; withClick?: boolean }) {
   const { layout, set, cards, forms, disabled, element } = ctx
   const [picking, setPicking] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -303,9 +550,11 @@ function CardChoice({ ctx }: { ctx: Ctx }) {
         <Button type="button" size="sm" className="h-8" disabled={disabled} onClick={() => setEditing(true)}><Pencil />Modifier l’élément</Button>
         <Button type="button" size="sm" variant="outline" className="h-8" disabled={disabled} onClick={() => setPicking(true)}><Sparkles />Repartir d’une forme…</Button>
       </div>}
-      <p className={hintText}>{own ? "Fait avec le moteur des cartes : taille, image, couleurs, blocs (titre, pastilles, libellé : valeur, jauge ou charges, tuiles, détails…), composition. Gardé dans cette vue, qui le pose à sa taille." : layout.itemForm ? "Le formulaire se règle dans « Modifier › Formulaire » : sections, onglets, blocs. Ici il se lit, le clic ouvre la fiche." : layout.itemCard ? "La carte se dessine dans « Modifier › Cartes » : image, couleurs, blocs, composition. Une carte changée là change aussi ici." : "Pour régler l’élément aussi finement qu’une carte : « Un élément propre à cette vue »."}</p>
+      {/* L'élément simple devient une carte, réglable comme les cartes ; ses réglages d'avant restent : revenir à « Avec les réglages de cette vue » les retrouve. */}
+      {!value && element && <Button type="button" size="sm" variant="outline" className="h-8 justify-self-start" disabled={disabled} onClick={() => { set({ itemCard: PRESENTATION_ITEM_CARD, itemTemplate: elementFromSettings(layout, element.columns, kindLabel), itemForm: undefined }); setEditing(true) }} title="Une carte faite des réglages actuels (nom, colonnes, icône, image, pastille), à retoucher comme dans « Modifier › Cartes »"><Sparkles />En faire une carte, réglable comme les cartes</Button>}
+      <p className={hintText}>{own ? "Fait avec le moteur des cartes : taille, image, couleurs, blocs (titre, pastilles, libellé : valeur, jauge ou charges, tuiles, détails…), composition. Gardé dans cette vue, qui le pose à sa taille." : layout.itemForm ? "Le formulaire se règle dans « Modifier › Formulaire » : sections, onglets, blocs. Ici il se lit, le clic ouvre la fiche." : layout.itemCard ? "La carte se dessine dans « Modifier › Cartes » : image, couleurs, blocs, composition. Une carte changée là change aussi ici." : element ? "Les réglages ci-dessous dessinent l’élément. « En faire une carte » le refait avec le moteur des cartes ; ces réglages restent gardés : revenir ici les retrouve." : "Pour régler l’élément aussi finement qu’une carte : « Un élément propre à cette vue »."}</p>
     </div>
-    <ClickSettings ctx={ctx} />
+    {withClick && <ClickSettings ctx={ctx} />}
     {picking && element && <NewCardDialog
       title={`Élément de la vue ${kindLabel} : point de départ`}
       columns={element.columns}
@@ -330,36 +579,119 @@ function CardChoice({ ctx }: { ctx: Ctx }) {
 }
 
 // ---------------------------------------------------------------------------
-// Liste
+// Liste : une seule vue, trois formes (liste, kanban, maître-détail), quatre pages
 // ---------------------------------------------------------------------------
 
-function ListPages(ctx: Ctx): Page[] {
-  const { layout, set, disabled } = ctx
-  return [
-    { key: "items", label: "Lignes", icon: <LayoutList className="size-3.5" />, render: () => <>
-      <div className={settingsGroup}>
-        <p className={settingsTitle}><LayoutList className="size-3.5" />La liste</p>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <Toggle checked={Boolean(layout.compact)} onChange={(compact) => set({ compact: compact || undefined })} disabled={disabled}>Compacte (une ligne par élément)</Toggle>
-          {!layout.compact && <Toggle checked={Boolean(layout.collapsible) && !layout.groupBy && !layout.alphabet} onChange={(collapsible) => set({ collapsible: collapsible || undefined })} disabled={disabled || Boolean(layout.groupBy || layout.alphabet)} title={layout.groupBy || layout.alphabet ? "Avec des sections, ce sont elles qui se replient" : "Déplier une ligne montre toutes ses colonnes"}>Lignes dépliables</Toggle>}
-          <Toggle checked={Boolean(layout.numbered)} onChange={(numbered) => set({ numbered: numbered || undefined })} disabled={disabled}>Numérotées</Toggle>
-        </div>
-        <Range text="Colonnes de la liste (sur un écran assez large)" value={layout.listColumns ?? 1} min={1} max={5} onChange={(value) => set({ listColumns: value === 1 ? undefined : value as 2 | 3 | 4 | 5 })} disabled={disabled} />
+/** Les formes de la Liste : la façon de ranger, sous un seul éditeur (leurs clés d'enregistrement ne changent pas). */
+export const LIST_FAMILY: PresentationKind[] = ["list", "kanban", "master-detail"]
+export const listFormLabels: Record<string, string> = { list: "Liste", kanban: "Kanban", "master-detail": "Maître-détail" }
+
+/** Les colonnes du kanban et ses couloirs : « Groupe » quand la liste est en kanban. */
+function KanbanGroupSettings({ ctx }: { ctx: Ctx }) {
+  const { layout, look, set, setLook, columns, disabled } = ctx
+  return <>
+    <div className={settingsGroup}>
+      <p className={settingsTitle}><Columns3 className="size-3.5" />Groupe · les colonnes du kanban</p>
+      <ColumnField label="Une colonne du kanban par valeur de" value={layout.kanbanColumn} columns={columns} onChange={(kanbanColumn) => set({ kanbanColumn, lanes: undefined })} empty="— Choisir… —" disabled={disabled} hint="Glisser une carte d’une colonne à l’autre change la case" />
+      <div className="flex flex-wrap items-end gap-3">
+        <Choice label="Largeur des colonnes" value={layout.laneWidth ?? "normal"} options={[{ value: "narrow", label: "Serrées" }, { value: "normal", label: "Normales" }, { value: "wide", label: "Larges" }]} onChange={(laneWidth) => set({ laneWidth: laneWidth === "normal" ? undefined : laneWidth })} disabled={disabled} />
+        <Choice label="En-tête des colonnes" value={look.laneStyle ?? "plain"} options={[{ value: "plain", label: "Sobre" }, { value: "tinted", label: "Teinté" }, { value: "header", label: "Bandeau coloré" }]} onChange={(laneStyle) => setLook({ laneStyle: laneStyle === "plain" ? undefined : laneStyle })} disabled={disabled} />
       </div>
-      <CardChoice ctx={ctx} />
-      <ItemSettings ctx={ctx} />
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <Toggle checked={Boolean(layout.hideEmpty)} onChange={(hideEmpty) => set({ hideEmpty: hideEmpty || undefined })} disabled={disabled}>Sans la colonne « Sans valeur »</Toggle>
+        <Toggle checked={Boolean(layout.hideCounts)} onChange={(hideCounts) => set({ hideCounts: hideCounts || undefined })} disabled={disabled}>Sans le nombre de cartes</Toggle>
+        <Toggle checked={Boolean(layout.laneCollapse)} onChange={(laneCollapse) => set({ laneCollapse: laneCollapse || undefined })} disabled={disabled}>Colonnes repliables (clic sur l’en-tête)</Toggle>
+      </div>
+      <span className={fieldLabel}>Icône d’office des colonnes<IconPick value={look.sectionIcon} onChange={(sectionIcon) => setLook({ sectionIcon })} disabled={disabled} /></span>
+      {layout.kanbanColumn && <GroupFormulaSettings ctx={ctx} what="colonne" />}
+    </div>
+    {layout.kanbanColumn && <div className={settingsGroup}>
+      <p className={settingsTitle}><LayoutList className="size-3.5" />Couloirs</p>
+      <ColumnField label="Une rangée de colonnes par valeur de" value={layout.groupBy} columns={columns.filter((name) => name !== layout.kanbanColumn)} onChange={(groupBy) => set({ groupBy, ...(groupBy ? {} : { collapsible: undefined, collapsed: undefined }) })} empty="— Pas de couloirs —" disabled={disabled} hint="Les mêmes colonnes dans chaque couloir ; glisser une carte la change de colonne dans son couloir." />
+      {layout.groupBy && <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <Toggle checked={Boolean(layout.collapsible)} onChange={(collapsible) => set({ collapsible: collapsible || undefined, collapsed: collapsible ? layout.collapsed : undefined })} disabled={disabled}>Couloirs repliables</Toggle>
+        {layout.collapsible && <Toggle checked={Boolean(layout.collapsed)} onChange={(collapsed) => set({ collapsed: collapsed || undefined })} disabled={disabled}>Repliés à l’ouverture</Toggle>}
+      </div>}
+    </div>}
+    <LanesEditor ctx={ctx} />
+  </>
+}
+
+/**
+ * La Liste en quatre pages : « Général » (en-tête, barre d'outils, pied, quand rien ne
+ * correspond), « Rangement » (le groupe et les lignes), « Éléments et clic » (l'élément, et au
+ * clic le détail), « Apparences ». La forme (liste, kanban, maître-détail) change le groupe et
+ * le détail ; le reste est le même partout.
+ */
+function ListFamilyPages(ctx: Ctx): Page[] {
+  const { kind, layout, set, disabled } = ctx
+  const master = kind === "master-detail"
+  return [
+    { key: "general", label: "Général", icon: <LayoutList className="size-3.5" />, render: () => <>
+      <HeaderSettings ctx={ctx} />
+      <ToolbarSettings ctx={ctx} />
+      <FooterSettings ctx={ctx} />
+      <EmptySettings ctx={ctx} />
     </> },
-    { key: "sections", label: "Sections", icon: <ListTree className="size-3.5" />, render: () => <SectionsSettings ctx={ctx} withAlphabet /> },
-    { key: "look", label: "Apparence", icon: <Palette className="size-3.5" />, render: () => <>
-      <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p><FrameLook ctx={ctx} /><TitleLook ctx={ctx} /><FieldsLook ctx={ctx} /></div>
+    { key: "arrange", label: "Rangement", icon: <ListTree className="size-3.5" />, render: () => <>
+      {kind === "kanban" ? <KanbanGroupSettings ctx={ctx} /> : <SectionsSettings ctx={ctx} withAlphabet title="Groupe · les sections" />}
+      <DragSettings ctx={ctx} />
+      <div className={settingsGroup}>
+        <p className={settingsTitle}><LayoutList className="size-3.5" />Lignes</p>
+        <SortSettings ctx={ctx} />
+        {kind === "list" && <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Toggle checked={Boolean(layout.compact)} onChange={(compact) => set({ compact: compact || undefined })} disabled={disabled}>Compactes (une ligne par élément)</Toggle>
+          {!layout.compact && <Toggle checked={Boolean(layout.collapsible) && !layout.groupBy && !layout.alphabet} onChange={(collapsible) => set({ collapsible: collapsible || undefined })} disabled={disabled || Boolean(layout.groupBy || layout.alphabet)} title={layout.groupBy || layout.alphabet ? "Avec des sections, ce sont elles qui se replient" : "Déplier une ligne montre toutes ses colonnes"}>Dépliables</Toggle>}
+          <Toggle checked={Boolean(layout.numbered)} onChange={(numbered) => set({ numbered: numbered || undefined })} disabled={disabled}>Numérotées</Toggle>
+        </div>}
+        <RulesSettings ctx={ctx} />
+      </div>
+    </> },
+    { key: "items", label: "Éléments et clic", icon: <MousePointerClick className="size-3.5" />, render: () => <>
+      <div className={settingsGroup}>
+        <p className={settingsTitle}><LayoutGrid className="size-3.5" />Éléments</p>
+        {kind === "list" && <Range text="Colonnes de la liste (sur un écran assez large)" value={layout.listColumns ?? 1} min={1} max={5} onChange={(value) => set({ listColumns: value === 1 ? undefined : value as 2 | 3 | 4 | 5 })} disabled={disabled} />}
+        <CardChoice ctx={ctx} withClick={false} />
+      </div>
+      <ItemSettings ctx={ctx} max={master ? 4 : 8} />
+      <div className={settingsGroup}>
+        <p className={settingsTitle}><BookOpen className="size-3.5" />Au clic : le détail</p>
+        <ClickSettings ctx={ctx} />
+        {(master || layout.detail?.kind === undefined) && (master || layout.click === "side" || layout.click === "center" || layout.click === "below") && <MasterDetailSettings ctx={ctx} />}
+      </div>
+    </> },
+    { key: "look", label: "Apparences", icon: <Palette className="size-3.5" />, render: () => <>
+      {kind === "kanban"
+        ? <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin des cartes</p><FrameLook ctx={ctx} surfaces={[{ value: "boxed", label: "Encadrées" }, { value: "plain", label: "Séparées d’un trait" }]} surface="boxed" /><TitleLook ctx={ctx} /><FieldsLook ctx={ctx} /></div>
+        : master
+          ? <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p><FrameLook ctx={ctx} surfaces={[{ value: "spaced", label: "Espacées" }, { value: "plain", label: "Lignes séparées" }, { value: "boxed", label: "Encadrées" }]} surface="spaced" density="mixed" /><TitleLook ctx={ctx} font="mixed" /><FieldsLook ctx={ctx} /></div>
+          : <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p><FrameLook ctx={ctx} /><TitleLook ctx={ctx} /><FieldsLook ctx={ctx} /></div>}
       <div className={settingsGroup}><p className={settingsTitle}><Palette className="size-3.5" />Couleurs</p><ColorLook ctx={ctx} /></div>
-      <div className={settingsGroup}><p className={settingsTitle}>Tri</p><SortSettings ctx={ctx} /></div>
     </> },
   ]
 }
 
+/** Le maître-détail : la liste à gauche ou à droite, sa largeur ; le détail en colonnes (ses champs, son image). */
+function MasterDetailSettings({ ctx }: { ctx: Ctx }) {
+  const { kind, layout, look, set, setLook, columns, disabled } = ctx
+  const master = kind === "master-detail"
+  return <div className="grid gap-2 rounded-lg border border-dashed bg-background/50 p-2.5">
+    {master && <div className="flex flex-wrap items-end gap-3">
+      <Choice label="La liste" value={layout.masterSide ?? "left"} options={[{ value: "left", label: "À gauche" }, { value: "right", label: "À droite" }]} onChange={(masterSide) => set({ masterSide: masterSide === "left" ? undefined : masterSide })} disabled={disabled} />
+      <Choice label="Sa largeur" value={look.masterWidth ?? "normal"} options={[{ value: "narrow", label: "Étroite" }, { value: "normal", label: "Normale" }, { value: "wide", label: "Large" }]} onChange={(masterWidth) => setLook({ masterWidth: masterWidth === "normal" ? undefined : masterWidth })} disabled={disabled} />
+    </div>}
+    {!layout.detail?.kind && <>
+      <span className={fieldLabel}>Colonnes du détail <span className="font-normal">(toutes si aucune choisie, 12 au plus)</span><ColumnsPicker value={layout.detailFields ?? []} columns={columns} onChange={(detailFields) => set({ detailFields: detailFields.length ? detailFields : undefined })} disabled={disabled} ariaLabel="Colonnes du détail" max={12} /></span>
+      <div className="flex flex-wrap items-end gap-3">
+        <Choice label="Sur" value={String(layout.detailColumns ?? 2)} options={[{ value: "1", label: "Une colonne" }, { value: "2", label: "Deux" }, { value: "3", label: "Trois" }]} onChange={(value) => set({ detailColumns: value === "2" ? undefined : Number(value) as 1 | 3 })} disabled={disabled} />
+        <Choice label="Son image" value={layout.detailImage ?? "side"} options={[{ value: "side", label: "À côté du titre" }, { value: "banner", label: "En bannière" }, { value: "none", label: "Sans" }]} onChange={(detailImage) => set({ detailImage: detailImage === "side" ? undefined : detailImage })} disabled={disabled || !layout.imageColumn} hint={layout.imageColumn ? undefined : "Choisis d’abord une image dans « Éléments »"} />
+      </div>
+    </>}
+  </div>
+}
+
 // ---------------------------------------------------------------------------
-// Kanban
+// Kanban : ses colonnes une à une
 // ---------------------------------------------------------------------------
 
 function LanesEditor({ ctx }: { ctx: Ctx }) {
@@ -411,81 +743,6 @@ function LanesEditor({ ctx }: { ctx: Ctx }) {
       <Button type="submit" size="sm" variant="outline" className="h-7 text-[11px]" disabled={disabled || !added.trim()}><Plus />Ajouter</Button>
     </form>}
   </div>
-}
-
-function KanbanPages(ctx: Ctx): Page[] {
-  const { layout, look, set, setLook, columns, disabled } = ctx
-  return [
-    { key: "lanes", label: "Colonnes", icon: <Columns3 className="size-3.5" />, render: () => <>
-      <div className={settingsGroup}>
-        <p className={settingsTitle}><Columns3 className="size-3.5" />Le kanban</p>
-        <ColumnField label="Une colonne du kanban par valeur de" value={layout.kanbanColumn} columns={columns} onChange={(kanbanColumn) => set({ kanbanColumn, lanes: undefined })} empty="— Choisir… —" disabled={disabled} hint="Glisser une carte d’une colonne à l’autre change la case" />
-        <div className="flex flex-wrap items-end gap-3">
-          <Choice label="Largeur des colonnes" value={layout.laneWidth ?? "normal"} options={[{ value: "narrow", label: "Serrées" }, { value: "normal", label: "Normales" }, { value: "wide", label: "Larges" }]} onChange={(laneWidth) => set({ laneWidth: laneWidth === "normal" ? undefined : laneWidth })} disabled={disabled} />
-          <Choice label="En-tête des colonnes" value={look.laneStyle ?? "plain"} options={[{ value: "plain", label: "Sobre" }, { value: "tinted", label: "Teinté" }, { value: "header", label: "Bandeau coloré" }]} onChange={(laneStyle) => setLook({ laneStyle: laneStyle === "plain" ? undefined : laneStyle })} disabled={disabled} />
-        </div>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <Toggle checked={Boolean(layout.hideEmpty)} onChange={(hideEmpty) => set({ hideEmpty: hideEmpty || undefined })} disabled={disabled}>Sans la colonne « Sans valeur »</Toggle>
-          <Toggle checked={Boolean(layout.hideCounts)} onChange={(hideCounts) => set({ hideCounts: hideCounts || undefined })} disabled={disabled}>Sans le nombre de cartes</Toggle>
-          <Toggle checked={Boolean(layout.laneCollapse)} onChange={(laneCollapse) => set({ laneCollapse: laneCollapse || undefined })} disabled={disabled}>Colonnes repliables (clic sur l’en-tête)</Toggle>
-        </div>
-        <span className={fieldLabel}>Icône d’office des colonnes<IconPick value={look.sectionIcon} onChange={(sectionIcon) => setLook({ sectionIcon })} disabled={disabled} /></span>
-      </div>
-      {layout.kanbanColumn && <div className={settingsGroup}>
-        <p className={settingsTitle}><LayoutList className="size-3.5" />Couloirs</p>
-        <ColumnField label="Une rangée de colonnes par valeur de" value={layout.groupBy} columns={columns.filter((name) => name !== layout.kanbanColumn)} onChange={(groupBy) => set({ groupBy, ...(groupBy ? {} : { collapsible: undefined, collapsed: undefined }) })} empty="— Pas de couloirs —" disabled={disabled} hint="Les mêmes colonnes dans chaque couloir ; glisser une carte la change de colonne dans son couloir." />
-        {layout.groupBy && <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <Toggle checked={Boolean(layout.collapsible)} onChange={(collapsible) => set({ collapsible: collapsible || undefined, collapsed: collapsible ? layout.collapsed : undefined })} disabled={disabled}>Couloirs repliables</Toggle>
-          {layout.collapsible && <Toggle checked={Boolean(layout.collapsed)} onChange={(collapsed) => set({ collapsed: collapsed || undefined })} disabled={disabled}>Repliés à l’ouverture</Toggle>}
-        </div>}
-      </div>}
-      {layout.kanbanColumn && <GroupFormulaSettings ctx={ctx} what="colonne" />}
-      <LanesEditor ctx={ctx} />
-    </> },
-    { key: "cards", label: "Cartes", icon: <LayoutGrid className="size-3.5" />, render: () => <><CardChoice ctx={ctx} /><ItemSettings ctx={ctx} /></> },
-    { key: "look", label: "Apparence", icon: <Palette className="size-3.5" />, render: () => <>
-      <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin des cartes</p><FrameLook ctx={ctx} surfaces={[{ value: "boxed", label: "Encadrées" }, { value: "plain", label: "Séparées d’un trait" }]} surface="boxed" /><TitleLook ctx={ctx} /><FieldsLook ctx={ctx} /></div>
-      <div className={settingsGroup}><p className={settingsTitle}><Palette className="size-3.5" />Couleurs</p><ColorLook ctx={ctx} /></div>
-      <div className={settingsGroup}><p className={settingsTitle}>Tri dans chaque colonne</p><SortSettings ctx={ctx} /></div>
-    </> },
-  ]
-}
-
-// ---------------------------------------------------------------------------
-// Maître-détail
-// ---------------------------------------------------------------------------
-
-function MasterDetailPages(ctx: Ctx): Page[] {
-  const { layout, look, set, setLook, columns, disabled } = ctx
-  return [
-    { key: "master", label: "Liste", icon: <PanelsLeftRight className="size-3.5" />, render: () => <>
-      <div className={settingsGroup}>
-        <p className={settingsTitle}><PanelsLeftRight className="size-3.5" />La liste</p>
-        <div className="flex flex-wrap items-end gap-3">
-          <Choice label="Côté" value={layout.masterSide ?? "left"} options={[{ value: "left", label: "À gauche" }, { value: "right", label: "À droite" }]} onChange={(masterSide) => set({ masterSide: masterSide === "left" ? undefined : masterSide })} disabled={disabled} />
-          <Choice label="Largeur" value={look.masterWidth ?? "normal"} options={[{ value: "narrow", label: "Étroite" }, { value: "normal", label: "Normale" }, { value: "wide", label: "Large" }]} onChange={(masterWidth) => setLook({ masterWidth: masterWidth === "normal" ? undefined : masterWidth })} disabled={disabled} />
-        </div>
-      </div>
-      <ItemSettings ctx={ctx} max={4} />
-      <SectionsSettings ctx={ctx} withAlphabet />
-    </> },
-    { key: "detail", label: "Détail", icon: <BookOpen className="size-3.5" />, render: () => <>
-      <div className={settingsGroup}>
-        <p className={settingsTitle}><BookOpen className="size-3.5" />La ligne choisie</p>
-        <span className={fieldLabel}>Colonnes du détail <span className="font-normal">(toutes si aucune choisie, 12 au plus)</span><ColumnsPicker value={layout.detailFields ?? []} columns={columns} onChange={(detailFields) => set({ detailFields: detailFields.length ? detailFields : undefined })} disabled={disabled} ariaLabel="Colonnes du détail" max={12} /></span>
-        <div className="flex flex-wrap items-end gap-3">
-          <Choice label="Sur" value={String(layout.detailColumns ?? 2)} options={[{ value: "1", label: "Une colonne" }, { value: "2", label: "Deux" }, { value: "3", label: "Trois" }]} onChange={(value) => set({ detailColumns: value === "2" ? undefined : Number(value) as 1 | 3 })} disabled={disabled} />
-          <Choice label="Son image" value={layout.detailImage ?? "side"} options={[{ value: "side", label: "À côté du titre" }, { value: "banner", label: "En bannière" }, { value: "none", label: "Sans" }]} onChange={(detailImage) => set({ detailImage: detailImage === "side" ? undefined : detailImage })} disabled={disabled || !layout.imageColumn} hint={layout.imageColumn ? undefined : "Choisis d’abord une image dans « Liste »"} />
-        </div>
-      </div>
-      <CardChoice ctx={ctx} />
-    </> },
-    { key: "look", label: "Apparence", icon: <Palette className="size-3.5" />, render: () => <>
-      <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p><FrameLook ctx={ctx} surfaces={[{ value: "spaced", label: "Espacées" }, { value: "plain", label: "Lignes séparées" }, { value: "boxed", label: "Encadrées" }]} surface="spaced" density="mixed" /><TitleLook ctx={ctx} font="mixed" /><FieldsLook ctx={ctx} /></div>
-      <div className={settingsGroup}><p className={settingsTitle}><Palette className="size-3.5" />Couleurs</p><ColorLook ctx={ctx} /></div>
-      <div className={settingsGroup}><p className={settingsTitle}>Tri</p><SortSettings ctx={ctx} /></div>
-    </> },
-  ]
 }
 
 // ---------------------------------------------------------------------------
@@ -1012,9 +1269,7 @@ export function PresentationKindSettings({ kind, layout, columns, onChange, card
     set({ look: Object.keys(next).length ? next : undefined })
   }
   const ctx: Ctx = { kind, layout, columns, set, setLook, look, cards, forms, hovers, stats, presentations, optionsOf, disabled, element }
-  const pages = kind === "list" ? ListPages(ctx)
-    : kind === "kanban" ? KanbanPages(ctx)
-    : kind === "master-detail" ? MasterDetailPages(ctx)
+  const pages = LIST_FAMILY.includes(kind) ? ListFamilyPages(ctx)
     : kind === "calendar" ? CalendarPages(ctx, calendars)
     : kind === "dashboard" ? DashboardPages(ctx)
     : kind === "gallery" ? GalleryPages(ctx)
@@ -1054,8 +1309,10 @@ export function withPresentationVersion(value: TabPresentations, kind: Presentat
 const viewId = () => Math.random().toString(36).slice(2, 10)
 
 /** Le panneau d'une vue, sous les onglets : ses versions (l'étoile, nouvelle, dupliquer…) et ses presets. */
-export function PresentationsPanel({ kind, tabName, columns, value, selectedId, onSelect, onChange, presets, onSavePreset, onDeletePreset, otherTabs, onCopyTo, disabled = false }: {
+export function PresentationsPanel({ kind: viewKind, family, tabName, columns, value, selectedId, onSelect, onChange, presets, onSavePreset, onDeletePreset, otherTabs, onCopyTo, disabled = false }: {
   kind: PresentationKind
+  /** Plusieurs formes sous une seule vue (la Liste : liste, kanban, maître-détail) : les versions de toutes, « forme|id ». */
+  family?: PresentationKind[]
   tabName: string
   columns: string[]
   /** Toutes les vues de l'onglet (brouillon compris). */
@@ -1073,12 +1330,24 @@ export function PresentationsPanel({ kind, tabName, columns, value, selectedId, 
   onCopyTo: (tabIds: string[], layout: Presentation, star: boolean, name: string) => void
   disabled?: boolean
 }) {
-  const [dialog, setDialog] = useState<"save" | "copy" | "manage" | null>(null)
+  const [dialog, setDialog] = useState<"save" | "copy" | "manage" | "new" | null>(null)
+  // La Liste : les versions de ses trois formes, chacune désignée « forme|id » ; la forme de la version choisie décide du reste.
+  const multi = Boolean(family && family.length > 1)
+  const kinds = multi ? family! : [viewKind]
+  const keyOf = (form: PresentationKind, id: string) => multi ? `${form}|${id}` : id
+  const chosenKind = multi && selectedId.includes("|") ? selectedId.split("|")[0] as PresentationKind : viewKind
+  const all = kinds.flatMap((form) => presentationVersionsOf(value, form)
+    // Le kanban et le maître-détail principaux n'apparaissent que réglés (ou choisis) : la liste principale, toujours.
+    .filter((item) => !multi || item.id !== MAIN_PRESENTATION_ID || form === kinds[0] || Boolean(value[form]) || form === chosenKind)
+    .map((item) => ({ ...item, kind: form, key: keyOf(form, item.id), label: !multi ? item.name : item.id === MAIN_PRESENTATION_ID ? `${listFormLabels[form] ?? form} · principale` : `${item.name} · ${listFormLabels[form] ?? form}` })))
+  const picked = all.find((item) => item.key === selectedId) ?? all[0]
+  const kind = picked.kind
   const kindInfo = presentationKinds.find((entry) => entry.value === kind)
-  const kindLabel = kindInfo?.label ?? ""
+  const kindLabel = multi ? "Liste" : kindInfo?.label ?? ""
   const versions = presentationVersionsOf(value, kind)
-  const selected = versions.find((item) => item.id === selectedId) ?? versions[0]
+  const selected = versions.find((item) => item.id === picked.id) ?? versions[0]
   const layout = selected.layout
+  const select = (form: PresentationKind, id: string) => onSelect(keyOf(form, id))
   const named = namedPresentationsOf(value, kind)
   const others = (value.named ?? []).filter((item) => item.layout.kind !== kind)
   const setNamed = (list: NamedPresentation[], main?: Presentation | null) => {
@@ -1088,29 +1357,37 @@ export function PresentationsPanel({ kind, tabName, columns, value, selectedId, 
     if (!next.named?.length) delete next.named
     onChange(next)
   }
-  const add = (name: string, shape: Presentation) => { const id = viewId(); setNamed([...named, { id, name, layout: { ...shape, kind } }]); onSelect(id) }
+  const add = (name: string, shape: Presentation) => { const id = viewId(); setNamed([...named, { id, name, layout: { ...shape, kind } }]); select(kind, id) }
+  // Une nouvelle version d'une autre forme de la Liste : rangée sous sa forme.
+  const addForm = (form: PresentationKind) => {
+    const id = viewId()
+    const next: TabPresentations = { ...value, named: [...(value.named ?? []), { id, name: `${listFormLabels[form] ?? form} ${namedPresentationsOf(value, form).length + 2}`, layout: { kind: form } as NamedPresentation["layout"] }] }
+    onChange(next)
+    select(form, id)
+  }
   const available = [...builtinPresentationPresets, ...presets].filter((preset) => preset.layout.kind === kind)
   const mine = available.filter((preset) => !preset.builtin)
   const configured = selected.id === MAIN_PRESENTATION_ID ? Boolean(value[kind]) : Object.keys(layout).length > 1
   return <>
     <VariantsPanel
       title={`${kindLabel} de « ${tabName} »`}
-      icon={layoutIcons[kind]}
+      icon={layoutIcons[multi ? viewKind : kind]}
       noun="vue"
-      items={versions.map((item) => ({ id: item.id, name: item.name }))}
-      selectedId={selected.id}
-      starredId={MAIN_PRESENTATION_ID}
+      items={all.map((item) => ({ id: item.key, name: item.label }))}
+      selectedId={picked.key}
+      starredId={keyOf(kind, MAIN_PRESENTATION_ID)}
       onSelect={onSelect}
-      onStar={(id) => {
-        // L'étoile passe à cette version : elle devient celle des pages, l'ancienne garde une place nommée.
+      onStar={(key) => {
+        // L'étoile passe à cette version : elle devient celle des pages (pour sa forme), l'ancienne garde une place nommée.
+        const id = multi ? key.split("|")[1] : key
         const target = named.find((item) => item.id === id)
         if (!target) return
         setNamed([...named.filter((item) => item.id !== id), ...(value[kind] ? [{ id: viewId(), name: "Ancienne vue principale", layout: { ...value[kind]!, kind } }] : [])], target.layout)
-        onSelect(MAIN_PRESENTATION_ID)
+        select(kind, MAIN_PRESENTATION_ID)
       }}
-      starHint="celle que montrent les pages et le tableau de bord ; les autres se choisissent dans un bloc de page"
-      onRename={(id, name) => setNamed(named.map((item) => item.id === id ? { ...item, name } : item))}
-      renameable={(id) => id !== MAIN_PRESENTATION_ID}
+      starHint={multi ? "celle que montrent les pages et le tableau de bord, pour sa forme (liste, kanban ou maître-détail) ; les autres se choisissent dans un bloc de page" : "celle que montrent les pages et le tableau de bord ; les autres se choisissent dans un bloc de page"}
+      onRename={(key, name) => { const id = multi ? key.split("|")[1] : key; setNamed(named.map((item) => item.id === id ? { ...item, name } : item)) }}
+      renameable={(key) => (multi ? key.split("|")[1] : key) !== MAIN_PRESENTATION_ID}
       onMove={(delta) => {
         // Seules les versions nommées se déplacent : l'étoilée reste en tête.
         const at = named.findIndex((item) => item.id === selected.id)
@@ -1121,11 +1398,11 @@ export function PresentationsPanel({ kind, tabName, columns, value, selectedId, 
         setNamed(list)
       }}
       pinFirst
-      onNew={() => add(`${kindLabel} ${named.length + 2}`, { kind })}
-      newHint={`Nouvelle version de la vue ${kindLabel}, avec ses réglages d’office`}
-      onDuplicate={() => add(`${selected.id === MAIN_PRESENTATION_ID ? kindLabel : selected.name} (copie)`, layout)}
-      onRemove={() => { setNamed(named.filter((item) => item.id !== selected.id)); onSelect(MAIN_PRESENTATION_ID) }}
-      removable={(id) => id !== MAIN_PRESENTATION_ID}
+      onNew={() => multi ? setDialog("new") : add(`${kindLabel} ${named.length + 2}`, { kind })}
+      newHint={multi ? "Nouvelle version de la Liste : choisis sa forme de départ (liste, kanban, maître-détail)" : `Nouvelle version de la vue ${kindLabel}, avec ses réglages d’office`}
+      onDuplicate={() => add(`${selected.id === MAIN_PRESENTATION_ID ? (multi ? listFormLabels[kind] ?? kindLabel : kindLabel) : selected.name} (copie)`, layout)}
+      onRemove={() => { setNamed(named.filter((item) => item.id !== selected.id)); select(multi ? kinds[0] : kind, MAIN_PRESENTATION_ID) }}
+      removable={(key) => (multi ? key.split("|")[1] : key) !== MAIN_PRESENTATION_ID}
       full={named.length >= 11}
       presets={available.map((preset) => ({ id: preset.id, name: preset.name, group: preset.builtin ? "Eraser" : "Les tiens" }))}
       onApplyPreset={(id) => {
@@ -1139,6 +1416,21 @@ export function PresentationsPanel({ kind, tabName, columns, value, selectedId, 
       disabled={disabled}
       footer={configured && <Button type="button" variant="ghost" size="sm" className="h-7 justify-start text-[11px] text-muted-foreground" disabled={disabled} onClick={() => selected.id === MAIN_PRESENTATION_ID ? setNamed(named, null) : onChange(withPresentationVersion(value, kind, selected.id, { kind }))}><RotateCcw />Revenir aux réglages d’office</Button>}
     />
+    {dialog === "new" && multi && <Dialog open onOpenChange={(open) => { if (!open) setDialog(null) }}>
+      <DialogContent className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle className="font-display text-2xl">Nouvelle version de la Liste</DialogTitle>
+          <DialogDescription>Sa forme de départ : comment les lignes se rangent. Tout le reste (en-tête, barre d’outils, éléments, clic, détail) se règle de la même façon.</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-2 sm:grid-cols-3">
+          {kinds.map((form) => { const Icon = layoutIcons[form]; return <button key={form} type="button" onClick={() => { addForm(form); setDialog(null) }} className="grid content-start gap-1.5 rounded-xl border bg-card/70 p-3 text-left transition hover:border-primary hover:shadow-md">
+            <Icon className="size-5 text-primary" />
+            <span className="text-sm font-semibold">{listFormLabels[form] ?? form}</span>
+            <span className="text-[11px] leading-4 text-muted-foreground">{form === "list" ? "Les lignes l’une sous l’autre, en sections si tu veux, ou en grille." : form === "kanban" ? "Une colonne par valeur ; glisser une carte change sa case." : "La liste d’un côté, la ligne choisie toujours ouverte de l’autre."}</span>
+          </button> })}
+        </div>
+      </DialogContent>
+    </Dialog>}
     {dialog === "save" && onSavePreset && <NamePresetDialog
       title="Enregistrer en preset"
       description={<>Les réglages de cette vue {kindLabel}, pour les reprendre dans n’importe quel index (Forme de base, bloc de page). Les colonnes absentes y sont sautées.</>}

@@ -12,8 +12,10 @@ import { announceWorldIndexChange, onWorldIndexChange } from "@/lib/world-index-
 import { builtinWindowsFor, windowAddDefaults } from "@/lib/index-window-defaults"
 import { forgetWorldIndexData, indexGridColumn, IndexEntryForm, loadWorldIndexData, RankedLinksCell, type IndexFieldProps, type IndexFormField, type LoadedWorldIndex } from "@/components/eraser/index-cells"
 import { createRowEngine } from "@/components/eraser/index-row-engine"
-import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
-import { RowPageLink } from "@/components/eraser/row-page-link"
+import { IndexRowForm, IndexRowSheet } from "@/components/eraser/index-row-sheet"
+import { RowPageLink, rowPageFor } from "@/components/eraser/row-page-link"
+import { useRolesOf } from "@/components/eraser/view-roles"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { OwnerSelector } from "@/components/eraser/owner-selector"
 import type { EditorMode } from "@/components/eraser/index-editor"
 import { SavedViewDialog, savedViewMark, useIndexSettings } from "@/components/eraser/index-windows"
@@ -22,10 +24,10 @@ import { IndexStats, TAB_PSEUDO } from "@/components/eraser/index-stats"
 import type { StatColumnGroup, StatDefinition } from "@/lib/index-stats"
 import { builtinPresentationPresets, DEFAULT_ITEM_CARD, groupRowsBy, type Presentation } from "@/lib/index-presentations"
 import { filterFromGridFilters, matchesSavedView, resolveSavedViewPresentation, savedViewFromWindow, windowFromSavedView, type SavedView } from "@/lib/index-saved-views"
-import { IndexCard, IndexCardGrid, IndexDisplayControls, NoCardsYet, isCardChoice, isIndexDisplay, type CardRowSource, type IndexDisplay } from "@/components/eraser/index-card"
+import { CardActionsContext, IndexCard, IndexCardGrid, IndexDisplayControls, NoCardsYet, isCardChoice, isIndexDisplay, roleRowOf, type CardActions, type CardRowSource, type IndexDisplay } from "@/components/eraser/index-card"
 import { pickCard, tabCardsOf } from "@/lib/index-cards"
 import { ALL_SOURCES, windowIdOfSelectKey, windowSelectKey, type FilterCondition } from "@/lib/index-windows"
-import { layoutPlaces } from "@/lib/index-layouts"
+import { DEFAULT_FORM_ID, layoutPlaces } from "@/lib/index-layouts"
 import { automaticLayoutFor, tabFormOrBuiltin, tabLayoutOrBuiltin } from "@/lib/index-layout-defaults"
 import { IndexFormView } from "@/components/eraser/index-form-view"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
@@ -238,6 +240,8 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   const query = embed?.query ?? ownQuery
   const [details, setDetails] = useState<string | null>(null)
   const [sheetForm, setSheetForm] = useState<{ row: string; form: string } | null>(null)
+  // « Montrer une carte » (bouton d'une carte) : la ligne dessinée avec une autre carte, dans une fenêtre.
+  const [cardPeek, setCardPeek] = useState<{ row: string; card: string } | null>(null)
   const [sort, setSort] = usePersistentState<SheetGridSort>(`eraser:world-index:${storeKey}:sort`, null, isValidSort)
   const localEdits = useRef<Record<string, string>>({})
   // Pour chaque saisie : ses écritures encore en route, et le numéro de requête atteint quand
@@ -715,11 +719,13 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     if (embed) return undefined
     return `${pathname}?ligne=${encodeURIComponent(id)}`
   }, [embed, entity, pathname, rawOf])
-  // « ?ligne=ID » (clic droit sur un nom › nouvel onglet, fenêtre ou ici) ouvre la fiche de la ligne.
+  // « ?ligne=ID » (clic droit sur un nom › nouvel onglet, fenêtre ou ici) ouvre la fiche de la ligne ;
+  // « ?fiche=Nom » aussi, par son nom (le bouton « Ouvrir une ligne d'un autre index » d'une carte),
+  // avec « &formulaire=… » pour l'ouvrir dans un autre formulaire de son onglet.
   const [wantedRow, setWantedRow] = useState<string | null>(null)
   useEffect(() => {
     if (embed) return
-    const read = () => setWantedRow(new URLSearchParams(window.location.search).get("ligne"))
+    const read = () => { const params = new URLSearchParams(window.location.search); setWantedRow(params.get("ligne") ?? (params.get("fiche") ? `nom:${params.get("fiche")}` : null)) }
     const timer = window.setTimeout(read, 0)
     window.addEventListener(URL_CHANGE_EVENT, read)
     window.addEventListener("popstate", read)
@@ -728,18 +734,21 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   }, [])
   useEffect(() => {
     if (!wantedRow || !tables.length) return
+    const byName = wantedRow.startsWith("nom:") ? foldName(wantedRow.slice(4)) : ""
     const found = tables.flatMap((candidate) => {
-      const column = candidate.headers.findIndex((header) => foldName(header) === "id")
-      const row = column < 0 ? undefined : candidate.rows.find((item) => (item.values[column] ?? "").replace(/<[^>]+>/g, "").trim() === wantedRow)
+      const column = byName ? labelColumnIndex(candidate.headers) : candidate.headers.findIndex((header) => foldName(header) === "id")
+      const row = column < 0 ? undefined : candidate.rows.find((item) => byName ? foldName((item.values[column] ?? "").replace(/<[^>]+>/g, "")) === byName : (item.values[column] ?? "").replace(/<[^>]+>/g, "").trim() === wantedRow)
       return row ? [rowKeyOf(candidate.tabName, row.rowNumber)] : []
     })[0]
     if (!found) return
     // Lue une fois : fermer la fiche ne la rouvre pas, l'adresse redevient celle de l'index.
     const timer = window.setTimeout(() => {
       const url = new URL(window.location.href)
-      url.searchParams.delete("ligne")
+      const form = url.searchParams.get("formulaire")
+      for (const key of ["ligne", "fiche", "formulaire"]) url.searchParams.delete(key)
       replaceAppUrl(url.pathname + url.search, { record: false })
       setWantedRow(null)
+      setSheetForm(form && form !== DEFAULT_FORM_ID ? { row: found, form } : null)
       setDetails(found)
     }, 0)
     return () => window.clearTimeout(timer)
@@ -953,6 +962,22 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     return text
   }, [commitCell, engine, notify, rawOf, rowsOf])
 
+  /**
+   * « Ouvrir la page » d'une ligne : la page d'un personnage ou d'une campagne, sinon celle d'un
+   * modèle de page de ligne (Créateur de pages), sinon sa fiche, ici.
+   */
+  const openRowPage = useCallback((rowKey: string) => {
+    const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
+    if (entity?.nameHref && id) { if (!embed) router.push(entity.nameHref.replace("{id}", encodeURIComponent(id))); else openRow(rowKey); return }
+    const tab = parseRowKey(rowKey).tabName
+    void rowPageFor(indexKey, tab, id).then((href) => { if (href) router.push(href); else setDetails(rowKey) })
+  }, [embed, entity, indexKey, openRow, rawOf, router])
+  /** Un formulaire de l'onglet ouvert ici sur la ligne, dans la fiche (« principal » : l'étoilé). */
+  const openRowForm = useCallback((rowKey: string, form: string) => {
+    setSheetForm(form && form !== DEFAULT_FORM_ID ? { row: rowKey, form } : null)
+    setDetails(rowKey)
+  }, [])
+
   // Les boutons d'une ligne : ce qu'ils peuvent toucher dans un index du monde.
   const mutateRef = useRef<(action: string, rowKeys: string[], label: string, extra?: Record<string, unknown>) => Promise<void>>(async () => undefined)
   const mutateRowsRef = useRef<(action: string, targets: RowTarget[], label: string, extra?: Record<string, unknown>, options?: { rethrow?: boolean }) => Promise<void>>(async () => undefined)
@@ -1033,10 +1058,49 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         if (!campaign) throw new Error("Aucune campagne choisie : le message n’est pas parti.")
         await sendToCampaignChat(campaign, message, audience)
       },
+      openForm: (form) => openRowForm(rowKey, form),
+      openPage: () => openRowPage(rowKey),
+      // Une ligne d'un autre index, par son nom : sa fiche s'ouvre dans son index (« ?fiche= ») ; dans celui-ci, ici.
+      openRow: async (index, name, form) => {
+        if (index === indexKey) {
+          const wanted = foldName(name)
+          const match = tables.flatMap((owner) => owner.rows.filter((row) => foldName((row.values[labelColumnIndex(owner.headers)] ?? "").replace(/<[^>]+>/g, "")) === wanted).map((row) => rowKeyOf(owner.tabName, row.rowNumber)))[0]
+          if (!match) throw new Error(`« ${name} » n’est pas dans cet index.`)
+          openRowForm(match, form ?? DEFAULT_FORM_ID)
+          return
+        }
+        router.push(`${pathOf(index)}?fiche=${encodeURIComponent(name)}${form ? `&formulaire=${encodeURIComponent(form)}` : ""}`)
+      },
+      showCard: (card) => setCardPeek({ row: rowKey, card }),
+      // Une ligne au hasard : dans cet index (l'onglet choisi, sinon celui de la ligne), sinon dans un autre, ouverte dans sa fiche.
+      randomRow: async (index, wantedTab, form) => {
+        const pick = <T,>(list: T[]) => list[Math.floor(cryptoRandom() * list.length)]
+        if (!index || index === indexKey) {
+          const owner = tables.find((candidate) => candidate.tabName === (wantedTab || tab)) ?? tables[0]
+          const rows = (owner?.rows ?? []).filter((row) => (row.values[labelColumnIndex(owner!.headers)] ?? "").trim())
+          if (!owner || !rows.length) throw new Error("Aucune ligne à tirer dans cet onglet.")
+          openRowForm(rowKeyOf(owner.tabName, pick(rows).rowNumber), form ?? DEFAULT_FORM_ID)
+          return
+        }
+        const source = await loadWorldIndexData(index as WorldIndexKey)
+        const owner = source?.tables.find((candidate) => !wantedTab || candidate.tabName === wantedTab) ?? source?.tables[0]
+        const names = (owner?.rows ?? []).map((row) => (row.values[labelColumnIndex(owner!.headers)] ?? "").replace(/<[^>]+>/g, "").trim()).filter(Boolean)
+        if (!names.length) throw new Error("Aucune ligne à tirer dans cet index.")
+        router.push(`${pathOf(index)}?fiche=${encodeURIComponent(pick(names))}${form ? `&formulaire=${encodeURIComponent(form)}` : ""}`)
+      },
     }
-  }, [applyData, ask, commitCell, origin, data, drawCell, engine, indexKey, locate, moveTargetsOf, nameOf, notify, ownNameColumn, pathOf, rawOf, relationOf, router, rowTargetOf, specOf, tables, valueOf])
+  }, [applyData, ask, commitCell, origin, data, drawCell, engine, indexKey, locate, moveTargetsOf, nameOf, notify, openRowForm, openRowPage, ownNameColumn, pathOf, rawOf, relationOf, router, rowTargetOf, specOf, tables, valueOf])
 
   const runButton = useCallback(async (rowKey: string, button: ActionButton) => { await runActionButton(button, runtimeFor(rowKey)) }, [runtimeFor])
+  // Les cartes de l'index : leurs boutons (rôles, condition, étapes) et leur clic (un formulaire ici, la page).
+  const rolesOf = useRolesOf()
+  const cardActions = useMemo<CardActions>(() => ({
+    run: (rowKey, button) => void runButton(rowKey, button),
+    visible: (rowKey, button) => engine.buttonVisible(rowKey, button),
+    rolesOf: (rowKey) => rolesOf(roleRowOf(nameOf(rowKey).replace(/<[^>]+>/g, "").trim(), locate(rowKey)?.table.headers ?? [], (header) => rawOf(rowKey, header))),
+    openForm: openRowForm,
+    openPage: openRowPage,
+  }), [engine, locate, nameOf, openRowForm, openRowPage, rawOf, rolesOf, runButton])
 
   /* eslint-disable react-hooks/refs -- les cellules ne lisent ces valeurs qu'en se dessinant, comme avant : indexGridColumn ne fait que les ranger dans la colonne */
   const columns = useMemo<SheetGridColumn[]>(() => {
@@ -1200,6 +1264,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     setViewDialog({ mode: "new", draft, notice: skipped.length ? `Pas repris dans la vue : ${skipped.join(", ")}.` : undefined })
   }, [activeSort, activeView, definition.title, display, gridFilters, showAll, sort, table, viewCardChoice])
   const cardRow = useCallback((rowKey: string): CardRowSource => ({
+    key: rowKey,
     value: (header) => valueOf(rowKey, header),
     spec: (header) => { const found = locate(rowKey); return found ? specOf(found.table.tabName, header) : undefined },
   // eslint-disable-next-line react-hooks/exhaustive-deps -- une ligne réécrite depuis sa fiche redessine ses cartes
@@ -1331,6 +1396,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     name: detailsFound ? savedCell(detailsFound, detailsFound.table.headers[ownNameColumn(detailsFound.table.headers, detailsFound.table.tabName)] ?? "").replace(/<[^>]+>/g, "") : undefined,
   }
 
+
   /** Les champs d'une ligne, enregistrés d'eux-mêmes par sa fiche (la ligne est donnée : on a pu passer à une autre). */
   async function saveSheet(rowKey: string, changes: Record<string, string>) {
     setSheetError("")
@@ -1352,6 +1418,33 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       throw reason
     }
     bumpRow(rowKey)
+  }
+
+  /**
+   * Le détail modifiable d'une vue (« Le détail : modifiable ») : le formulaire choisi de la ligne,
+   * ses champs comme dans la fiche, enregistrés d'eux-mêmes ; `locked` : en lecture.
+   */
+  const renderEditForm = (rowKey: string, formId: string, locked: string[]) => {
+    const found = locate(rowKey)
+    if (!found) return null
+    const tab = found.table.tabName
+    const layout = (formId && formId !== DEFAULT_FORM_ID ? tabFormOrBuiltin(settings.layouts, indexKey, tab, formId) : null) ?? tabLayoutOrBuiltin(settings.layouts, indexKey, tab, "form")
+    const fields = (data?.columns[tab] ?? [])
+      .filter((column) => (isSheetSpec(column.spec) || layoutPlaces(layout, column.header)) && !["auto-links", "ranked-links", "tab"].includes(column.spec.kind) && !rankHeaders.has(foldName(column.header)))
+      .map((column) => ({ key: column.header, label: column.header, spec: column.spec, value: rawOf(rowKey, column.header), long: isLongColumn(column.header) }))
+    const rowFor = (header: string): IndexFieldProps["row"] => ({
+      ...(entityImage && foldName(header) === entityImage.header ? { upload: (file: File) => entityImage.upload(file, rowKey, header) } : {}),
+      formula: (spec) => engine.formula(rowKey, header, spec),
+      computed: (spec) => computed(rowKey, header, spec),
+      gaugeMax: (spec) => engine.gaugeMax(rowKey, spec),
+      draw: async (spec) => { await drawCell(rowKey, header, spec) },
+      buttonVisible: (button) => engine.buttonVisible(rowKey, button),
+      runButton: (button) => runButton(rowKey, button),
+      tabNames: sortTabs.map((entry) => entry.value),
+      name: nameOf(rowKey).replace(/<[^>]+>/g, ""),
+    })
+    const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
+    return <IndexRowForm key={`${rowKey}:${formId}`} rowKey={rowKey} fields={fields} layout={layout} rowFor={rowFor} onSave={saveSheet} rowRef={{ index: indexKey, id, tab }} inventoryEndpoint={indexKey === "npcs" ? (row) => `/api/npcs/${encodeURIComponent(row.id)}/inventory` : undefined} openForm={(next) => openRowForm(rowKey, next ?? DEFAULT_FORM_ID)} locked={locked} />
   }
   /** Le tableau derrière la fiche montre tout de suite ce qui vient d'y être enregistré. */
   function bumpRow(rowKey: string) {
@@ -1405,8 +1498,11 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     setPending("")
   }
 
+  const peekFound = cardPeek ? locate(cardPeek.row) : null
+  const peekCard = cardPeek && peekFound ? pickCard(tabCardsOf(settings.cards, indexKey, peekFound.table.tabName), cardPeek.card === DEFAULT_ITEM_CARD ? null : cardPeek.card) : null
   return (
     <ReferenceScopeProvider scope={referenceScope}>
+    <CardActionsContext.Provider value={cardActions}>
     <section className={`${embed ? "" : "mt-4 "}flex flex-col gap-3`} {...(embed ? {} : { [IN_PLACE_ATTRIBUTE]: pathname })}>
       <div className="flex flex-wrap items-end gap-2">
         {/* Intégrée : la vue de la page, puis les onglets-fenêtres de l'index (combinés à elle). */}
@@ -1542,7 +1638,10 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         optionsOf={layoutOptionsOf}
         specOf={(header) => specOf(table.tabName, header)}
         onOpen={openRow}
-        onOpenPage={(rowKey) => { const href = rowHref(rowKey); if (href && !embed) router.push(href); else openRow(rowKey) }}
+        onOpenPage={openRowPage}
+        onOpenForm={openRowForm}
+        renderEditForm={busy ? undefined : renderEditForm}
+        onAdd={busy ? undefined : startAdding}
         onCommit={busy ? undefined : (rowKey, header, value) => void commitCell(rowKey, header, value)}
         renderCard={renderViewCard}
         cardOf={(rowKey, cardId) => pickCard(tabCardsOf(settings.cards, indexKey, parseRowKey(rowKey).tabName), cardId === DEFAULT_ITEM_CARD ? activeView?.cardId ?? null : cardId)}
@@ -1661,7 +1760,16 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       {guideOpen && <IndexGuide open onClose={() => setGuideOpen(false)} />}
       {noticesView}
       {choiceView}
+      {/* eslint-disable react-hooks/refs -- la carte lit les cases comme le tableau les montre, saisies enregistrées comprises */}
+      {cardPeek && peekCard && <Dialog open onOpenChange={(open) => { if (!open) setCardPeek(null) }}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader><DialogTitle className="font-display text-xl">{nameOf(cardPeek.row).replace(/<[^>]+>/g, "").trim() || "Sans nom"}</DialogTitle><DialogDescription>{peekCard.name}</DialogDescription></DialogHeader>
+          <div className="mx-auto w-full min-w-0" style={{ maxWidth: peekCard.width === "full" && !peekCard.widthRem ? undefined : `${Math.max(16, peekCard.widthRem ?? 22)}rem` }}><IndexCard card={peekCard} row={cardRow(cardPeek.row)} onOpen={() => { setCardPeek(null); openRow(cardPeek.row) }} href={rowHref(cardPeek.row)} /></div>
+        </DialogContent>
+      </Dialog>}
+      {/* eslint-enable react-hooks/refs */}
     </section>
+    </CardActionsContext.Provider>
     </ReferenceScopeProvider>
   )
 }

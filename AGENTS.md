@@ -98,6 +98,11 @@
   « Eraser · Réglages des index », `vue:`, `@vue`).
 - Les éditeurs enregistrent la valeur « par défaut » comme absente : vérifier que
   l’affichage a bien le même défaut.
+- « Liste » réunit dans « Modifier » les formes `list`, `kanban` et `master-detail` : leurs
+  clés d'enregistrement restent séparées (une version désignée « forme|id » dans l'éditeur).
+- Les rôles d'un lecteur pour une ligne (joueur, joueur de la campagne, joueur propriétaire,
+  MJ, MJ de la campagne, admin) sont dans `lib/view-roles.ts` ; ils règlent l'affichage
+  (boutons, clic, détail modifiable), jamais les droits d'écriture, que le serveur vérifie.
 - Le chantier en cours suit la roadmap « Eraser · Vues des index » (document
   partagé du propriétaire) : la relire et la mettre à jour à chaque étape.
 

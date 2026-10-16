@@ -4,7 +4,7 @@ import { useState, type CSSProperties, type ReactNode } from "react"
 import { ChevronDown } from "lucide-react"
 
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
-import { resolveLayoutColor, type ArrangedLayout, type ArrangedSection, type LayoutField, type LayoutLook } from "@/lib/index-layouts"
+import { firstTabFor, resolveLayoutColor, type ArrangedLayout, type ArrangedSection, type LayoutField, type LayoutLook } from "@/lib/index-layouts"
 import { cn } from "@/lib/utils"
 
 const asideColumns: Record<"sm" | "md" | "lg", string> = {
@@ -81,9 +81,15 @@ function SectionView<T>({ section, accent, compact, readColumn, children }: { se
   </section>
 }
 
-/** Les sections en onglets : une barre d'onglets (titre, icône), une section à la fois, la première ouverte. */
-function SectionTabs<T>({ sections, accent, compact, render }: { sections: Array<ArrangedSection<T>>; accent: string; compact: boolean; render: (section: ArrangedSection<T>) => ReactNode }) {
-  const [active, setActive] = useState(sections[0]?.id ?? "")
+/**
+ * Les sections en onglets : une barre d'onglets (titre, icône), une section à la fois. S'ouvre
+ * d'abord celle que donne la colonne choisie (`initial`), sinon la première ; une autre ligne
+ * (le détail d'une vue qui change de ligne) rouvre la sienne.
+ */
+function SectionTabs<T>({ sections, accent, compact, render, initial }: { sections: Array<ArrangedSection<T>>; accent: string; compact: boolean; render: (section: ArrangedSection<T>) => ReactNode; initial?: string }) {
+  const [picked, setPicked] = useState<{ from?: string; id: string } | null>(null)
+  const active = picked && picked.from === initial ? picked.id : initial ?? sections[0]?.id ?? ""
+  const setActive = (id: string) => setPicked({ from: initial, id })
   const current = sections.find((section) => section.id === active) ?? sections[0]
   return <div className={cn("grid min-w-0 content-start", compact ? "gap-2" : "gap-3")}>
     <div role="tablist" className="flex flex-wrap gap-0 border-b">
@@ -122,7 +128,7 @@ export function IndexLayoutView<T>({ arranged, render, renderRest, restTitle = "
   </SectionView>
   const main = <div className={`grid min-w-0 content-start ${gap}`}>
     {arranged.tabs && arranged.sections.length > 1
-      ? <SectionTabs sections={arranged.sections} accent={color} compact={compact} render={(section) => sectionBody({ ...section, title: undefined, icon: undefined, collapsible: undefined })} />
+      ? <SectionTabs sections={arranged.sections} accent={color} compact={compact} initial={firstTabFor(arranged.tabsBy, readColumn, arranged.sections.map((section) => section.id))} render={(section) => sectionBody({ ...section, title: undefined, icon: undefined, collapsible: undefined })} />
       : arranged.sections.map(sectionBody)}
     {arranged.rest.length > 0 && renderRest && <section className={`grid min-w-0 content-start ${compact ? "gap-2" : "gap-3"}`}>
       {arranged.sections.length > 0 && restTitle && <p className={`font-semibold uppercase tracking-[.14em] text-muted-foreground ${compact ? "text-[10px]" : "text-xs"}`}>{restTitle}</p>}
