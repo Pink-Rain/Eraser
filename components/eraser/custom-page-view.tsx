@@ -8,12 +8,12 @@ import { usePageEditTarget } from "@/components/eraser/app-shell"
 import { virtualPagePath } from "@/lib/eraser-page-blueprints"
 import { Button } from "@/components/ui/button"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
-import { DEFAULT_LAYOUT_ACCENT, FieldLabel, IndexLayoutView } from "@/components/eraser/index-layout-view"
+import { DEFAULT_LAYOUT_ACCENT, FieldLabel, IndexLayoutView, layoutBackgroundOf } from "@/components/eraser/index-layout-view"
 import { LayoutBlockView } from "@/components/eraser/index-layout-blocks"
 import { IndexRichText } from "@/components/eraser/index-references"
 import { PageBacklinksBlock, PageSearchBlock, PageSearchProvider, PageStatBlock, PageViewBlock, type BlockSource } from "@/components/eraser/page-index-block"
 import { fillRowPage, unpackRowContext, type RowContext } from "@/lib/custom-pages-rows"
-import { arrangeLayout, type LayoutBlock, type LayoutField } from "@/lib/index-layouts"
+import { arrangeLayout, resolveLayoutColor, type LayoutBlock, type LayoutField } from "@/lib/index-layouts"
 import { eraserModules, moduleSections } from "@/lib/eraser-modules"
 import { RichTextField } from "@/components/eraser/rich-text"
 import { placeLabel, sectionLayouts, studioHref, type CalloutTone, type ImageRatio, type PageBlock, type PageView, type SectionLayout, type ViewedBlock, type ViewedSection } from "@/lib/custom-pages"
@@ -230,18 +230,22 @@ function RowFieldsView({ block, row }: { block: Extract<PageBlock, { type: "rowf
   const layout = block.style === "form" ? (block.formId ? row.forms?.[block.formId] ?? row.form : row.form) : undefined
   if (block.style === "form" && layout && columns.length) {
     const columnOf = (header: string) => row.columns.find((column) => fold(column.header) === fold(header))
-    const blockContext = { valueOf: (header: string) => columnOf(header)?.text ?? "", htmlOf: (header: string) => columnOf(header)?.html ?? "", accent: DEFAULT_LAYOUT_ACCENT, row: { index: row.index, id: row.id, tab: row.tab, name: row.name } }
+    const plainOf = (header: string) => columnOf(header)?.text ?? ""
+    // La couleur d'accent, le fond et l'allure des libellés réglés dans « Apparence », comme dans la fiche.
+    const accent = resolveLayoutColor(layout.accent, DEFAULT_LAYOUT_ACCENT, plainOf)
+    const background = layoutBackgroundOf(layout.look, accent, plainOf)
+    const blockContext = { valueOf: plainOf, htmlOf: (header: string) => columnOf(header)?.html ?? "", accent, row: { index: row.index, id: row.id, tab: row.tab, name: row.name } }
     type Shown = RowContext["columns"][number] & { block?: LayoutBlock }
     const field = (column: Shown, placed: LayoutField) => column.block
-      ? <div className="grid min-w-0 gap-1">{!placed.hideLabel && placed.label && <FieldLabel field={placed} fallback="" className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-muted-foreground" />}<LayoutBlockView block={column.block} ctx={blockContext} /></div>
+      ? <div className="grid min-w-0 gap-1">{!placed.hideLabel && placed.label && <FieldLabel field={placed} fallback="" accent={accent} readColumn={plainOf} look={layout.look} className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-muted-foreground" />}<LayoutBlockView block={column.block} ctx={blockContext} /></div>
       : <div className="grid min-w-0 gap-0.5">
-        {!placed.hideLabel && <FieldLabel field={placed} fallback={column.header} className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-muted-foreground" readColumn={blockContext.valueOf} />}
+        {!placed.hideLabel && <FieldLabel field={placed} fallback={column.header} accent={accent} look={layout.look} className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-muted-foreground" readColumn={plainOf} />}
         <IndexRichText html={column.html} as="span" className={`min-w-0 [overflow-wrap:anywhere] ${placed.large ? "font-display text-xl font-semibold" : placed.size === "sm" ? "text-[12px]" : "text-[14px]"} ${placed.align === "center" ? "text-center" : placed.align === "right" ? "text-right" : ""}`} />
       </div>
     return <section className="grid gap-2">
       {block.heading && <h3 className="font-display text-lg font-semibold">{block.heading}</h3>}
-      <div className="rounded-2xl border bg-card p-4">
-        <IndexLayoutView arranged={arrangeLayout<Shown>(layout, columns, (column) => column.header, (placed) => ({ header: placed.column, text: "", html: "", block: placed.block }))} render={field} readColumn={blockContext.valueOf}
+      <div className="rounded-2xl border bg-card p-4" style={background ? { background } : undefined}>
+        <IndexLayoutView arranged={arrangeLayout<Shown>(layout, columns, (column) => column.header, (placed) => ({ header: placed.column, text: "", html: "", block: placed.block }))} render={field} accent={accent} readColumn={plainOf}
           renderRest={(rest) => <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(12rem,100%),1fr))]">{rest.map((column) => <div key={column.header}>{field(column, { column: column.header })}</div>)}</div>} />
       </div>
     </section>

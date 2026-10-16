@@ -227,7 +227,7 @@ function BlockSettings({ block, columns, onChange, disabled, forms }: { block: L
  * première ligne de l'onglet. Le point de départ est toujours la mise en page réellement
  * utilisée (celle réglée, celle d'Eraser, ou l'automatique écrite d'après les colonnes).
  */
-export function IndexLayoutEditor({ kind, columns, value, source = "saved", onChange, onReset, sample = {}, samples, resetLabel, disabled = false, forms, sampleRow, eraserStarters, indexTitle }: {
+export function IndexLayoutEditor({ kind, columns, value, source = "saved", onChange, onReset, sample = {}, samples, valuesOf, resetLabel, disabled = false, forms, sampleRow, eraserStarters, indexTitle }: {
   kind: LayoutKind
   /** Les colonnes que la mise en page peut placer. */
   columns: LayoutColumn[]
@@ -241,6 +241,8 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
   sample?: Record<string, string>
   /** Les premières lignes de l'onglet, pour l'aperçu en grand (on passe de l'une à l'autre). */
   samples?: Array<Record<string, string>>
+  /** Les valeurs d'une colonne dans toutes les lignes de l'onglet (« Onglet ouvert d'abord » les propose toutes). */
+  valuesOf?: (header: string) => string[]
   /** Le nom de l'index, écrit sous le titre de la fiche dans l'aperçu en grand. */
   indexTitle?: string
   resetLabel?: string
@@ -360,6 +362,8 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
 
   const chip = (field: LayoutField, place: Place, index: number, count: number) => {
     const spec = specOf(field.column)
+    // Sa largeur réelle : seul sur sa ligne et sans réglage, un champ la prend toute (comme dans la fiche).
+    const span = field.span ?? (count === 1 ? 12 : 6)
     const isBlock = Boolean(field.block)
     const missing = !isBlock && !known(field.column)
     const open = editing === field.column
@@ -376,14 +380,14 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
       onDrop={(event) => { event.preventDefault(); event.stopPropagation(); setOver(null); const column = dragging; setDragging(null); if (column && column !== field.column) set(placeField(layout, column, place, index)) }}
       className={cn("group/chip relative flex min-w-0 items-center gap-1 rounded-lg border px-1.5 py-1 text-xs shadow-xs", missing ? "border-destructive/40 bg-destructive/5" : isBlock ? "border-primary/40 bg-primary/5" : "bg-background", open && "ring-2 ring-primary/50")}
       // Sa part de la ligne, comme dans la fiche : un champ « ½ » seul n'en prend que la moitié.
-      style={place.area === "row" ? { flex: `0 1 calc(${field.span ?? 6} / 12 * 100% - 0.375rem)`, minWidth: "7.5rem" } : undefined}
+      style={place.area === "row" ? { flex: `0 1 calc(${span} / 12 * 100% - 0.375rem)`, minWidth: "7.5rem" } : undefined}
       title={missing ? "Cette colonne n’existe plus dans l’onglet : elle sera ignorée." : isBlock ? layoutBlockSummary(field.block!) : spec ? indexColumnKinds[normalizeSpec(spec).kind].label : undefined}
     >
       <GripVertical className="size-3.5 shrink-0 cursor-grab text-muted-foreground/60" aria-hidden="true" />
       {isBlock && <Blocks className="size-3 shrink-0 text-primary" aria-hidden="true" />}
       {field.icon && <IndexIconGlyph icon={field.icon} className="size-3 shrink-0" filled={false} />}
       <span className={cn("min-w-0 flex-1 truncate font-medium", field.large && "font-display text-sm", missing && "line-through")} style={field.color && !field.color.startsWith("{") ? { color: resolveLayoutColor(field.color, DEFAULT_LAYOUT_ACCENT) } : undefined}>{isBlock ? `${title} · ${layoutBlockSummary(field.block!)}` : field.label || field.column}</span>
-      {place.area === "row" && <NativeSelect disabled={disabled} value={String(field.span ?? 6)} onChange={(event) => updateField(field.column, { span: Number(event.target.value) as LayoutSpan })} className="h-6 w-[4.5rem] py-0 pl-2 pr-7 text-xs" aria-label={`Largeur de ${title}`} title="Largeur sur la ligne">
+      {place.area === "row" && <NativeSelect disabled={disabled} value={String(span)} onChange={(event) => updateField(field.column, { span: Number(event.target.value) as LayoutSpan })} className="h-6 w-[4.5rem] py-0 pl-2 pr-7 text-xs" aria-label={`Largeur de ${title}`} title="Largeur sur la ligne">
         {layoutSpans.map((span) => <NativeSelectOption key={span.value} value={String(span.value)} title={span.label}>{span.short}</NativeSelectOption>)}
       </NativeSelect>}
       {!isBlock && (field.large || field.hideLabel) && <span className="flex shrink-0 gap-0.5 text-muted-foreground">{field.large && <Heading className="size-3" aria-label="En grand" />}{field.hideLabel && <Tag className="size-3" aria-label="Sans nom de colonne" />}</span>}
@@ -451,9 +455,7 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
       </div>
 
       {page === "look" && <div className={cn(group, "sm:grid-cols-2")}>
-        <span className={smallLabel}>Couleur d’accent <span className="font-normal">— titres de sections, séparateurs, boutons</span><ColorPick label="Couleur d’accent" value={layout.accent} columns={colorColumns} disabled={disabled} allowAccent={false} onChange={(accent) => set({ ...layout, accent })} /></span>
-        <span className={cn(smallLabel, "self-end")}><label className="flex items-center gap-1.5 pb-1.5 text-[11px]"><Checkbox disabled={disabled} checked={Boolean(layout.tabs)} onCheckedChange={(checked) => set({ ...layout, tabs: checked === true || undefined })} />Sections en onglets <span className="font-normal text-muted-foreground">— une section à la fois, la colonne latérale reste</span></label></span>
-        {layout.tabs && layout.sections.length > 1 && <TabsByEditor layout={layout} columns={columns} samples={samples?.length ? samples : [sample]} disabled={disabled} onChange={(tabsBy) => set({ ...layout, tabsBy })} />}
+        <span className={smallLabel}>Couleur d’accent <span className="font-normal">— titres de sections, séparateurs, boutons</span><span className="flex flex-wrap items-center gap-1"><button type="button" disabled={disabled} onClick={() => set({ ...layout, accent: undefined })} aria-pressed={!layout.accent} title="L’or d’Eraser" className={cn("h-5 rounded-full border px-1.5 text-[10px]", !layout.accent && "ring-2 ring-primary ring-offset-1")}>par défaut</button><ColorPick label="Couleur d’accent" value={layout.accent} columns={colorColumns} disabled={disabled} allowAccent={false} onChange={(accent) => set({ ...layout, accent })} /></span></span>
         {/* Le style d'ensemble : le fond, l'allure de tous les libellés. Le réglage d'un champ (sa couleur) l'emporte. */}
         {(() => {
           const look = layout.look ?? {}
@@ -567,17 +569,28 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
         </div>
       </div>
 
+      {/* Les sections à la suite, ou en onglets (une à la fois) ; et l'onglet ouvert d'abord selon une colonne. */}
+      {!hover && <div className="grid gap-2 rounded-xl border bg-muted/10 p-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <p className="text-xs font-semibold">Les sections</p>
+          <Segmented label="Les sections" value={layout.tabs ? "tabs" : "stack"} disabled={disabled} onChange={(mode) => set({ ...layout, tabs: mode === "tabs" || undefined })} options={[{ value: "stack", label: "L’une sous l’autre" }, { value: "tabs", label: "En onglets", title: "Une section à la fois ; la colonne latérale reste" }]} />
+          {layout.tabs && layout.sections.length < 2 && <span className="text-[11px] text-muted-foreground">Ajoute une deuxième section : chacune devient un onglet.</span>}
+        </div>
+        {layout.tabs && layout.sections.length > 1 && <TabsByEditor layout={layout} columns={columns} samples={samples?.length ? samples : [sample]} valuesOf={valuesOf} disabled={disabled} onChange={(tabsBy) => set({ ...layout, tabsBy })} />}
+      </div>}
+
       {layout.sections.map((section, sectionIndex) => {
         const look: SectionLook = section.look ?? (section.framed ? "framed" : "plain")
         const color = resolveLayoutColor(section.color, accent, readColumn)
         return <div key={section.id} className={cn("grid gap-2 rounded-xl border p-3", look === "plain" ? "bg-background/40" : "bg-muted/25")} style={look !== "plain" ? { borderColor: `${color}66` } : undefined}>
           <div className="flex flex-wrap items-center gap-2">
             <span className="flex items-center gap-1"><IconPicker icon={section.icon} disabled={disabled} allowNone onChange={(value) => updateSection(sectionIndex, { icon: value.icon || undefined })} /></span>
-            <Input disabled={disabled} value={section.title ?? ""} onChange={(event) => updateSection(sectionIndex, { title: event.target.value || undefined })} placeholder={`Section ${sectionIndex + 1} — titre (facultatif)`} className="h-8 min-w-40 flex-1 text-xs font-semibold" style={section.title && look !== "plain" ? { color } : undefined} />
+            <Input disabled={disabled} value={section.title ?? ""} onChange={(event) => updateSection(sectionIndex, { title: event.target.value || undefined })} placeholder={layout.tabs ? `Onglet ${sectionIndex + 1} — son nom` : `Section ${sectionIndex + 1} — titre (facultatif)`} className="h-8 min-w-40 flex-1 text-xs font-semibold" style={section.title && look !== "plain" ? { color } : undefined} />
             <Segmented label="Allure de la section" value={look} disabled={disabled} onChange={(next) => updateSection(sectionIndex, { look: next === "plain" ? undefined : next, framed: undefined })} options={[{ value: "plain", label: "Nue" }, { value: "framed", label: "Encadrée" }, { value: "tinted", label: "Teintée" }, { value: "banner", label: "Bandeau" }]} />
             <Segmented label="Colonnes de la section" value={String(section.columns ?? 1)} disabled={disabled} onChange={(next) => updateSection(sectionIndex, { columns: next === "1" ? undefined : Number(next) as 2 | 3 })} options={[{ value: "1", label: "1 col.", title: "Les lignes se suivent" }, { value: "2", label: "2 col." }, { value: "3", label: "3 col." }]} />
-            <label className="flex items-center gap-1.5 text-[11px]"><Checkbox disabled={disabled} checked={Boolean(section.collapsible)} onCheckedChange={(checked) => updateSection(sectionIndex, { collapsible: checked === true || undefined, collapsed: checked === true ? section.collapsed : undefined })} />Repliable</label>
-            {section.collapsible && <label className="flex items-center gap-1.5 text-[11px]"><Checkbox disabled={disabled} checked={Boolean(section.collapsed)} onCheckedChange={(checked) => updateSection(sectionIndex, { collapsed: checked === true || undefined })} />Fermée d’emblée</label>}
+            {/* En onglets, une section ne se replie pas : le réglage n'est pas proposé (il reste gardé). */}
+            {!layout.tabs && <label className="flex items-center gap-1.5 text-[11px]"><Checkbox disabled={disabled} checked={Boolean(section.collapsible)} onCheckedChange={(checked) => updateSection(sectionIndex, { collapsible: checked === true || undefined, collapsed: checked === true ? section.collapsed : undefined })} />Repliable</label>}
+            {!layout.tabs && section.collapsible && <label className="flex items-center gap-1.5 text-[11px]"><Checkbox disabled={disabled} checked={Boolean(section.collapsed)} onCheckedChange={(checked) => updateSection(sectionIndex, { collapsed: checked === true || undefined })} />Fermée d’emblée</label>}
             <span className="ml-auto flex">
               <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || sectionIndex === 0} onClick={() => moveSection(sectionIndex, -1)} aria-label="Monter la section"><ArrowUp /></Button>
               <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || sectionIndex === layout.sections.length - 1} onClick={() => moveSection(sectionIndex, 1)} aria-label="Descendre la section"><ArrowDown /></Button>
@@ -587,7 +600,7 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
           {(look !== "plain" || section.color) && <span className={smallLabel}>Couleur de la section<ColorPick allowMuted label="Couleur de la section" value={section.color} columns={colorColumns} disabled={disabled} onChange={(next) => updateSection(sectionIndex, { color: next })} /></span>}
           {section.rows.map((row, rowIndex) => {
             const key = `${section.id}:${row.id}`
-            const used = row.fields.reduce((sum, field) => sum + (field.span ?? 6), 0)
+            const used = row.fields.length === 1 ? row.fields[0].span ?? 12 : row.fields.reduce((sum, field) => sum + (field.span ?? 6), 0)
             return <div key={row.id} className={`group/row flex items-start gap-1.5 rounded-lg border border-dashed p-1.5 ${over === key ? "border-primary bg-primary/5" : "border-border/70"}`} {...dropProps({ area: "row", section: sectionIndex, row: rowIndex }, key)}>
               <span className="mt-1.5 w-5 shrink-0 text-center text-[10px] text-muted-foreground" title={used > 12 ? "La ligne dépasse : les champs se partagent la place" : `${used}/12 de la ligne`}>{rowIndex + 1}</span>
               <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
@@ -696,29 +709,30 @@ function LayoutPreview({ kind, layout, columns, sample = {}, sampleRow }: { kind
  * choix, puis celles des lignes de l'onglet), et pour chacune l'onglet qui s'ouvre. Une
  * valeur laissée sur « Le premier onglet » n'est pas enregistrée.
  */
-function TabsByEditor({ layout, columns, samples, disabled, onChange }: { layout: IndexLayout; columns: LayoutColumn[]; samples: Array<Record<string, string>>; disabled?: boolean; onChange: (tabsBy: IndexLayout["tabsBy"]) => void }) {
+function TabsByEditor({ layout, columns, samples, valuesOf, disabled, onChange }: { layout: IndexLayout; columns: LayoutColumn[]; samples: Array<Record<string, string>>; valuesOf?: (header: string) => string[]; disabled?: boolean; onChange: (tabsBy: IndexLayout["tabsBy"]) => void }) {
   const tabsBy = layout.tabsBy
   const choosable = columns.filter((column) => !["id", "actions", "archived"].includes(normalizeSpec(column.spec).kind))
   const column = tabsBy ? columns.find((item) => foldName(item.header) === foldName(tabsBy.column)) : undefined
   const values = useMemo(() => {
     if (!tabsBy) return []
     const seen = new Map<string, string>()
-    const add = (value: string) => { const clean = value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(); if (clean && !seen.has(foldName(clean)) && seen.size < 60) seen.set(foldName(clean), clean) }
+    const add = (value: string, always = false) => { const clean = value.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim(); if (clean && !seen.has(foldName(clean)) && (always || seen.size < 80)) seen.set(foldName(clean), clean) }
+    const addCell = (cell: string) => { for (const part of cell.replace(/<[^>]+>/g, " ").split(/\s*[,;\n]\s*/)) add(part) }
+    // La liste de choix dans son ordre, puis les valeurs de toutes les lignes de l'onglet, puis celles déjà reliées qui n'y sont plus.
     for (const option of column ? normalizeSpec(column.spec).options ?? [] : []) add(option.value)
-    for (const sample of samples) {
-      const cell = sample[tabsBy.column] ?? sample[Object.keys(sample).find((key) => foldName(key) === foldName(tabsBy.column)) ?? ""] ?? ""
-      for (const part of cell.replace(/<[^>]+>/g, " ").split(/\s*[,;\n]\s*/)) add(part)
-    }
-    for (const entry of tabsBy.map) add(entry.value)
+    const cells = valuesOf?.(tabsBy.column)
+    if (cells) for (const cell of cells) addCell(cell)
+    else for (const sample of samples) addCell(sample[tabsBy.column] ?? sample[Object.keys(sample).find((key) => foldName(key) === foldName(tabsBy.column)) ?? ""] ?? "")
+    for (const entry of tabsBy.map) add(entry.value, true)
     return [...seen.values()]
-  }, [column, samples, tabsBy])
+  }, [column, samples, tabsBy, valuesOf])
   const sectionOf = (value: string) => tabsBy?.map.find((entry) => foldName(entry.value) === foldName(value))?.section ?? ""
   const link = (value: string, section: string) => {
     if (!tabsBy) return
     const map = tabsBy.map.filter((entry) => foldName(entry.value) !== foldName(value))
     onChange({ ...tabsBy, map: section ? [...map, { value, section }] : map })
   }
-  return <div className="grid gap-2 rounded-lg border border-dashed bg-background/40 p-2 sm:col-span-2">
+  return <div className="grid gap-2 rounded-lg border border-dashed bg-background/40 p-2">
     <p className={groupTitle}><Bookmark className="size-3.5" />Onglet ouvert d’abord <span className="font-normal normal-case tracking-normal">— selon une colonne de la ligne</span></p>
     <label className={smallLabel}>Selon la colonne
       <NativeSelect disabled={disabled} value={tabsBy?.column ?? ""} onChange={(event) => onChange(event.target.value ? { column: event.target.value, map: [] } : undefined)} className="h-8 py-0 text-xs">
@@ -801,10 +815,11 @@ function LayoutStarterDialog({ kind, columns, sample, sampleRow, eraserStarters 
   const presets = layoutPresets.filter((preset) => preset.kind === kind)
   const infos: LayoutColumnInfo[] = columns
   const starters = useMemo(() => layoutStarters.filter((starter) => starter.kind === kind).map((starter) => ({ key: starter.key, label: starter.label, hint: starter.hint, layout: starter.build(infos) })), [infos, kind])
-  const tile = (key: string, title: string, hint: string, layout: IndexLayout) => <button key={key} type="button" onClick={() => onPick(layout)} className="group grid content-start gap-2 rounded-xl border bg-card/70 p-2.5 text-left transition hover:border-primary hover:shadow-md">
-    <span className="pointer-events-none block max-h-56 min-h-24 overflow-hidden rounded-lg bg-muted/30 p-2"><span className="block origin-top-left scale-[0.78]" style={{ width: "128%" }}><LayoutPreview kind={kind} layout={layout} columns={columns} sample={sample} sampleRow={sampleRow} /></span></span>
+  // Une vignette cliquable, pas un bouton : son aperçu contient lui-même des boutons (onglets, blocs).
+  const tile = (key: string, title: string, hint: string, layout: IndexLayout) => <div key={key} role="button" tabIndex={0} onClick={() => onPick(layout)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onPick(layout) } }} className="group grid cursor-pointer content-start gap-2 rounded-xl border bg-card/70 p-2.5 text-left transition hover:border-primary hover:shadow-md focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:outline-none">
+    <span className="pointer-events-none block max-h-56 min-h-24 overflow-hidden rounded-lg bg-muted/30 p-2" inert><span className="block origin-top-left scale-[0.78]" style={{ width: "128%" }}><LayoutPreview kind={kind} layout={layout} columns={columns} sample={sample} sampleRow={sampleRow} /></span></span>
     <span><span className="block text-sm font-semibold">{title}</span><span className="block text-[11px] leading-4 text-muted-foreground">{hint}</span></span>
-  </button>
+  </div>
   const what = kind === "form" ? "fiche" : "survol"
   return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
     <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-[min(94vw,1100px)]">

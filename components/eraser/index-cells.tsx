@@ -1297,10 +1297,12 @@ export function IndexEntryForm({ title, fields, pending, leading, layout, onCanc
         <IndexLayoutView
           arranged={arrangeLayout(layout, fields, (field) => field.label, (placed) => ({ key: placed.column, label: placed.label ?? "", spec: { kind: "rich" } as IndexColumnSpec, block: placed.block }))}
           readColumn={readEntry}
+          // Une ligne neuve s'ouvre sur le premier onglet : choisir le « Type » ne fait pas sauter d'onglet pendant la saisie.
+          tabValue={() => ""}
           // Un bloc (tuiles de valeurs…) écrit dans ses cases ; un inventaire attend que la ligne existe.
           render={(field, placed) => field.block
             ? <div className="grid gap-1">{!placed.hideLabel && placed.label && <FieldLabel field={placed} fallback="" accent={accent} readColumn={readEntry} look={layout.look} className="text-xs font-semibold" />}<LayoutBlockView block={field.block} ctx={{ valueOf: readEntry, accent, onChange: (column, value) => { const target = fields.find((item) => foldName(item.label) === foldName(column)); if (target) setValues((current) => ({ ...current, [target.key]: value })) } }} /></div>
-            : <div className={cn(placed.large ? largeFieldClass : placed.size === "sm" ? smallFieldClass : undefined, placed.align && fieldAlignClass[placed.align])} style={placed.imageWidth ? { width: `${placed.imageWidth}%` } : undefined}>{entryField(field, placed.hideLabel, placed)}</div>}
+            : <div className={cn(placed.large ? largeFieldClass : placed.size === "sm" ? smallFieldClass : normalizeSpec(field.spec).kind === "checkbox" ? "grid flex-1" : undefined, placed.align && fieldAlignClass[placed.align])} style={placed.imageWidth ? { width: `${placed.imageWidth}%` } : undefined}>{entryField(field, placed.hideLabel, placed)}</div>}
           renderRest={(rest) => <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">{rest.map((field) => entryField(field))}</div>}
         />
       </div>

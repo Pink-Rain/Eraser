@@ -86,14 +86,14 @@ function SectionView<T>({ section, accent, compact, readColumn, children }: { se
  * d'abord celle que donne la colonne choisie (`initial`), sinon la première ; une autre ligne
  * (le détail d'une vue qui change de ligne) rouvre la sienne.
  */
-function SectionTabs<T>({ sections, accent, compact, render, initial }: { sections: Array<ArrangedSection<T>>; accent: string; compact: boolean; render: (section: ArrangedSection<T>) => ReactNode; initial?: string }) {
+function SectionTabs<T>({ sections, accent, compact, render, initial, readColumn }: { sections: Array<ArrangedSection<T>>; accent: string; compact: boolean; render: (section: ArrangedSection<T>) => ReactNode; initial?: string; readColumn?: (column: string) => string }) {
   const [picked, setPicked] = useState<{ from?: string; id: string } | null>(null)
   const active = picked && picked.from === initial ? picked.id : initial ?? sections[0]?.id ?? ""
   const setActive = (id: string) => setPicked({ from: initial, id })
   const current = sections.find((section) => section.id === active) ?? sections[0]
   return <div className={cn("grid min-w-0 content-start", compact ? "gap-2" : "gap-3")}>
     <div role="tablist" className="flex flex-wrap gap-0 border-b">
-      {sections.map((section, index) => <button key={section.id} type="button" role="tab" aria-selected={section.id === current?.id} onClick={() => setActive(section.id)} className={cn("-mb-px inline-flex items-center gap-1.5 border-b-2 font-semibold uppercase tracking-[.12em] transition", compact ? "h-7 px-2 text-[10px]" : "h-8 px-3 text-xs", section.id === current?.id ? "border-current" : "border-transparent text-muted-foreground hover:text-foreground")} style={section.id === current?.id ? { color: accent } : undefined}>
+      {sections.map((section, index) => <button key={section.id} type="button" role="tab" aria-selected={section.id === current?.id} onClick={() => setActive(section.id)} className={cn("-mb-px inline-flex items-center gap-1.5 border-b-2 font-semibold uppercase tracking-[.12em] transition", compact ? "h-7 px-2 text-[10px]" : "h-8 px-3 text-xs", section.id === current?.id ? "border-current" : "border-transparent text-muted-foreground hover:text-foreground")} style={section.id === current?.id ? { color: section.color ? resolveLayoutColor(section.color, accent, readColumn) : accent } : undefined}>
         {section.icon && <IndexIconGlyph icon={section.icon} className={compact ? "size-3" : "size-3.5"} filled={false} />}{section.title || `Section ${index + 1}`}
       </button>)}
     </div>
@@ -107,7 +107,7 @@ function SectionTabs<T>({ sections, accent, compact, render, initial }: { sectio
  * dessine un élément (un champ de la fiche, une case du survol, un bloc) ; `renderRest` les
  * éléments non placés. `readColumn` résout les couleurs lues dans une colonne (« {Couleur} »).
  */
-export function IndexLayoutView<T>({ arranged, render, renderRest, restTitle = "Autres champs", compact = false, accent, readColumn }: {
+export function IndexLayoutView<T>({ arranged, render, renderRest, restTitle = "Autres champs", compact = false, accent, readColumn, tabValue }: {
   arranged: ArrangedLayout<T>
   render: (item: T, field: LayoutField) => ReactNode
   renderRest?: (items: T[]) => ReactNode
@@ -117,18 +117,25 @@ export function IndexLayoutView<T>({ arranged, render, renderRest, restTitle = "
   /** La couleur d'accent de la ligne (sinon celle de la mise en page, sinon l'or d'Eraser). */
   accent?: string
   readColumn?: (column: string) => string
+  /**
+   * La valeur qui choisit l'onglet ouvert d'abord (« Onglet ouvert d'abord ») ; d'office `readColumn`.
+   * Une fiche qu'on remplit donne les valeurs enregistrées : l'onglet ne saute pas pendant la saisie.
+   */
+  tabValue?: (column: string) => string
 }) {
   const gap = compact ? "gap-2.5" : "gap-4"
   const color = accent ?? resolveLayoutColor(arranged.accent, DEFAULT_LAYOUT_ACCENT, readColumn)
   const sectionBody = (section: ArrangedSection<T>) => <SectionView key={section.id} section={section} accent={color} compact={compact} readColumn={readColumn}>
     {section.rows.map((row) => <div key={row.id} className={layoutRowClass} style={layoutRowStyle(row.fields)}>
       {/* En colonne : un champ peut occuper toute la hauteur de sa ligne (une case à cocher s'aligne en bas). */}
-      {row.fields.map((field) => <div key={field.column} className="flex min-w-0 flex-col self-stretch">{render(field.item, field)}</div>)}
+      {/* Sans libellé, à côté de champs qui en ont un : en bas de la ligne, à hauteur des autres saisies. */}
+      {row.fields.map((field) => <div key={field.column} className={cn("flex min-w-0 flex-col self-stretch", field.hideLabel && !field.block && row.fields.some((other) => !other.hideLabel) && "justify-end")}>{render(field.item, field)}</div>)}
     </div>)}
   </SectionView>
   const main = <div className={`grid min-w-0 content-start ${gap}`}>
     {arranged.tabs && arranged.sections.length > 1
-      ? <SectionTabs sections={arranged.sections} accent={color} compact={compact} initial={firstTabFor(arranged.tabsBy, readColumn, arranged.sections.map((section) => section.id))} render={(section) => sectionBody({ ...section, title: undefined, icon: undefined, collapsible: undefined })} />
+      // En onglets, le titre est sur l'onglet : un bandeau garde sa couleur en cadre teinté (sans bande vide).
+      ? <SectionTabs sections={arranged.sections} accent={color} compact={compact} readColumn={readColumn} initial={firstTabFor(arranged.tabsBy, tabValue ?? readColumn, arranged.sections.map((section) => section.id))} render={(section) => sectionBody({ ...section, title: undefined, icon: undefined, collapsible: undefined, collapsed: undefined, look: section.look === "banner" ? "tinted" : section.look })} />
       : arranged.sections.map(sectionBody)}
     {arranged.rest.length > 0 && renderRest && <section className={`grid min-w-0 content-start ${compact ? "gap-2" : "gap-3"}`}>
       {arranged.sections.length > 0 && restTitle && <p className={`font-semibold uppercase tracking-[.14em] text-muted-foreground ${compact ? "text-[10px]" : "text-xs"}`}>{restTitle}</p>}

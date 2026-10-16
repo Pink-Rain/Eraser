@@ -737,7 +737,7 @@ function useDragList<T extends { id: string }>(items: T[], onMove: (next: T[]) =
  * milieu, les réglages de la colonne choisie à droite, tous visibles. Rien n'est écrit
  * tant qu'on n'a pas enregistré ; le résumé dit exactement ce qui va changer.
  */
-export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {}, layouts = {}, onSaveLayouts, cardsIndex, cards = {}, onSaveCards, initialMode = "columns", initialTab, locks = {}, onSaveLocks, presentations = {}, onSavePresentations, viewPresets = [], onSaveViewPreset, onDeleteViewPreset, previewRows = {}, optionsOf, statsPanel, stats = [] }: {
+export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {}, layouts = {}, onSaveLayouts, cardsIndex, cards = {}, onSaveCards, initialMode = "columns", initialTab, locks = {}, onSaveLocks, presentations = {}, onSavePresentations, viewPresets = [], onSaveViewPreset, onDeleteViewPreset, previewRows = {}, valuesOf, optionsOf, statsPanel, stats = [] }: {
   model: IndexEditorModel
   open: boolean
   pending?: boolean
@@ -779,6 +779,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   previewRows?: Record<string, Array<Record<string, string>>>
   /** Les choix d'une colonne liste d'un onglet (couleurs des sections, du kanban). */
   optionsOf?: (tab: string, header: string) => Array<{ value: string; color?: string }>
+  /** Les valeurs d'une colonne dans toutes les lignes de l'onglet (une par case), pas seulement celles des aperçus. */
+  valuesOf?: (tab: string, header: string) => string[]
   /** Le constructeur des statistiques de l'index (onglet « Stats ») ; absent : pas d'onglet. */
   statsPanel?: ReactNode
   /** Les statistiques de l'index : une tuile du tableau de bord en dessine une. */
@@ -1384,7 +1386,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
           const main = layoutOf(tab, mode)
           const current = named ? { layout: named.layout, source: "saved" as const } : main
           const columns = layoutColumnsOf(tab, mode)
-          const sampleRows = sampleRowsOf(tab)
+          // L'aperçu en grand passe d'une ligne à l'autre : celles de l'aperçu des vues (une quarantaine), sinon les premières.
+          const sampleRows = previewRows[tab.original ?? tab.name.trim()]?.length ? previewRows[tab.original ?? tab.name.trim()] : sampleRowsOf(tab)
           const update = (layout: IndexLayout) => {
             if (!named) return touchLayout(tab, mode === "form" ? { form: layout } : { hover: layout })
             const next = list.map((item) => item.id === named.id ? { ...item, layout } : item)
@@ -1405,6 +1408,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               indexTitle={model.title}
               sampleRow={sampleRows[0] ? { index: model.key, id: sampleRows[0].ID ?? "", tab: tab.original ?? tab.name } : undefined}
               forms={[{ id: DEFAULT_FORM_ID, name: "Formulaire principal" }, ...namedFormsOf(tab).map((item) => ({ id: item.id, name: item.name }))]}
+              valuesOf={valuesOf && tab.original ? (header) => valuesOf(tab.original!, tab.columns.find((column) => foldName(column.header) === foldName(header))?.original ?? header) : undefined}
               eraserStarters={tab.original ? eraserLayoutStarters(model.key, tab.original, mode) : []}
               disabled={pending || layoutSaving || tab.removed}
             />

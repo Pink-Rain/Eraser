@@ -48,7 +48,7 @@ function releaseFocus() {
  * ni « Fermer ». Une seule barre de mise en forme, en haut, sert à tous les champs. En bas, « Précédente », « Aller à… » et « Suivante » passent d'une ligne
  * à l'autre sans quitter la fiche.
  */
-export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, rowFor, renderField, error = "", footer, navigation, onSave, onClose, rowRef, inventoryEndpoint, openForm }: {
+export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, rowFor, renderField, error = "", footer, navigation, onSave, onClose, rowRef, inventoryEndpoint, openForm, columnValue }: {
   open: boolean
   /** La ligne affichée : chaque enregistrement la désigne, même si on est passé à une autre entre-temps. */
   rowKey: string
@@ -73,6 +73,8 @@ export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, r
   inventoryEndpoint?: (row: { index: string; id: string }) => string
   /** Le bouton « Ouvrir un formulaire » de la mise en page : montre ce formulaire (sans : l'étoilé). */
   openForm?: (formId?: string) => void
+  /** Une colonne de la ligne, même absente de la fiche (« Onglet ouvert d'abord » peut en lire une du tableau seulement). */
+  columnValue?: (column: string) => string
 }) {
   const [status, setStatus] = useState<SaveStatus>("idle")
   // « Réessayer » : renvoie ce que la fiche n'a pas pu enregistrer.
@@ -123,7 +125,7 @@ export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, r
       </div>
       {/* Une ligne, un corps : passer à une autre ligne enregistre ce qui restait et repart de ses valeurs. */}
       <RichTextToolbarHost.Provider value={toolbarHost}>
-        <RowSheetBody key={rowKey} rowKey={rowKey} fields={fields} layout={layout} rowFor={rowFor} renderField={renderField} retryRef={retryRef} onSave={onSave} onStatus={setStatus} rowRef={rowRef} inventoryEndpoint={inventoryEndpoint} openForm={openForm} />
+        <RowSheetBody key={rowKey} rowKey={rowKey} fields={fields} layout={layout} rowFor={rowFor} renderField={renderField} retryRef={retryRef} onSave={onSave} onStatus={setStatus} rowRef={rowRef} inventoryEndpoint={inventoryEndpoint} openForm={openForm} columnValue={columnValue} />
       </RichTextToolbarHost.Provider>
       {error && <p className="rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p>}
       <DialogFooter className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[1fr_auto_1fr] sm:justify-normal">
@@ -220,7 +222,7 @@ function RowJump({ navigation, current, position, onGo }: { navigation: RowSheet
  * fiche, ses champs enregistrés d'eux-mêmes, une barre de mise en forme et l'état de
  * l'enregistrement. Les champs `locked` restent en lecture.
  */
-export function IndexRowForm({ rowKey, fields, layout, rowFor, onSave, rowRef, inventoryEndpoint, openForm, locked = [] }: {
+export function IndexRowForm({ rowKey, fields, layout, rowFor, onSave, rowRef, inventoryEndpoint, openForm, locked = [], columnValue }: {
   rowKey: string
   fields: RowSheetField[]
   layout?: IndexLayout | null
@@ -230,6 +232,8 @@ export function IndexRowForm({ rowKey, fields, layout, rowFor, onSave, rowRef, i
   inventoryEndpoint?: (row: { index: string; id: string }) => string
   openForm?: (formId?: string) => void
   locked?: string[]
+  /** Une colonne de la ligne, même absente du formulaire (l'onglet ouvert d'abord). */
+  columnValue?: (column: string) => string
 }) {
   const [status, setStatus] = useState<SaveStatus>("idle")
   const retryRef = useRef<(() => void) | null>(null)
@@ -241,7 +245,9 @@ export function IndexRowForm({ rowKey, fields, layout, rowFor, onSave, rowRef, i
     <span className="flex items-center gap-1 text-xs font-semibold text-muted-foreground"><Lock className="size-3" />{field.label}</span>
     <div className="min-h-8 rounded-md border border-dashed bg-muted/20 px-2 py-1.5 text-sm">{field.value.trim() ? <IndexRichText html={field.value} /> : <span className="text-muted-foreground/60">—</span>}</div>
   </div> : undefined
-  return <div className="grid gap-2">
+  // Le fond réglé dans « Apparence », comme dans la fiche.
+  const background = sheetBackgroundOf(layout, fields)
+  return <div className={cn("grid gap-2", background && "rounded-xl p-2")} style={background ? { background } : undefined}>
     <div className="flex flex-wrap items-center gap-1 rounded-lg border bg-card/80 px-2 py-1">
       <RichTextToolbar targetRef={targetRef} ready={toolbarReady} />
       <span className="ml-auto flex items-center gap-2">
@@ -250,12 +256,12 @@ export function IndexRowForm({ rowKey, fields, layout, rowFor, onSave, rowRef, i
       </span>
     </div>
     <RichTextToolbarHost.Provider value={toolbarHost}>
-      <RowSheetBody key={rowKey} rowKey={rowKey} fields={fields} layout={layout} rowFor={rowFor} renderField={locked.length ? renderLocked : undefined} retryRef={retryRef} onSave={onSave} onStatus={setStatus} rowRef={rowRef} inventoryEndpoint={inventoryEndpoint} openForm={openForm} />
+      <RowSheetBody key={rowKey} rowKey={rowKey} fields={fields} layout={layout} rowFor={rowFor} renderField={locked.length ? renderLocked : undefined} retryRef={retryRef} onSave={onSave} onStatus={setStatus} rowRef={rowRef} inventoryEndpoint={inventoryEndpoint} openForm={openForm} columnValue={columnValue} />
     </RichTextToolbarHost.Provider>
   </div>
 }
 
-function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, onSave, onStatus, rowRef, inventoryEndpoint, openForm }: {
+function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, onSave, onStatus, rowRef, inventoryEndpoint, openForm, columnValue }: {
   rowKey: string
   fields: RowSheetField[]
   layout?: IndexLayout | null
@@ -267,6 +273,7 @@ function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, o
   rowRef?: { index: string; id: string; tab?: string }
   inventoryEndpoint?: (row: { index: string; id: string }) => string
   openForm?: (formId?: string) => void
+  columnValue?: (column: string) => string
 }) {
   // Ce qui a été saisi ici : la fiche l'affiche tant que la page n'a pas relu la ligne.
   const [drafts, setDrafts] = useState<Record<string, string>>({})
@@ -325,6 +332,15 @@ function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, o
 
   const byLabel = (column: string) => fields.find((item) => foldName(item.label) === foldName(column))
   const readColumn = (column: string) => { const item = byLabel(column); return item ? richTextPlainText(valueOf(item)) : "" }
+  // L'onglet ouvert d'abord : selon la ligne telle qu'elle était à l'ouverture (une saisie, ni son enregistrement,
+  // ne font sauter d'onglet), y compris une colonne que la fiche ne montre pas.
+  const [opened] = useState(() => {
+    const column = layout?.tabsBy?.column
+    if (!column) return null
+    const item = fields.find((entry) => foldName(entry.label) === foldName(column))
+    return { column: foldName(column), value: richTextPlainText(item ? item.value : columnValue?.(column) ?? "") }
+  })
+  const tabValue = (column: string) => opened && opened.column === foldName(column) ? opened.value : byLabel(column) ? readColumn(column) : richTextPlainText(columnValue?.(column) ?? "")
   // La mise en page : sa couleur d'accent (blocs, couleurs « accent »), le style d'ensemble des libellés.
   const accent = resolveLayoutColor(layout?.accent, DEFAULT_LAYOUT_ACCENT, readColumn)
   const labels = labelLookOf(layout?.look, accent, readColumn)
@@ -364,6 +380,7 @@ function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, o
       ? <IndexLayoutView
         arranged={arranged}
         readColumn={blockContext.valueOf}
+        tabValue={tabValue}
         // Une case à cocher (sans libellé au-dessus) s'aligne sur le bas des champs de sa ligne.
         render={(item, placed) => item.block
           ? <div key={item.key} className="grid gap-1">{!placed.hideLabel && placed.label && <FieldLabel field={placed} fallback="" accent={accent} readColumn={readColumn} look={layout?.look} className="text-xs font-semibold text-muted-foreground" />}<LayoutBlockView block={item.block} ctx={blockContext} /></div>

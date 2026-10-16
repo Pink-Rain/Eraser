@@ -792,6 +792,8 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         onSaveViewPreset={settings.saveViewPreset}
         onDeleteViewPreset={settings.deleteViewPreset}
         previewRows={Object.fromEntries(tables.filter((table) => table.fileId === editor.key).map((table) => [table.tabName, table.rows.slice(0, 40).map((row) => Object.fromEntries(table.headers.map((header, index) => [header, row.values[index] ?? ""])))]))}
+        // « Onglet ouvert d'abord » propose les valeurs de toutes les lignes, pas seulement celles des aperçus.
+        valuesOf={(tabName, header) => { const table = tables.filter((table) => table.fileId === editor.key).find((item) => item.tabName === tabName); const at = table ? table.headers.findIndex((item) => foldName(item) === foldName(header)) : -1; return table && at >= 0 ? [...new Set(table.rows.map((row) => row.values[at] ?? "").filter(Boolean))].slice(0, 2000) : [] }}
         optionsOf={(tabName, header) => { const table = tables.find((candidate) => candidate.fileId === editor.key && candidate.tabName === tabName); return (table ? specIn(table, header, schemas).options ?? [] : []).map((option) => ({ value: option.value, color: option.color })) }}
         statsPanel={<IndexStats {...statsProps} canEdit={!busy} />}
         initialMode={editorMode}

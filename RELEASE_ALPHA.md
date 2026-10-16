@@ -1,62 +1,39 @@
-# Eraser 0.1.1-alpha.225 — La Liste réunie, les cartes à boutons
+# Eraser 0.1.1-alpha.226 — Les formulaires réparés
 
 Cette version arrive **sans réinstallation** : Eraser la télécharge, redémarre son serveur et
 recharge la page tout seul. Rien n'est effacé dans Google Sheets, ni dans les réglages, ni dans
-les pages : les vues enregistrées gardent leurs clés et s'affichent comme avant.
+les pages : les formulaires enregistrés gardent leurs clés et s'affichent comme avant.
 
-## La Liste
+## L'onglet ouvert d'abord
 
-- Dans « Modifier », **Liste** réunit Liste, Kanban et Maître-détail. Ses versions des trois
-  formes sont dans le même panneau ; « + » demande la forme de départ.
-- Quatre pages : **Général** (en-tête, barre d'outils, pied, texte quand rien ne correspond),
-  **Rangement** (le groupe et les lignes), **Éléments et clic** (l'élément, puis au clic le
-  détail), **Apparences**.
-- **En-tête** : un titre, un texte, une icône, le nombre de lignes ; au-dessus de la vue ou dans
-  le détail (maître-détail, panneau à côté).
-- **Barre d'outils** : recherche, filtres épinglés, tri au choix, regroupement au choix, nombre de
-  lignes, bouton « Ajouter » réservé aux rôles choisis. Ce que le lecteur y change ne touche que
-  son écran.
-- **Pied** : le nombre de lignes, des totaux qui suivent la recherche, « Charger plus ».
-- **Couleurs selon une règle** : une teinte, un signe (🩸, ☠) ou une ligne grisée quand une
-  condition est vraie (« PV inférieur à 15 »).
-- **Groupes en onglets** : en haut, sur le côté (noms écrits à la verticale, comme des
-  intercalaires) ou en bas ; soulignés, en pastilles, en classeur ou en signets.
-- **Glisser** une ligne d'une section à l'autre change sa case, comme le kanban (à cocher). Une
-  ligne à plusieurs valeurs : dans chaque groupe, ou seulement dans celui de sa première valeur.
-- **Au clic** : la fiche, le panneau à côté toujours ouvert, une **fenêtre au centre**, dessous,
-  la page, rien, ou « comme la carte ». Un **clic différent selon le rôle** est possible.
-- **Le détail** peut être un formulaire **modifiable directement** ou avec un bouton
-  « Modifier », par les rôles choisis, certains champs restant en lecture.
-- L'élément simple peut devenir une carte (« En faire une carte ») ; ses anciens réglages restent
-  gardés.
+- « Onglet ouvert d'abord » propose **les valeurs de toutes les lignes du tableau**, plus seulement
+  celles des trois lignes d'exemple. La liste de choix de la colonne reste en tête, dans son ordre.
+- La colonne choisie peut être une colonne que la fiche ne montre pas (une colonne du tableau
+  seulement) : l'onglet s'ouvre quand même selon sa valeur.
+- L'onglet **ne saute plus** pendant qu'on modifie la ligne : il est choisi à l'ouverture de la
+  fiche, d'après la ligne enregistrée. Une ligne neuve (« Ajouter ») s'ouvre sur le premier onglet.
+- « Sections en onglets » et « Onglet ouvert d'abord » sont dans **Mise en page**, juste au-dessus
+  des sections (« Les sections : l'une sous l'autre / en onglets »), et non plus dans Apparence.
+- En onglets, « Repliable » n'est plus proposé (une section en onglet ne se replie pas) et le titre
+  d'une section s'appelle son nom d'onglet.
 
-## Les cartes
+## Ce qui s'affiche mieux
 
-- **Survol et clic** passe sous « Couleur et cadre » : le survol, et ce que fait un clic (la fiche,
-  un formulaire choisi ici, la page, rien). Une vue qui règle les siens l'emporte.
-- Nouveau bloc **Boutons** : ouvrir un formulaire ici, la page de la ligne, une ligne d'un autre
-  index, une page d'Eraser, une page web, montrer une autre carte, une ligne au hasard, lancer
-  des dés, +1 / −1, mettre une valeur, dupliquer, supprimer (avec confirmation), envoyer dans le
-  chat… Chaque bouton peut enchaîner plusieurs actions et être réservé à certains rôles.
-- « Voir comme », dans l'aperçu, montre les boutons que voit chaque rôle.
-- Les colonnes Boutons des index gagnent les mêmes nouvelles actions.
+- En onglets, une section en **bandeau** garde sa couleur en cadre teinté, au lieu d'une bande vide ;
+  l'onglet ouvert prend la couleur de sa section.
+- Un champ **sans libellé** se pose à hauteur des autres saisies de sa ligne.
+- Le **détail modifiable** d'une vue (panneau à côté, fenêtre) prend le fond réglé dans Apparence,
+  comme la fiche.
+- La **page d'une ligne** (bloc « Champs de la ligne » en forme de formulaire) suit la couleur
+  d'accent, le fond et le style des libellés du formulaire.
+- Dans le formulaire d'ajout, une case à cocher s'aligne comme dans la fiche.
 
-## Les formulaires
+## L'éditeur
 
-- Avec des sections en onglets, **l'onglet ouvert d'abord** peut dépendre d'une colonne de la
-  ligne : par exemple « Type » : un Mage ouvre l'onglet « Magie ».
-
-## Les rôles
-
-- Six rôles pour les boutons, le clic et le détail modifiable : Joueur, **Joueur de la
-  campagne**, Joueur propriétaire (celui dont le personnage est la ligne), MJ, MJ de la campagne,
-  Admin.
-
-## Ce qui peut changer d'aspect
-
-- Les onglets Kanban et Maître-détail de « Modifier » sont dans « Liste ».
-- Une vue dont l'élément est une carte prend le survol choisi par cette carte, si la vue n'en
-  choisit pas.
-- Dans une carte d'élément, les liens, les boutons et les replis gardent leur propre clic.
-- « Afficher à côté » s'appelle « Panneau à côté, toujours ouvert » ; la ligne ouverte est marquée
-  dans la liste, et un formulaire dans ce panneau étroit met sa colonne de côté au-dessus.
+- La largeur affichée d'un champ seul sur sa ligne dit « Plein » (c'est ce que montre la fiche), et
+  plus « ½ ».
+- La couleur d'accent peut revenir à **par défaut**.
+- L'aperçu en grand passe d'une ligne à l'autre parmi une quarantaine de lignes de l'onglet, plus
+  seulement les trois premières.
+- « Forme de base » : une vignette dont l'aperçu a des onglets ou des boutons ne provoque plus
+  d'erreur.

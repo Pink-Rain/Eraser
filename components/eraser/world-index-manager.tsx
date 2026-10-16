@@ -1444,7 +1444,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       name: nameOf(rowKey).replace(/<[^>]+>/g, ""),
     })
     const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
-    return <IndexRowForm key={`${rowKey}:${formId}`} rowKey={rowKey} fields={fields} layout={layout} rowFor={rowFor} onSave={saveSheet} rowRef={{ index: indexKey, id, tab }} inventoryEndpoint={indexKey === "npcs" ? (row) => `/api/npcs/${encodeURIComponent(row.id)}/inventory` : undefined} openForm={(next) => openRowForm(rowKey, next ?? DEFAULT_FORM_ID)} locked={locked} />
+    return <IndexRowForm key={`${rowKey}:${formId}`} rowKey={rowKey} fields={fields} layout={layout} rowFor={rowFor} columnValue={(column) => rawOf(rowKey, column)} onSave={saveSheet} rowRef={{ index: indexKey, id, tab }} inventoryEndpoint={indexKey === "npcs" ? (row) => `/api/npcs/${encodeURIComponent(row.id)}/inventory` : undefined} openForm={(next) => openRowForm(rowKey, next ?? DEFAULT_FORM_ID)} locked={locked} />
   }
   /** Le tableau derrière la fiche montre tout de suite ce qui vient d'y être enregistré. */
   function bumpRow(rowKey: string) {
@@ -1584,6 +1584,8 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         onSaveViewPreset={settings.saveViewPreset}
         onDeleteViewPreset={settings.deleteViewPreset}
         previewRows={Object.fromEntries(tables.map((owner) => [owner.tabName, owner.rows.slice(0, 40).map((row) => Object.fromEntries(owner.headers.map((header, index) => [header, row.values[index] ?? ""])))]))}
+        // « Onglet ouvert d'abord » propose les valeurs de toutes les lignes, pas seulement celles des aperçus.
+        valuesOf={(tabName, header) => { const table = tables.find((item) => item.tabName === tabName); const at = table ? table.headers.findIndex((item) => foldName(item) === foldName(header)) : -1; return table && at >= 0 ? [...new Set(table.rows.map((row) => row.values[at] ?? "").filter(Boolean))].slice(0, 2000) : [] }}
         optionsOf={(tabName, header) => (specOf(tabName, header).options ?? []).map((option) => ({ value: option.value, color: option.color }))}
         stats={indexStats}
         statsPanel={<IndexStats stats={indexStats} groups={settings.statGroups} rows={statRowKeys} columns={statHeaders} tabs={statTabs} valueOf={statValueOf} tabOf={statTabOf} nameOf={layoutNameOf} optionsOf={statOptionsOf} separatorOf={statSeparatorOf} onOpen={(rowKey, list) => { setSheetError(""); setStatSheetRows(list ?? null); setDetails(rowKey) }} canEdit={!busy} onSave={saveStats} />}
@@ -1721,6 +1723,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         subtitle={`${definition.title} · ${detailsFound.table.tabName}`}
         fields={sheetFields}
         layout={sheetLayout}
+        columnValue={(column) => rawOf(details, column)}
         rowFor={sheetRow}
         renderField={(field) => {
           const extra = field.key.startsWith("__embed:") ? pageColumns.find((column) => `__embed:${column.key}` === field.key) : undefined
