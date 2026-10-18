@@ -201,7 +201,8 @@ export function viewBlockData(source: IndexSource, input: ViewBlockInput, settin
   if (input.sort?.column) rows = sortLayoutRows(rows, { sortBy: input.sort.column, sortDesc: input.sort.desc }, cellOf)
   const table = { ...found, rows }
   const headers = shownColumns(source, table, options)
-  let all = rowsOf(source, table, headers, options, input.click)
+  // Une vue réglée (liste, kanban…) a son propre « Au clic » : celui du bloc ne vaut que pour le tableau et les cartes.
+  let all = rowsOf(source, table, headers, options, isPresentationKind(input.kind) ? undefined : input.click)
   // Page de ligne : seulement les lignes dont la colonne choisie cite la ligne de la page.
   if (input.match) {
     const at = headers.findIndex((header) => foldName(header) === foldName(input.match!.column))
@@ -225,7 +226,8 @@ export function viewBlockData(source: IndexSource, input: ViewBlockInput, settin
   if (chosen) {
     const layout = fitLayoutToColumns(chosen, headers)
     // Les formulaires que la vue lit (élément, détail) : celui de l'onglet, sinon celui d'Eraser, sinon l'automatique sur les colonnes visibles.
-    const wanted = [...(layout.itemForm ? [layout.itemForm] : []), ...(layout.detail?.kind === "form" ? [layout.detail.form ?? DEFAULT_FORM_ID] : [])]
+    // Le formulaire principal aussi : sur une page, la fiche d'une ligne s'ouvre ici, en lecture.
+    const wanted = [...new Set([DEFAULT_FORM_ID, ...(layout.itemForm ? [layout.itemForm] : []), ...(layout.detail?.kind === "form" ? [layout.detail.form ?? DEFAULT_FORM_ID] : [])])]
     const forms = Object.fromEntries(wanted.map((id) => [id, tabFormOrBuiltin(settings.layouts, source.key, table.tabName, id) ?? automaticLayoutFor("form", headers.map((header) => ({ header, spec: specs[header] })))]))
     // Le tableau de bord : ses tuiles « vue » lisent les autres vues de l'onglet, ses tuiles « stat » les statistiques de l'index, ses tuiles « carte » les cartes.
     const tiles = layout.kind === "dashboard" ? layout.tiles ?? [] : []

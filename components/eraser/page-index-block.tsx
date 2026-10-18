@@ -8,7 +8,7 @@ import { ChevronRight, LoaderCircle, RotateCcw, Search, TriangleAlert, X } from 
 import { CardActionsContext, IndexCard, IndexCardGrid, roleRowOf, type CardActions, type CardRowSource } from "@/components/eraser/index-card"
 import { useRolesOf } from "@/components/eraser/view-roles"
 import { IndexFormView } from "@/components/eraser/index-form-view"
-import { primeWorldIndexData } from "@/components/eraser/index-cells"
+import { IndexEntryForm, primeWorldIndexData } from "@/components/eraser/index-cells"
 import { IndexStats } from "@/components/eraser/index-stats"
 import { IndexPresentation } from "@/components/eraser/index-presentation"
 import type { BacklinksBlock, SearchBlock, StatBlock, ViewBlock } from "@/lib/custom-pages"
@@ -18,6 +18,7 @@ import { ALL_PINNED_STATS, type StatBlockData, type ViewBlockData } from "@/lib/
 import { pickCard } from "@/lib/index-cards"
 import { foldName } from "@/lib/index-columns"
 import { DEFAULT_ITEM_CARD, isPresentationKind } from "@/lib/index-presentations"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 /**
  * Les blocs d'une page qui montrent un index : une vue (tableau, cartes, liste, kanban,
@@ -116,24 +117,24 @@ function Skeleton() {
 const strip = (value: string) => value.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim()
 
 /** Un tableau en lecture seule : les colonnes de l'onglet, le nom en premier. */
-function ReadTable({ data, open }: { data: ViewData; open: (href?: string) => void }) {
+function ReadTable({ data, open, onRow, linkOf }: { data: ViewData; open: (href?: string) => void; /** Sur une page : la ligne s'ouvre ici (sa page, sinon sa fiche en lecture). */ onRow?: (rowKey: string) => void; linkOf: (rowKey: string) => string | undefined }) {
   return <div className="overflow-x-auto rounded-2xl border bg-card">
     <table className="w-full border-collapse text-[13px]">
       <thead className="sticky top-0 z-[1]">
         <tr>{data.headers.map((header) => <th key={header} scope="col" className="whitespace-nowrap border-b bg-muted px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{header}</th>)}</tr>
       </thead>
       <tbody>
-        {data.rows.map((row) => <tr key={row.key} onClick={row.href ? () => open(row.href) : undefined} className={`border-b border-border/60 last:border-b-0 ${row.href ? "cursor-pointer hover:bg-background/70" : ""}`}>
+        {data.rows.map((row) => { const link = linkOf(row.key); const click = onRow ? () => onRow(row.key) : row.href ? () => open(row.href) : undefined; return <tr key={row.key} onClick={click} className={`border-b border-border/60 last:border-b-0 ${click ? "cursor-pointer hover:bg-background/70" : ""}`}>
           {row.cells.map((cell, index) => <td key={data.headers[index]} className={`max-w-[22rem] px-3 py-1.5 align-top tabular-nums ${index === 0 ? "whitespace-nowrap font-semibold" : ""}`}>
-            {index === 0 && row.href ? <Link href={row.href} prefetch={false} onClick={(event) => event.stopPropagation()} className="hover:text-primary hover:underline">{strip(cell) || row.name}</Link> : <span className="line-clamp-3">{strip(cell)}</span>}
+            {index === 0 && link ? <Link href={link} prefetch={false} onClick={(event) => event.stopPropagation()} className="hover:text-primary hover:underline">{strip(cell) || row.name}</Link> : <span className="line-clamp-3">{strip(cell)}</span>}
           </td>)}
-        </tr>)}
+        </tr> })}
       </tbody>
     </table>
   </div>
 }
 
-function ViewContent({ data, block, searching = false }: { data: ViewData; block: ViewBlock; searching?: boolean }) {
+function ViewContent({ data, block, searching = false, onChanged }: { data: ViewData; block: ViewBlock; searching?: boolean; /** Une ligne ajoutée ici : le bloc relit l'index. */ onChanged?: () => void }) {
   const router = useRouter()
   const byKey = useMemo(() => new Map(data.rows.map((row) => [row.key, row])), [data.rows])
   // Le survol au passage de la souris : seulement les lignes dont le serveur donne l'identifiant (jamais à un joueur).
@@ -145,6 +146,34 @@ function ViewContent({ data, block, searching = false }: { data: ViewData; block
   const open = useCallback((href?: string) => { if (href) router.push(href) }, [router])
   const openRow = useCallback((rowKey: string) => open(byKey.get(rowKey)?.href), [byKey, open])
   const hrefOf = useCallback((rowKey: string) => byKey.get(rowKey)?.href, [byKey])
+  // « Au clic » laissé à la vue (le bloc n'impose ni adresse ni « rien ») : la fiche s'ouvre ici, en
+  // lecture, pour tous les lecteurs ; on ne quitte la page que pour la page de la ligne, si elle en a une
+  // (une adresse « ?ligne= » mène à l'index : elle ne compte pas).
+  const inPlace = !block.click || isPresentationKind(data.layout?.kind)
+  const rowPageOf = useCallback((rowKey: string) => { const href = byKey.get(rowKey)?.href; return href && !href.includes("?ligne=") ? href : undefined }, [byKey])
+  const openRowPage = useCallback((rowKey: string) => { const href = rowPageOf(rowKey); if (!href) return false; router.push(href); return true }, [rowPageOf, router])
+  const [sheet, setSheet] = useState<{ row: string; form: string } | null>(null)
+  // « Ajouter » de la barre d'outils : une ligne neuve dans l'onglet, ici, dans une fenêtre (le serveur vérifie qui peut écrire).
+  const [adding, setAdding] = useState(false)
+  const [addState, setAddState] = useState<{ pending: boolean; error: string }>({ pending: false, error: "" })
+  const addFields = useMemo(() => data.headers.filter((header) => !/^id$/i.test(header.trim())).map((header) => ({ key: header, label: header, spec: specOf(header) ?? { kind: "rich" as const } })), [data.headers, specOf])
+  const addRow = useCallback(async (values: Record<string, string>) => {
+    setAddState({ pending: true, error: "" })
+    try {
+      const headers = addFields.map((field) => field.key)
+      const response = await fetch("/api/resources/world-indexes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: data.index, action: "add", tabName: data.tab, headers, values: headers.map((header) => values[header] ?? "") }) })
+      const payload = (await response.json().catch(() => ({}))) as { error?: string }
+      if (!response.ok) throw new Error(payload.error || "La ligne n’a pas pu être ajoutée.")
+      setAdding(false)
+      setAddState({ pending: false, error: "" })
+      onChanged?.()
+    } catch (reason) {
+      setAddState({ pending: false, error: reason instanceof Error ? reason.message : "La ligne n’a pas pu être ajoutée." })
+    }
+  }, [addFields, data.index, data.tab, onChanged])
+  // Ouvrir une ligne hors des vues réglées (cartes, tableau) : sa page si elle en a une, sinon sa fiche ici.
+  const openHere = useCallback((rowKey: string) => { if (!inPlace) return openRow(rowKey); if (!openRowPage(rowKey)) setSheet({ row: rowKey, form: "principal" }) }, [inPlace, openRow, openRowPage])
+  const linkOf = useCallback((rowKey: string) => inPlace ? rowPageOf(rowKey) : hrefOf(rowKey), [hrefOf, inPlace, rowPageOf])
   // Les boutons d'une carte dans une page : ceux qui mènent ailleurs (une page web, une page
   // d'Eraser) partent d'ici ; ceux qui touchent la ligne l'ouvrent dans son index, où ils agissent.
   const rolesOf = useRolesOf()
@@ -157,16 +186,16 @@ function ViewContent({ data, block, searching = false }: { data: ViewData; block
       openRow(rowKey)
     },
     rolesOf: (rowKey) => rolesOf(roleRowOf(byKey.get(rowKey)?.name ?? "", data.headers, (header) => valueOf(rowKey, header))),
-    openForm: (rowKey) => openRow(rowKey),
-    openPage: (rowKey) => openRow(rowKey),
-  }), [byKey, data.headers, openRow, rolesOf, router, valueOf])
+    openForm: (rowKey, form) => inPlace ? setSheet({ row: rowKey, form: form || "principal" }) : openRow(rowKey),
+    openPage: (rowKey) => inPlace ? void (openRowPage(rowKey) || setSheet({ row: rowKey, form: "principal" })) : openRow(rowKey),
+  }), [byKey, data.headers, inPlace, openRow, openRowPage, rolesOf, router, valueOf])
   // Le calendrier lit l'Index des calendriers : la page le lui donne (un joueur ne peut pas le lire).
   useEffect(() => { if (data.calendars) primeWorldIndexData("calendars", { tables: data.calendars }) }, [data.calendars])
   const card = data.cards ? pickCard(data.cards, null) : null
   const renderCard = useCallback((rowKey: string, cardId: string) => {
     const chosen = data.cards ? pickCard(data.cards, cardId === DEFAULT_ITEM_CARD ? null : cardId) : null
-    return chosen ? <IndexCard card={chosen} row={rowSource(rowKey)} onOpen={hrefOf(rowKey) ? () => openRow(rowKey) : undefined} href={hrefOf(rowKey)} /> : null
-  }, [data.cards, hrefOf, openRow, rowSource])
+    return chosen ? <IndexCard card={chosen} row={rowSource(rowKey)} onOpen={inPlace || hrefOf(rowKey) ? () => openHere(rowKey) : undefined} href={linkOf(rowKey)} /> : null
+  }, [data.cards, hrefOf, inPlace, linkOf, openHere, rowSource])
   // Un formulaire de l'onglet, en lecture, sur la ligne (élément ou détail « formulaire »).
   const renderForm = useCallback((rowKey: string, formId: string) => {
     const form = data.forms?.[formId] ?? data.forms?.[Object.keys(data.forms ?? {})[0] ?? ""]
@@ -178,10 +207,24 @@ function ViewContent({ data, block, searching = false }: { data: ViewData; block
     return stat ? <IndexStats stats={[{ ...stat, pinned: true }]} groups={data.statGroups} pinnedOnly single rows={data.rows.map((row) => row.key)} columns={data.headers} tabs={[data.tab]} valueOf={valueOf} tabOf={() => data.tab} nameOf={(rowKey) => byKey.get(rowKey)?.name ?? ""} optionsOf={(header) => (specOf(header)?.options ?? []).map((option) => ({ value: option.value, color: option.color }))} onOpen={data.rows.some((row) => row.href) ? (rowKey) => openRow(rowKey) : undefined} canEdit={false} onSave={async () => undefined} /> : null
   }, [byKey, data.headers, data.rows, data.statGroups, data.stats, data.tab, openRow, specOf, valueOf])
   const empty = searching ? "Aucune ligne ne correspond à la recherche." : "Aucune ligne dans cette vue pour le moment."
-  return <CardActionsContext.Provider value={cardActions}>{viewContent()}</CardActionsContext.Provider>
+  // La fiche ouverte ici par un bouton de carte (« Ouvrir un formulaire », « Ouvrir la page » sans page) : en lecture.
+  const sheetDialog = sheet && byKey.has(sheet.row) ? <Dialog open onOpenChange={(value) => { if (!value) setSheet(null) }}>
+    <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-3xl">
+      <DialogHeader><DialogTitle className="font-display text-2xl">{byKey.get(sheet.row)?.name || "Sans nom"}</DialogTitle><DialogDescription>{data.title} › {data.tab}</DialogDescription></DialogHeader>
+      {renderForm(sheet.row, sheet.form) ?? <dl className="grid gap-3 sm:grid-cols-2">{data.headers.map((header) => { const value = strip(valueOf(sheet.row, header)); return value ? <div key={header} className="min-w-0"><dt className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{header}</dt><dd className="mt-0.5 break-words text-sm">{value}</dd></div> : null })}</dl>}
+    </DialogContent>
+  </Dialog> : null
+  const addDialog = adding ? <Dialog open onOpenChange={(value) => { if (!value && !addState.pending) setAdding(false) }}>
+    <DialogContent className="max-h-[92svh] overflow-y-auto p-0 sm:max-w-3xl">
+      <DialogHeader className="sr-only"><DialogTitle>Ajouter une ligne</DialogTitle><DialogDescription>{data.title} › {data.tab}</DialogDescription></DialogHeader>
+      <IndexEntryForm title={`Ajouter · ${data.tab}`} fields={addFields} pending={addState.pending} layout={data.forms?.principal ?? Object.values(data.forms ?? {})[0] ?? null} onCancel={() => setAdding(false)} onSave={(values) => void addRow(values)} />
+      {addState.error && <p className="mx-4 mb-4 rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive">{addState.error}</p>}
+    </DialogContent>
+  </Dialog> : null
+  return <CardActionsContext.Provider value={cardActions}>{viewContent()}{sheetDialog}{addDialog}</CardActionsContext.Provider>
   function viewContent() {
   if (data.view === "cards") return card
-    ? <IndexCardGrid card={card} rows={data.rows} rowSource={rowSource} onOpen={openRow} hrefOf={hrefOf} rowRef={rowRefOf} empty={empty} />
+    ? <IndexCardGrid card={card} rows={data.rows} rowSource={rowSource} onOpen={openHere} hrefOf={linkOf} rowRef={rowRefOf} empty={empty} />
     : <Placeholder>Cet onglet n’a pas encore de cartes : elles se règlent dans l’index (Modifier › Cartes).</Placeholder>
   if (data.layout && isPresentationKind(data.layout.kind)) return <IndexPresentation
     layout={data.layout}
@@ -192,7 +235,9 @@ function ViewContent({ data, block, searching = false }: { data: ViewData; block
     optionsOf={(header) => (specOf(header)?.options ?? []).map((option) => ({ value: option.value, color: option.color }))}
     specOf={specOf}
     onOpen={openRow}
-    onOpenPage={openRow}
+    onOpenPage={inPlace ? openRowPage : openRow}
+    inPlace={inPlace}
+    onAdd={() => { setAddState({ pending: false, error: "" }); setAdding(true) }}
     renderCard={data.cards ? renderCard : undefined}
     cardOf={data.cards ? (_rowKey, cardId) => pickCard(data.cards!, cardId === DEFAULT_ITEM_CARD ? null : cardId) : undefined}
     renderForm={data.forms ? renderForm : undefined}
@@ -203,7 +248,7 @@ function ViewContent({ data, block, searching = false }: { data: ViewData; block
   />
   if (!data.rows.length) return <Placeholder>{empty}</Placeholder>
   void block
-  return <ReadTable data={data} open={open} />
+  return <ReadTable data={data} open={open} onRow={inPlace ? openHere : undefined} linkOf={linkOf} />
   }
 }
 
@@ -237,7 +282,7 @@ export function PageViewBlock({ block, source, path }: { block: ViewBlock; sourc
     {path && <Link href={path} prefetch={false} className="inline-flex items-center gap-0.5 font-medium text-primary hover:underline">Ouvrir l’index<ChevronRight className="size-3.5" /></Link>}
   </p> : null
   return <Frame heading={block.heading} height={height} footer={footer}>
-    {state.loading && !data ? <Skeleton /> : state.error ? <Placeholder tone="error" onRetry={() => setVersion((value) => value + 1)}>{state.error}</Placeholder> : data ? <ViewContent data={data} block={block} searching={Boolean(query)} /> : null}
+    {state.loading && !data ? <Skeleton /> : state.error ? <Placeholder tone="error" onRetry={() => setVersion((value) => value + 1)}>{state.error}</Placeholder> : data ? <ViewContent data={data} block={block} searching={Boolean(query)} onChanged={() => setVersion((value) => value + 1)} /> : null}
   </Frame>
 }
 

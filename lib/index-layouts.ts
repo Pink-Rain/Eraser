@@ -67,6 +67,22 @@ export const BLOCK_KEY_PREFIX = "bloc:"
 
 export const isBlockKey = (column: string) => column.startsWith(BLOCK_KEY_PREFIX)
 
+/**
+ * Le préfixe de la clé d'une copie d'un champ (« copie:… ») : une colonne placée une deuxième fois
+ * dans un formulaire. Sa colonne est dans `of` ; elle montre (et modifie) la même case.
+ */
+export const COPY_KEY_PREFIX = "copie:"
+
+export const isCopyKey = (column: string) => column.startsWith(COPY_KEY_PREFIX)
+
+/** La clé d'une nouvelle copie de champ. */
+export function copyKey() {
+  return `${COPY_KEY_PREFIX}${Math.random().toString(36).slice(2, 10)}`
+}
+
+/** La colonne qu'un champ placé montre : la sienne, ou celle dont il est une copie. */
+export const fieldColumnOf = (field: Pick<LayoutField, "column" | "of">) => field.of ?? field.column
+
 export type LayoutField = {
   column: string
   span?: LayoutSpan
@@ -88,6 +104,8 @@ export type LayoutField = {
   icon?: string
   /** La couleur du libellé (et de l'icône). */
   color?: string
+  /** Une copie : la colonne montrée une deuxième fois (`column` est alors sa clé « copie:… »). */
+  of?: string
 }
 
 export type LayoutRow = { id: string; fields: LayoutField[] }
@@ -357,6 +375,11 @@ function cleanField(input: unknown): LayoutField | null {
     const block = cleanLayoutBlock(raw.block)
     if (!block) return null
     field.block = block
+  } else if (isCopyKey(column)) {
+    // Une copie sans colonne d'origine ne montre rien : elle tombe.
+    const of = cleanText(raw.of, 120)
+    if (!of || isCopyKey(of) || isBlockKey(of)) return null
+    field.of = of
   }
   return field
 }
@@ -519,7 +542,7 @@ export function renameLayoutColumns(layout: IndexLayout, renames: Map<string, st
       default: return item
     }
   }
-  const field = (item: LayoutField) => item.block ? { ...item, block: block(item.block) } : { ...item, column: rename(item.column) }
+  const field = (item: LayoutField) => item.block ? { ...item, block: block(item.block) } : item.of ? { ...item, of: rename(item.of) } : { ...item, column: rename(item.column) }
   return {
     ...layout,
     aside: layout.aside.map(field),
@@ -570,10 +593,19 @@ export type ArrangedLayout<T> = {
 export function arrangeLayout<T>(layout: IndexLayout, items: T[], keyOf: (item: T) => string, blockItem?: (field: LayoutField & { block: LayoutBlock }) => T | null): ArrangedLayout<T> {
   const byColumn = new Map(items.map((item) => [foldName(keyOf(item)), item]))
   const used = new Set<string>()
+  // Les colonnes montrées par une copie : elles ne reviennent pas « à la suite », mais leur place d'origine reste libre.
+  const copied = new Set<string>()
   const take = (field: LayoutField): ArrangedField<T>[] => {
     if (field.block) {
       const item = blockItem?.({ ...field, block: field.block })
       return item ? [{ ...field, item }] : []
+    }
+    if (field.of) {
+      const key = foldName(field.of)
+      const item = byColumn.get(key)
+      if (!item) return []
+      copied.add(key)
+      return [{ ...field, item }]
     }
     const key = foldName(field.column)
     const item = byColumn.get(key)
@@ -594,7 +626,7 @@ export function arrangeLayout<T>(layout: IndexLayout, items: T[], keyOf: (item: 
     columns: section.columns,
     rows: section.rows.map((row) => ({ id: row.id, fields: row.fields.flatMap(take) })).filter((row) => row.fields.length),
   })).filter((section) => section.rows.length || section.title)
-  const rest = layout.rest === "hide" ? [] : items.filter((item) => !used.has(foldName(keyOf(item))))
+  const rest = layout.rest === "hide" ? [] : items.filter((item) => !used.has(foldName(keyOf(item))) && !copied.has(foldName(keyOf(item))))
   return { aside, asideWidth: layout.asideWidth ?? "md", asideSide: layout.asideSide ?? "left", ...(layout.accent ? { accent: layout.accent } : {}), ...(layout.look ? { look: layout.look } : {}), sections, ...(layout.tabs ? { tabs: true } : {}), ...(layout.tabs && layout.tabsBy ? { tabsBy: layout.tabsBy } : {}), rest }
 }
 
@@ -689,7 +721,7 @@ export function layoutPlaces(layout: IndexLayout | null | undefined, column: str
   if (!layout) return false
   const key = foldName(column)
   const fields = [...layout.aside, ...layout.sections.flatMap((section) => section.rows.flatMap((row) => row.fields))]
-  return fields.some((field) => field.block ? blockColumns(field.block).some((column) => foldName(column) === key) : foldName(field.column) === key) || [layout.image, ...subtitleColumnsOf(layout), layout.icon, layout.medallion?.column, layout.banner?.column].some((value) => value !== undefined && foldName(value) === key)
+  return fields.some((field) => field.block ? blockColumns(field.block).some((column) => foldName(column) === key) : foldName(fieldColumnOf(field)) === key) || [layout.image, ...subtitleColumnsOf(layout), layout.icon, layout.medallion?.column, layout.banner?.column].some((value) => value !== undefined && foldName(value) === key)
 }
 
 /** Tous les formulaires d'un onglet (étoilé compris) placent-ils cette colonne ? L'un d'eux suffit. */

@@ -229,6 +229,8 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   const [origin] = useState(() => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`)
   const relatedRef = useRef<Record<string, LoadedWorldIndex | null>>({})
   const [creating, setCreating] = useState(false)
+  // « Ajouter » de la barre d'outils d'une vue : le formulaire s'ouvre dans une fenêtre (la vue peut être loin sous le haut de la page).
+  const [creatingInDialog, setCreatingInDialog] = useState(false)
   const [creatingTab, setCreatingTab] = useState(definition.tabs[0]?.name ?? "")
   const [editor, setEditor] = useState<IndexEditorModel | null>(null)
   const [editorError, setEditorError] = useState("")
@@ -1373,6 +1375,28 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   }
 
   // La fiche d'une ligne : tous ses champs du formulaire, rangés par sa mise en page.
+  /** Le formulaire d'ajout d'une ligne : en haut de la page (bouton « Ajouter »), ou dans une fenêtre (barre d'outils d'une vue). */
+  /* eslint-disable react-hooks/refs -- « Enregistrer » ne lit la ligne qu'au clic, comme le formulaire posé dans la page */
+  function entryForm() {
+    if (!formTable) return null
+    return <IndexEntryForm
+      key={formTable.tabName}
+      title={`Ajouter ${formDefinition.itemLabel}`}
+      fields={formFields}
+      layout={tabLayoutOrBuiltin(settings.layouts, indexKey, formTable.tabName, "form")}
+      pending={pending === "add"}
+      leading={spanning ? <label className="grid gap-1 text-xs font-semibold">
+        Onglet
+        <NativeSelect value={formTable.tabName} onChange={(event) => setCreatingTab(event.target.value)} className="w-full">
+          {tables.map((candidate) => <NativeSelectOption key={candidate.tabName} value={candidate.tabName}>{candidate.tabName}</NativeSelectOption>)}
+        </NativeSelect>
+      </label> : undefined}
+      onCancel={() => setCreating(false)}
+      // Ajouter depuis un onglet de rangement : la ligne reçoit sa valeur (elle y apparaît aussitôt).
+      onSave={(values) => void addRow(formTable.tabName, formTable.headers.map((header) => values[header] || (activeSort && activeSort.columns.some((column) => foldName(column) === foldName(header)) ? activeSort.value : "")), formTable.headers)}
+      />
+  }
+  /* eslint-enable react-hooks/refs */
   // Une colonne hors fiche (ancien « Tableau seulement ») y vient quand sa mise en page la place.
   // Un bouton « Ouvrir un formulaire » de la fiche y montre ce formulaire (pour cette ligne seulement).
   const sheetFormId = sheetForm && sheetForm.row === details ? sheetForm.form : null
@@ -1557,7 +1581,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
           <ToolbarIconButton label="Nouvelle vue : des lignes choisies, dans un ordre, sous une forme (tableau, cartes, liste, kanban…) ou un onglet stat" onClick={() => setViewDialog({ mode: "new" })} disabled={busy || !tables.length}><Filter /></ToolbarIconButton>
           <Button type="button" variant="outline" onClick={() => void openEditor("columns")} disabled={busy} title="Colonnes, types, réglages, onglets, mises en page et cartes de cet index">{pending === "editor" ? <LoaderCircle className="animate-spin" /> : <Settings2 />}Modifier</Button>
           <Button type="button" variant="ghost" size="icon" onClick={() => setGuideOpen(true)} title="Guide des colonnes : types, formules, boutons, aléatoire" aria-label="Guide des colonnes"><CircleHelp /></Button>
-          <Button type="button" onClick={startAdding} disabled={!table || busy}><Plus />{embed?.addLabel ?? `Ajouter ${spanning ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}`}</Button>
+          <Button type="button" onClick={() => { setCreatingInDialog(false); startAdding() }} disabled={!table || busy}><Plus />{embed?.addLabel ?? `Ajouter ${spanning ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}`}</Button>
         </div>
       </div>
 
@@ -1596,22 +1620,15 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
 
 
-      {creating && formTable && <IndexEntryForm
-        key={formTable.tabName}
-        title={`Ajouter ${formDefinition.itemLabel}`}
-        fields={formFields}
-        layout={tabLayoutOrBuiltin(settings.layouts, indexKey, formTable.tabName, "form")}
-        pending={pending === "add"}
-        leading={spanning ? <label className="grid gap-1 text-xs font-semibold">
-          Onglet
-          <NativeSelect value={formTable.tabName} onChange={(event) => setCreatingTab(event.target.value)} className="w-full">
-            {tables.map((candidate) => <NativeSelectOption key={candidate.tabName} value={candidate.tabName}>{candidate.tabName}</NativeSelectOption>)}
-          </NativeSelect>
-        </label> : undefined}
-        onCancel={() => setCreating(false)}
-        // Ajouter depuis un onglet de rangement : la ligne reçoit sa valeur (elle y apparaît aussitôt).
-        onSave={(values) => void addRow(formTable.tabName, formTable.headers.map((header) => values[header] || (activeSort && activeSort.columns.some((column) => foldName(column) === foldName(header)) ? activeSort.value : "")), formTable.headers)}
-      />}
+      {creating && formTable && (creatingInDialog
+        ? <Dialog open onOpenChange={(open) => { if (!open && pending !== "add") setCreating(false) }}>
+          <DialogContent className="max-h-[92svh] overflow-y-auto p-0 sm:max-w-4xl">
+            <DialogHeader className="sr-only"><DialogTitle>{`Ajouter ${formDefinition.itemLabel}`}</DialogTitle><DialogDescription>{definition.title}</DialogDescription></DialogHeader>
+            {entryForm()}
+            {error && <p className="mx-4 mb-4 rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p>}
+          </DialogContent>
+        </Dialog>
+        : entryForm())}
 
       {table && statsView ? <IndexStats
         key={statsView.id}
@@ -1643,7 +1660,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         onOpenPage={openRowPage}
         onOpenForm={openRowForm}
         renderEditForm={busy ? undefined : renderEditForm}
-        onAdd={busy ? undefined : startAdding}
+        onAdd={busy ? undefined : () => { setCreatingInDialog(true); startAdding() }}
         onCommit={busy ? undefined : (rowKey, header, value) => void commitCell(rowKey, header, value)}
         renderCard={renderViewCard}
         cardOf={(rowKey, cardId) => pickCard(tabCardsOf(settings.cards, indexKey, parseRowKey(rowKey).tabName), cardId === DEFAULT_ITEM_CARD ? activeView?.cardId ?? null : cardId)}

@@ -62,3 +62,35 @@ test("la lecture et l'ajout : la lecture suit la ligne, une ligne neuve s'ouvre 
   const entry = renderToStaticMarkup(React.createElement(IndexEntryForm, { title: "Ajouter", fields: fields.map(({ key, label, spec }) => ({ key, label, spec })), pending: false, layout, onCancel: () => undefined, onSave: () => undefined }));
   assert.equal(activeTab(entry), "Général");
 });
+
+test("un même champ plusieurs fois : la copie se relit, se range, suit un renommage", () => {
+  const parsed = layouts.parseIndexLayout({ aside: [], sections: [{ id: "s", rows: [{ id: "r", fields: [{ column: "Nom" }, { column: "copie:ab12", of: "Nom", label: "Rappel" }, { column: "copie:zz", of: "" }, { column: "copie:yy", of: "copie:ab12" }] }] }] });
+  assert.deepEqual(parsed.sections[0].rows[0].fields.map((field) => [field.column, field.of]), [["Nom", undefined], ["copie:ab12", "Nom"]]);
+  const arranged = layouts.arrangeLayout({ ...parsed, rest: "show" }, ["Nom", "Rôle"], (item) => item);
+  assert.deepEqual(arranged.sections[0].rows[0].fields.map((field) => field.item), ["Nom", "Nom"]);
+  assert.deepEqual(arranged.rest, ["Rôle"]);
+  // La copie avant l'original : l'original garde sa place.
+  const before = layouts.arrangeLayout({ aside: [], sections: [{ id: "s", rows: [{ id: "r", fields: [{ column: "copie:a", of: "Nom" }, { column: "Nom" }] }] }] }, ["Nom"], (item) => item);
+  assert.equal(before.sections[0].rows[0].fields.length, 2);
+  assert.equal(layouts.renameLayoutColumns(parsed, new Map([["nom", "Nom complet"]])).sections[0].rows[0].fields[1].of, "Nom complet");
+  assert.equal(layouts.layoutPlaces({ aside: [], sections: [{ id: "s", rows: [{ id: "r", fields: [{ column: "copie:a", of: "Rôle" }] }] }] }, "rôle"), true);
+});
+
+test("la Liste : le maître-détail montre la ligne cliquée, « Ouvrir la fiche » seulement sur demande", async () => {
+  const { IndexPresentation } = await vite.ssrLoadModule("/components/eraser/index-presentation.tsx");
+  const views = await vite.ssrLoadModule("/lib/index-presentations.ts");
+  const props = { rows: ["a", "b"], headers: ["Nom", "Type"], nameOf: (key) => key === "a" ? "Épuisante" : "Lourde", valueOf: (key, header) => header === "Type" ? "Attribut" : key, onOpen: () => undefined, empty: "vide" };
+  // Un « Au clic » resté d'une autre forme ne change pas le maître-détail : la première ligne est dans le détail.
+  const master = renderToStaticMarkup(React.createElement(IndexPresentation, { ...props, layout: { kind: "master-detail", click: "sheet" } }));
+  assert.match(master, /<h3[^>]*>.*Épuisante/);
+  assert.doesNotMatch(master, /Ouvrir la fiche/);
+  const asked = renderToStaticMarkup(React.createElement(IndexPresentation, { ...props, layout: views.cleanPresentation({ kind: "master-detail", detail: { sheetButton: true } }) }));
+  assert.match(asked, /Ouvrir la fiche/);
+  // Sur une page, jamais.
+  assert.doesNotMatch(renderToStaticMarkup(React.createElement(IndexPresentation, { ...props, inPlace: true, layout: { kind: "master-detail", detail: { sheetButton: true } } })), /Ouvrir la fiche/);
+  // La taille : bornée, en rem.
+  assert.deepEqual(views.cleanPresentationLook({ maxHeight: 3, maxWidth: 999 }), { maxHeight: 8, maxWidth: 160 });
+  const sized = renderToStaticMarkup(React.createElement(IndexPresentation, { ...props, layout: { kind: "list", look: { maxHeight: 20, maxWidth: 40 } } }));
+  assert.match(sized, /max-width:40rem/);
+  assert.match(sized, /max-height:20rem/);
+});

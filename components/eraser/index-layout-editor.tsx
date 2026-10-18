@@ -31,6 +31,8 @@ import {
   layoutBlockKinds,
   layoutId,
   layoutPlaces,
+  copyKey,
+  fieldColumnOf,
   subtitleColumnsOf,
   type LayoutLook,
   layoutSpans,
@@ -275,7 +277,7 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
   }
   const hover = kind === "hover"
   const layout = value
-  const placed = useMemo(() => new Set([...layout.aside, ...layout.sections.flatMap((section) => section.rows.flatMap((row) => row.fields))].map((field) => foldName(field.column))), [layout])
+  const placed = useMemo(() => new Set([...layout.aside, ...layout.sections.flatMap((section) => section.rows.flatMap((row) => row.fields))].map((field) => foldName(fieldColumnOf(field)))), [layout])
   const unplaced = columns.filter((column) => !placed.has(foldName(column.header)))
   const specOf = (header: string) => columns.find((column) => sameColumn(column.header, header))?.spec
   const known = (header: string) => columns.some((column) => sameColumn(column.header, header))
@@ -337,12 +339,11 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
     }
     set(placeField(layout, column, { area: "row", section, row: target }))
   }
-  // Dupliquer un bloc (une colonne n'apparaît qu'une fois dans un formulaire : seuls les blocs se dupliquent).
+  // Dupliquer un bloc, ou (formulaire) un champ : sa copie montre et modifie la même case, ailleurs dans la fiche.
   const duplicateBlock = (field: LayoutField, place: Place, index: number) => {
-    if (!field.block) return
-    const key = blockKey()
     const fields = [...fieldsAt(layout, place)]
-    fields.splice(index + 1, 0, { ...field, column: key, block: structuredClone(field.block) })
+    if (field.block) fields.splice(index + 1, 0, { ...field, column: blockKey(), block: structuredClone(field.block) })
+    else fields.splice(index + 1, 0, { ...field, column: copyKey(), of: fieldColumnOf(field) })
     set(withFields(layout, place, fields))
   }
   const updateField = (column: string, changes: Partial<LayoutField>) => {
@@ -361,14 +362,16 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
   </Popover>
 
   const chip = (field: LayoutField, place: Place, index: number, count: number) => {
-    const spec = specOf(field.column)
+    const shown = fieldColumnOf(field)
+    const spec = specOf(shown)
     // Sa largeur réelle : seul sur sa ligne et sans réglage, un champ la prend toute (comme dans la fiche).
     const span = field.span ?? (count === 1 ? 12 : 6)
     const isBlock = Boolean(field.block)
-    const missing = !isBlock && !known(field.column)
+    const missing = !isBlock && !known(shown)
     const open = editing === field.column
-    const title = isBlock ? layoutBlockKinds.find((entry) => entry.value === field.block!.kind)?.label ?? "Bloc" : field.column
-    const toolButtons = (place.area === "row" ? 6 : 4) + (isBlock ? 1 : 0)
+    const title = isBlock ? layoutBlockKinds.find((entry) => entry.value === field.block!.kind)?.label ?? "Bloc" : shown
+    const canCopy = isBlock || !hover
+    const toolButtons = (place.area === "row" ? 6 : 4) + (canCopy ? 1 : 0)
     return <div
       key={field.column}
       onPointerEnter={(event) => placeToolbar(field.column, event.currentTarget, toolButtons)}
@@ -386,7 +389,8 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
       <GripVertical className="size-3.5 shrink-0 cursor-grab text-muted-foreground/60" aria-hidden="true" />
       {isBlock && <Blocks className="size-3 shrink-0 text-primary" aria-hidden="true" />}
       {field.icon && <IndexIconGlyph icon={field.icon} className="size-3 shrink-0" filled={false} />}
-      <span className={cn("min-w-0 flex-1 truncate font-medium", field.large && "font-display text-sm", missing && "line-through")} style={field.color && !field.color.startsWith("{") ? { color: resolveLayoutColor(field.color, DEFAULT_LAYOUT_ACCENT) } : undefined}>{isBlock ? `${title} · ${layoutBlockSummary(field.block!)}` : field.label || field.column}</span>
+      <span className={cn("min-w-0 flex-1 truncate font-medium", field.large && "font-display text-sm", missing && "line-through")} style={field.color && !field.color.startsWith("{") ? { color: resolveLayoutColor(field.color, DEFAULT_LAYOUT_ACCENT) } : undefined}>{isBlock ? `${title} · ${layoutBlockSummary(field.block!)}` : field.label || shown}</span>
+      {field.of && <span className="shrink-0 rounded-full border border-dashed px-1 text-[9px] font-semibold text-muted-foreground" title={`Une copie de « ${shown} » : elle montre et modifie la même case`}>copie</span>}
       {place.area === "row" && <NativeSelect disabled={disabled} value={String(span)} onChange={(event) => updateField(field.column, { span: Number(event.target.value) as LayoutSpan })} className="h-6 w-[4.5rem] py-0 pl-2 pr-7 text-xs" aria-label={`Largeur de ${title}`} title="Largeur sur la ligne">
         {layoutSpans.map((span) => <NativeSelectOption key={span.value} value={String(span.value)} title={span.label}>{span.short}</NativeSelectOption>)}
       </NativeSelect>}
@@ -400,7 +404,7 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
             {isBlock
               ? <BlockSettings block={field.block!} columns={columns} disabled={disabled} forms={forms} onChange={(block) => updateField(field.column, { block })} />
               : <div className="grid gap-2">
-                <label className={smallLabel}>Libellé au-dessus du champ<Input disabled={disabled} value={field.label ?? ""} maxLength={60} placeholder={field.column} onChange={(event) => updateField(field.column, { label: event.target.value || undefined })} className="h-7 text-xs" /></label>
+                <label className={smallLabel}>Libellé au-dessus du champ<Input disabled={disabled} value={field.label ?? ""} maxLength={60} placeholder={shown} onChange={(event) => updateField(field.column, { label: event.target.value || undefined })} className="h-7 text-xs" /></label>
                 <div className="flex flex-wrap items-center gap-3">
                   <span className={smallLabel}>Icône<IconPicker icon={field.icon} disabled={disabled} allowNone onChange={(value) => updateField(field.column, { icon: value.icon || undefined })} /></span>
                   <label className="flex items-center gap-1.5 text-[11px]"><Checkbox disabled={disabled} checked={Boolean(field.hideLabel)} onCheckedChange={(checked) => updateField(field.column, { hideLabel: checked === true || undefined })} />Sans libellé</label>
@@ -423,7 +427,7 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
           <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || place.row === 0} onClick={() => shiftRow(field.column, -1)} title="À la ligne d’avant" aria-label="Ligne d’avant"><ArrowUp /></Button>
           <Button type="button" variant="ghost" size="icon-xs" disabled={disabled} onClick={() => shiftRow(field.column, 1)} title="À la ligne d’après (une nouvelle ligne au bout)" aria-label="Ligne d’après"><ArrowDown /></Button>
         </>}
-        {isBlock && <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || count >= 12} onClick={() => duplicateBlock(field, place, index)} title="Dupliquer le bloc" aria-label="Dupliquer le bloc"><Copy /></Button>}
+        {canCopy && <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || count >= 12} onClick={() => duplicateBlock(field, place, index)} title={isBlock ? "Dupliquer le bloc" : "Placer ce champ une fois de plus (la copie montre et modifie la même case)"} aria-label={isBlock ? "Dupliquer le bloc" : "Dupliquer le champ"}><Copy /></Button>}
         <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" disabled={disabled} onClick={() => set(withoutColumn(layout, field.column).layout)} title={isBlock ? "Retirer le bloc" : "Retirer de la mise en page"} aria-label={`Retirer ${title}`}><X /></Button>
       </span>
     </div>

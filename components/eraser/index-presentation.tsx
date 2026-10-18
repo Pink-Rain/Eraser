@@ -16,6 +16,7 @@ import { allowedFor, pickForRole, type RoleRow, type ViewRole } from "@/lib/view
 import type { CardTemplate } from "@/lib/index-cards"
 import { parseGlyphValue, type IndexColumnSpec } from "@/lib/index-columns"
 import { cellNumber, cellParts } from "@/lib/index-stats"
+import { cn } from "@/lib/utils"
 import { calendarScaleOf, calendarScales, PRESENTATION_ITEM_CARD, type PresentationClick, dashboardTileKinds, dashboardTileValue, DEFAULT_ITEM_CARD, depthPalette, formatPresentationNumber, groupFormulaValue, groupRowsBy, linkedTiles, rowTree, ruleFor, sortLayoutRows, textWithFormulas, toolbarRows, tileGaugeValue, timelineEntries, treeSize, allPresentationKinds, presentationPalette, type CalendarScale, type DashboardTile, type GroupTabs, type KanbanLane, type RowTreeNode, type TabPresentations, type Presentation, type PresentationLook } from "@/lib/index-presentations"
 
 /**
@@ -47,8 +48,13 @@ export type PresentationProps = {
   cardOf?: (rowKey: string, cardId: string) => CardTemplate | null
   /** Une ligne dessinée avec un formulaire de l'onglet en lecture (`formId` : « principal » ou un formulaire nommé) ; `null` si la page ne sait pas. */
   renderForm?: (rowKey: string, formId: string) => ReactNode
-  /** Ouvrir la page de la ligne (« Au clic : ouvrir la page ») ; absent : la fiche. */
-  onOpenPage?: (rowKey: string) => void
+  /** Ouvrir la page de la ligne (« Au clic : ouvrir la page ») ; absent : la fiche. `false` : la ligne n'a pas de page (sur une page : son détail ici). */
+  onOpenPage?: (rowKey: string) => void | boolean
+  /**
+   * Sur une page : la fiche (et un formulaire) s'ouvre ici, en lecture, dans une fenêtre au centre ;
+   * jamais dans l'index, et sans « Ouvrir la fiche ». Un joueur peut donc toujours lire la ligne.
+   */
+  inPlace?: boolean
   /** Tableau de bord : les autres vues de l'onglet (tuile « vue ») ; une statistique de l'index dessinée (tuile « stat »). */
   presentations?: TabPresentations
   renderStat?: (statId: string) => ReactNode
@@ -692,7 +698,8 @@ function DetailPanel({ row, rows, props, inline = false }: { row: string; rows: 
   const editNow = canEdit && (detail.edit === "inline" || editing === row)
   const kind = detail.kind ?? (layout.kind === "master-detail" && layout.itemCard && !layout.itemForm ? "card" : "fields")
   const color = rowColor(layout, row, props.valueOf, props.optionsOf)
-  const open = props.openSheet ?? props.onOpen
+  // « Ouvrir la fiche » seulement si la vue le demande ; jamais sur une page (il mènerait à l'index).
+  const open = props.inPlace || !detail.sheetButton ? undefined : props.openSheet ?? props.onOpen
   const at = rows.indexOf(row)
   const nav = detail.nav && onChoose && rows.length > 1 ? <div className="flex items-center justify-between gap-2 border-b px-3 py-1.5 text-xs text-muted-foreground">
     <Button type="button" size="sm" variant="ghost" className="h-7" disabled={at <= 0} onClick={() => onChoose(rows[at - 1])}><ChevronLeft />Précédent</Button>
@@ -733,7 +740,7 @@ function MasterDetailLayout(props: PresentationProps) {
   const right = layout.masterSide === "right"
   const columns = right ? masterWidthsRight[look.masterWidth ?? "normal"] : masterWidths[look.masterWidth ?? "normal"]
   return <div className={`grid gap-4 ${columns}`}>
-    <div className={`max-h-[70vh] overflow-y-auto border bg-card/70 p-1.5 ${radii[look.radius ?? "md"]} ${right ? "md:order-2" : ""}`}>
+    <div className={`${look.maxHeight ? "" : "max-h-[70vh]"} overflow-y-auto border bg-card/70 p-1.5 ${radii[look.radius ?? "md"]} ${right ? "md:order-2" : ""}`} style={look.maxHeight ? { maxHeight: `${look.maxHeight}rem` } : undefined}>
       <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} render={(group) => <div className={look.surface === "plain" ? "divide-y" : look.surface === "boxed" ? "grid gap-1" : "space-y-0.5"}>{group.map((row) => {
         const rowTint = rowColor(layout, row, valueOf, optionsOf)
         const current = row === selected
@@ -1445,7 +1452,7 @@ function CodexLayout(props: PresentationProps) {
       const face = renderCard(row, back ? layout.codexVerso || layout.codexRecto : layout.codexRecto)
       return <div key={row} id={anchor(row)} className="scroll-mt-24 grid justify-items-center gap-2">
         <div className={`w-full max-w-xl transition-transform duration-300 ${back ? "[transform:rotateY(180deg)] [&>*]:[transform:rotateY(180deg)]" : ""}`} style={{ perspective: 1200 }}>{face ?? <p className="text-center text-xs text-muted-foreground">Carte introuvable.</p>}</div>
-        <div className="flex items-center gap-2"><Button type="button" size="sm" variant="outline" onClick={() => setFlipped((current) => { const next = new Set(current); if (next.has(row)) next.delete(row); else next.add(row); return next })}>{back ? "Recto" : "Verso"}</Button>{!props.inert && <Button type="button" size="sm" variant="ghost" onClick={() => onOpen(row)}><ExternalLink />Ouvrir la fiche</Button>}</div>
+        <div className="flex items-center gap-2"><Button type="button" size="sm" variant="outline" onClick={() => setFlipped((current) => { const next = new Set(current); if (next.has(row)) next.delete(row); else next.add(row); return next })}>{back ? "Recto" : "Verso"}</Button>{!props.inert && !props.inPlace && <Button type="button" size="sm" variant="ghost" onClick={() => onOpen(row)}><ExternalLink />Ouvrir la fiche</Button>}</div>
       </div>
     }
     // Une carte ou un formulaire comme élément : la fiche s'affiche ainsi (le sommaire la retrouve par son ancre).
@@ -1460,7 +1467,7 @@ function CodexLayout(props: PresentationProps) {
             <h3 className={`flex items-center gap-2 ${look.titleFont === "sans" ? "" : "font-display"} ${style === "sketch" ? "italic" : ""} ${codexTitles[look.titleSize ?? "md"]} font-semibold leading-tight ${look.titleCaps ? "uppercase tracking-[0.12em]" : ""}`} style={look.accent === "title" && color ? { color } : paper ? { color: color ?? "#6b4a1e" } : undefined}>{chapter}<RowIcon layout={layout} row={row} valueOf={valueOf} color={color ?? accent} className="size-6" />{nameOf(row) || "Sans nom"}<RowBadge layout={layout} row={row} valueOf={valueOf} optionsOf={optionsOf} /></h3>
             <RowGauge layout={layout} row={row} valueOf={valueOf} color={color ?? accent} />
           </div>
-          {!props.inert && <Button type="button" size="sm" variant="ghost" onClick={() => onOpen(row)}><ExternalLink />Ouvrir la fiche</Button>}
+          {!props.inert && !props.inPlace && <Button type="button" size="sm" variant="ghost" onClick={() => onOpen(row)}><ExternalLink />Ouvrir la fiche</Button>}
         </header>
         {tiles.length > 0 && <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(6rem,1fr))] gap-2">{tiles.map((tile) => <div key={tile.field} className={`grid gap-0.5 border px-2.5 py-2 text-center ${radii[look.radius ?? "md"]} ${paper ? "border-[#d9c7a3] bg-white/40" : "bg-muted/25"}`}><span className={`text-[10px] font-semibold uppercase tracking-[0.12em] ${muted}`}>{tile.field}</span><span className={`font-semibold tabular-nums ${look.titleFont === "sans" ? "" : "font-display"} text-xl`} style={{ color: color ?? accent }}>{tile.value}</span></div>)}</div>}
         <div className="mt-4 grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(12rem,16rem)]">
@@ -1634,7 +1641,8 @@ function DashboardLayout(props: PresentationProps) {
  * (nombre, totaux, « Charger plus ») ; ce que le lecteur y change ne touche que son écran.
  */
 export function IndexPresentation(input: PresentationProps) {
-  const [chosen, setChosen] = useState<{ row: string; mode: PresentationClick } | null>(null)
+  // `form` : la fiche ouverte ici (sur une page), en lecture : le formulaire montré.
+  const [chosen, setChosen] = useState<{ row: string; mode: PresentationClick; form?: string } | null>(null)
   const [query, setQuery] = useState("")
   const [filters, setFilters] = useState<Record<number, string[]>>({})
   const [sortChoice, setSortChoice] = useState<{ column: string; desc: boolean } | null>(null)
@@ -1655,23 +1663,30 @@ export function IndexPresentation(input: PresentationProps) {
   }, [base, groupChoice, sortChoice, tools])
   const { nameOf, valueOf, headers } = input
   const pageRoles = rolesOf()
+  // Le maître-détail montre la ligne cliquée dans son détail : c'est son clic d'office (l'éditeur l'affiche
+  // ainsi, et ne propose qu'un autre clic par rôle). Un « Au clic » resté d'une autre forme ne compte pas.
+  const master = layout.kind === "master-detail"
+  const baseClick = master ? "side" : layout.click
   // Le clic de la page (le panneau à côté, ou rien) pour le rôle du lecteur ; celui de chaque ligne (son propriétaire…).
-  const structural = pickForRole(layout.clickByRole, pageRoles, layout.click) ?? "sheet"
+  const structural = pickForRole(layout.clickByRole, pageRoles, baseClick) ?? "sheet"
   const itemCard = layout.itemForm ? undefined : layout.itemCard
   const { cardOf } = input
   const actionOf = useCallback((row: string): PresentationClick | "form" => {
-    const own = layout.clickByRole ? pickForRole(layout.clickByRole, rolesOf(roleRowFor({ nameOf, valueOf, headers }, row)), layout.click) : layout.click
+    const own = layout.clickByRole ? pickForRole(layout.clickByRole, rolesOf(roleRowFor({ nameOf, valueOf, headers }, row)), baseClick) : baseClick
     if (own) return own
     // Absent : le clic de la carte de l'élément (« Survol et clic »), sinon la fiche.
     const card = itemCard && itemCard !== PRESENTATION_ITEM_CARD ? cardOf?.(row, itemCard) : null
     return card?.click ?? "sheet"
-  }, [cardOf, headers, itemCard, layout.click, layout.clickByRole, nameOf, rolesOf, valueOf])
+  }, [baseClick, cardOf, headers, itemCard, layout.clickByRole, nameOf, rolesOf, valueOf])
   const clickOf = useCallback((row: string): PresentationClick => { const action = actionOf(row); return action === "form" ? "sheet" : action }, [actionOf])
   const onOpen = (row: string) => {
     const action = actionOf(row)
     if (action === "none") return
-    if (action === "page") return (input.onOpenPage ?? input.onOpen)(row)
-    if (action === "form") { const card = itemCard ? cardOf?.(row, itemCard) : null; return input.onOpenForm ? input.onOpenForm(row, card?.clickForm || "principal") : input.onOpen(row) }
+    // Sur une page : la fiche ou le formulaire s'ouvre ici, en lecture ; la page de la ligne seulement si elle en a une.
+    const here = (form: string) => setChosen({ row, mode: "center", form })
+    if (action === "page") { if (input.inPlace && !input.onOpenPage) return here("principal"); const opened: unknown = (input.onOpenPage ?? input.onOpen)(row); if (opened === false && input.inPlace) here("principal"); return }
+    if (action === "form") { const card = itemCard ? cardOf?.(row, itemCard) : null; if (input.inPlace) return here(card?.clickForm || "principal"); return input.onOpenForm ? input.onOpenForm(row, card?.clickForm || "principal") : input.onOpen(row) }
+    if (action === "sheet" && input.inPlace) return here("principal")
     if (action === "side" || action === "below" || action === "center") return setChosen((current) => current?.row === row && action === "below" ? null : { row, mode: action })
     input.onOpen(row)
   }
@@ -1712,16 +1727,21 @@ export function IndexPresentation(input: PresentationProps) {
   const detailTop = withDetail && (layout.header?.place === "detail" || layout.toolbar?.place === "detail") ? <>{layout.header?.place === "detail" && header}{layout.toolbar?.place === "detail" && toolbar}</> : null
   const footer = <ListFooterView layout={layout} rows={kept} shown={rows.length} valueOf={valueOf} onMore={() => setMore((current) => current + (layout.footer?.limit ?? 0))} />
   const center = picked?.mode === "center" ? picked.row : ""
+  // La taille réglée (Apparences › Taille) : la hauteur au plus, au-delà la vue défile (le maître-détail :
+  // sa liste, qui défile seule) ; la largeur au plus, la vue centrée.
+  const maxHeight = layout.look?.maxHeight
+  const maxWidth = layout.look?.maxWidth
+  const body = <ViewLayoutBody props={{ ...props, detailTop }} click={structural} />
   return <ViewSpecs.Provider value={input.specOf ?? noSpecs}><RowHovers.Provider value={wrap}>
-    <div className="grid min-w-0 gap-3">
+    <div className={cn("grid min-w-0 gap-3", maxWidth && "mx-auto w-full")} style={maxWidth ? { maxWidth: `${maxWidth}rem` } : undefined}>
       {top}
-      <ViewLayoutBody props={{ ...props, detailTop }} click={structural} />
+      {maxHeight && layout.kind !== "master-detail" ? <div className="min-w-0 overflow-y-auto overscroll-contain pr-1 [scrollbar-width:thin]" style={{ maxHeight: `${maxHeight}rem` }}>{body}</div> : body}
       {footer}
     </div>
     {center && <Dialog open onOpenChange={(open) => { if (!open) setChosen(null) }}>
       <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader><DialogTitle className="font-display text-2xl">{plain(nameOf(center)) || "Sans nom"}</DialogTitle><DialogDescription className="sr-only">Le détail de la ligne</DialogDescription></DialogHeader>
-        <DetailPanel row={center} rows={rows} props={{ ...props, onChoose: (row) => setChosen({ row, mode: "center" }) }} />
+        <DetailPanel row={center} rows={rows} props={{ ...props, ...(picked?.form && props.renderForm && !props.layout.detail?.kind ? { layout: { ...props.layout, detail: { ...props.layout.detail, kind: "form" as const, form: picked.form === "principal" ? undefined : picked.form } } } : {}), onChoose: (row) => setChosen({ row, mode: "center", form: picked?.form }) }} />
       </DialogContent>
     </Dialog>}
   </RowHovers.Provider></ViewSpecs.Provider>

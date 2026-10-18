@@ -10,11 +10,12 @@
  * montrent avec ces réglages.
  */
 import { useMemo, useState, type ReactNode } from "react"
-import { ArrowDown, ArrowUp, BookOpen, Bookmark, Check, Columns3, Gauge, Heading, Image as ImageIcon, LayoutGrid, LayoutList, ListTree, Monitor, MousePointerClick, Palette, Pencil, Plus, RotateCcw, Search, SearchX, Sigma, Smartphone, Sparkles, Star, Tablet, Users, X } from "lucide-react"
+import { ArrowDown, ArrowUp, BookOpen, Maximize2, Bookmark, Check, Columns3, Gauge, Heading, Image as ImageIcon, LayoutGrid, LayoutList, ListTree, Monitor, MousePointerClick, Palette, Pencil, Plus, RotateCcw, Search, SearchX, Sigma, Smartphone, Sparkles, Star, Tablet, Users, X } from "lucide-react"
 
 import { IndexCard } from "@/components/eraser/index-card"
 import { NewCardDialog, SingleCardEditor } from "@/components/eraser/index-card-editor"
 import { IndexFormView } from "@/components/eraser/index-form-view"
+import { IndexRowForm } from "@/components/eraser/index-row-sheet"
 import { IndexStats } from "@/components/eraser/index-stats"
 import { IndexPresentation } from "@/components/eraser/index-presentation"
 import { layoutIcons, useIndexSettings } from "@/components/eraser/index-windows"
@@ -151,6 +152,7 @@ function ClickSettings({ ctx }: { ctx: Ctx }) {
       </label>}
       {click === "side" && !master && <Choice label="Largeur du panneau" value={detail.width ?? "normal"} options={[{ value: "narrow", label: "Étroit" }, { value: "normal", label: "Normal" }, { value: "wide", label: "Large" }]} onChange={(width) => update({ width: width === "normal" ? undefined : width })} disabled={disabled} />}
       {panel && <span className={cn(fieldLabel, "self-end pb-1.5")}><Toggle checked={Boolean(detail.nav)} onChange={(nav) => update({ nav: nav || undefined })} disabled={disabled}>Précédent / suivant</Toggle></span>}
+      {panel && <span className={cn(fieldLabel, "self-end pb-1.5")}><Toggle checked={Boolean(detail.sheetButton)} onChange={(sheetButton) => update({ sheetButton: sheetButton || undefined })} disabled={disabled} title="Sous le détail, un bouton qui ouvre la fiche de la ligne (dans l’index). Jamais sur une page.">Bouton « Ouvrir la fiche »</Toggle></span>}
     </SettingsRow>
     {panel && detail.kind === "form" && <DetailEditSettings ctx={ctx} />}
     <ClickByRoleSettings ctx={ctx} />
@@ -394,7 +396,7 @@ const lookSave = <T extends string>(value: T, fallback: T | "mixed") => fallback
 /** Le nom des éléments : police, taille, capitales. */
 function TitleLook({ ctx, sizes = sizeOptions, font = "sans", size = "sm" }: { ctx: Ctx; sizes?: ReadonlyArray<{ value: "sm" | "md" | "lg"; label: string }>; font?: "display" | "sans" | "mixed"; size?: "sm" | "md" | "lg" | "mixed" }) {
   const { look, setLook, disabled } = ctx
-  return <div className="flex flex-wrap items-end gap-3">
+  return <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
     <Choice label="Police du nom" value={lookChoice(look.titleFont, font)} options={[{ value: "display", label: "Titre" }, { value: "sans", label: "Texte" }]} onChange={(titleFont) => setLook({ titleFont: lookSave(titleFont, font) })} disabled={disabled} hint={font === "mixed" && !look.titleFont ? mixedHint : undefined} />
     <Choice label="Taille" value={lookChoice(look.titleSize, size)} options={sizes} onChange={(titleSize) => setLook({ titleSize: lookSave(titleSize, size) })} disabled={disabled} hint={size === "mixed" && !look.titleSize ? mixedHint : undefined} />
     <Toggle checked={Boolean(look.titleCaps)} onChange={(titleCaps) => setLook({ titleCaps: titleCaps || undefined })} disabled={disabled}>Capitales espacées</Toggle>
@@ -410,11 +412,9 @@ type SurfaceChoice = NonNullable<PresentationLook["surface"]> | "spaced"
 function FrameLook({ ctx, surfaces = [{ value: "plain", label: "Lignes séparées" }, { value: "zebra", label: "Lignes alternées" }, { value: "boxed", label: "Encadrés" }], surface = "plain", density = "normal", withDensity = true }: { ctx: Ctx; surfaces?: ReadonlyArray<{ value: SurfaceChoice; label: string }>; surface?: SurfaceChoice; density?: NonNullable<PresentationLook["density"]> | "mixed"; withDensity?: boolean }) {
   const { look, setLook, disabled } = ctx
   return <>
-    <div className="flex flex-wrap items-end gap-3">
+    <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
       {surfaces.length > 0 && <Choice label="Éléments" value={(look.surface ?? surface) as SurfaceChoice} options={surfaces} onChange={(chosen) => setLook({ surface: chosen === surface || chosen === "spaced" ? undefined : chosen })} disabled={disabled} />}
       {withDensity && <Choice label="Espacement" value={lookChoice(look.density, density)} options={densityOptions} onChange={(chosen) => setLook({ density: lookSave(chosen, density) })} disabled={disabled} hint={density === "mixed" && !look.density ? mixedHint : undefined} />}
-    </div>
-    <div className="flex flex-wrap items-end gap-3">
       <Choice label="Coins" value={look.radius ?? "md"} options={radiusOptions} onChange={(radius) => setLook({ radius: radius === "md" ? undefined : radius })} disabled={disabled} />
       <Toggle checked={Boolean(look.shadow)} onChange={(shadow) => setLook({ shadow: shadow || undefined })} disabled={disabled}>Ombre</Toggle>
     </div>
@@ -424,7 +424,7 @@ function FrameLook({ ctx, surfaces = [{ value: "plain", label: "Lignes séparée
 /** Les colonnes montrées sous le nom : leur style et leur couleur. */
 function FieldsLook({ ctx }: { ctx: Ctx }) {
   const { look, setLook, disabled } = ctx
-  return <div className="flex flex-wrap items-end gap-3">
+  return <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
     <Choice label="Colonnes montrées" value={look.fieldStyle ?? "inline"} options={fieldStyleOptions} onChange={(fieldStyle) => setLook({ fieldStyle: fieldStyle === "inline" ? undefined : fieldStyle })} disabled={disabled} />
     <Choice label="Leurs libellés" value={look.hideFieldLabels ? "hidden" : look.fieldColor ?? "muted"} options={[{ value: "muted", label: "Discrets" }, { value: "accent", label: "À la couleur d’accent" }, { value: "hidden", label: "Sans libellé" }]} onChange={(choice) => setLook(choice === "hidden" ? { hideFieldLabels: true } : { hideFieldLabels: undefined, fieldColor: choice === "muted" ? undefined : choice })} disabled={disabled} />
   </div>
@@ -461,7 +461,7 @@ function SectionsSettings({ ctx, withAlphabet = false, title = "Sections" }: { c
         <Toggle checked={Boolean(layout.hideEmpty)} onChange={(hideEmpty) => set({ hideEmpty: hideEmpty || undefined })} disabled={disabled}>Sans « Sans valeur »</Toggle>
         <Toggle checked={Boolean(layout.hideCounts)} onChange={(hideCounts) => set({ hideCounts: hideCounts || undefined })} disabled={disabled}>Sans le nombre de lignes</Toggle>
       </div>
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
         <Choice label="Titre des sections" value={look.sectionStyle ?? "bar"} options={[{ value: "bar", label: "Trait discret" }, { value: "heading", label: "Grand titre centré" }, { value: "letter", label: "En marge (glossaire)" }]} onChange={(sectionStyle) => setLook({ sectionStyle: sectionStyle === "bar" ? undefined : sectionStyle })} disabled={disabled} />
         <Choice label="Menu des sections" value={layout.menu ?? "none"} options={[{ value: "none", label: "Aucun" }, { value: "top", label: "En haut" }, { value: "side", label: "Sur le côté" }, { value: "tabs", label: "Onglets" }]} onChange={(menu) => set({ menu: menu === "none" ? undefined : menu })} disabled={disabled} />
         <span className={fieldLabel}>Icône des sections<IconPick value={look.sectionIcon} onChange={(sectionIcon) => setLook({ sectionIcon })} disabled={disabled} /></span>
@@ -593,7 +593,7 @@ function KanbanGroupSettings({ ctx }: { ctx: Ctx }) {
     <div className={settingsGroup}>
       <p className={settingsTitle}><Columns3 className="size-3.5" />Groupe · les colonnes du kanban</p>
       <ColumnField label="Une colonne du kanban par valeur de" value={layout.kanbanColumn} columns={columns} onChange={(kanbanColumn) => set({ kanbanColumn, lanes: undefined })} empty="— Choisir… —" disabled={disabled} hint="Glisser une carte d’une colonne à l’autre change la case" />
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
         <Choice label="Largeur des colonnes" value={layout.laneWidth ?? "normal"} options={[{ value: "narrow", label: "Serrées" }, { value: "normal", label: "Normales" }, { value: "wide", label: "Larges" }]} onChange={(laneWidth) => set({ laneWidth: laneWidth === "normal" ? undefined : laneWidth })} disabled={disabled} />
         <Choice label="En-tête des colonnes" value={look.laneStyle ?? "plain"} options={[{ value: "plain", label: "Sobre" }, { value: "tinted", label: "Teinté" }, { value: "header", label: "Bandeau coloré" }]} onChange={(laneStyle) => setLook({ laneStyle: laneStyle === "plain" ? undefined : laneStyle })} disabled={disabled} />
       </div>
@@ -667,8 +667,24 @@ function ListFamilyPages(ctx: Ctx): Page[] {
           ? <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p><FrameLook ctx={ctx} surfaces={[{ value: "spaced", label: "Espacées" }, { value: "plain", label: "Lignes séparées" }, { value: "boxed", label: "Encadrées" }]} surface="spaced" density="mixed" /><TitleLook ctx={ctx} font="mixed" /><FieldsLook ctx={ctx} /></div>
           : <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p><FrameLook ctx={ctx} /><TitleLook ctx={ctx} /><FieldsLook ctx={ctx} /></div>}
       <div className={settingsGroup}><p className={settingsTitle}><Palette className="size-3.5" />Couleurs</p><ColorLook ctx={ctx} /></div>
+      <SizeLook ctx={ctx} />
     </> },
   ]
+}
+
+/** La taille de la vue : sa hauteur au plus (au-delà, elle défile ; le maître-détail : sa liste), sa largeur au plus (centrée). 0 : toute la place. */
+function SizeLook({ ctx }: { ctx: Ctx }) {
+  const { kind, look, setLook, disabled } = ctx
+  const master = kind === "master-detail"
+  const rem = (value: number) => value ? `${value} rem (≈ ${Math.round(value * 16)} px)` : "toute"
+  return <div className={settingsGroup}>
+    <p className={settingsTitle}><Maximize2 className="size-3.5" />Taille</p>
+    <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
+      <Range text={master ? "Hauteur de la liste, au plus" : "Hauteur, au plus"} value={look.maxHeight ?? 0} min={0} max={120} step={2} format={rem} onChange={(maxHeight) => setLook({ maxHeight: maxHeight >= 8 ? maxHeight : undefined })} disabled={disabled} title="Au-delà, la vue défile dans son cadre. Tout à gauche : toute la hauteur." />
+      <Range text="Largeur, au plus" value={look.maxWidth ?? 0} min={0} max={160} step={4} format={rem} onChange={(maxWidth) => setLook({ maxWidth: maxWidth >= 16 ? maxWidth : undefined })} disabled={disabled} title="La vue se centre dans la place restante. Tout à gauche : toute la largeur." />
+    </div>
+    <p className={hintText}>Sur une page, le bloc a aussi sa hauteur (réglages du bloc) : la plus petite l’emporte.</p>
+  </div>
 }
 
 /** Le maître-détail : la liste à gauche ou à droite, sa largeur ; le détail en colonnes (ses champs, son image). */
@@ -676,13 +692,13 @@ function MasterDetailSettings({ ctx }: { ctx: Ctx }) {
   const { kind, layout, look, set, setLook, columns, disabled } = ctx
   const master = kind === "master-detail"
   return <div className="grid gap-2 rounded-lg border border-dashed bg-background/50 p-2.5">
-    {master && <div className="flex flex-wrap items-end gap-3">
+    {master && <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
       <Choice label="La liste" value={layout.masterSide ?? "left"} options={[{ value: "left", label: "À gauche" }, { value: "right", label: "À droite" }]} onChange={(masterSide) => set({ masterSide: masterSide === "left" ? undefined : masterSide })} disabled={disabled} />
       <Choice label="Sa largeur" value={look.masterWidth ?? "normal"} options={[{ value: "narrow", label: "Étroite" }, { value: "normal", label: "Normale" }, { value: "wide", label: "Large" }]} onChange={(masterWidth) => setLook({ masterWidth: masterWidth === "normal" ? undefined : masterWidth })} disabled={disabled} />
     </div>}
     {!layout.detail?.kind && <>
       <span className={fieldLabel}>Colonnes du détail <span className="font-normal">(toutes si aucune choisie, 12 au plus)</span><ColumnsPicker value={layout.detailFields ?? []} columns={columns} onChange={(detailFields) => set({ detailFields: detailFields.length ? detailFields : undefined })} disabled={disabled} ariaLabel="Colonnes du détail" max={12} /></span>
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
         <Choice label="Sur" value={String(layout.detailColumns ?? 2)} options={[{ value: "1", label: "Une colonne" }, { value: "2", label: "Deux" }, { value: "3", label: "Trois" }]} onChange={(value) => set({ detailColumns: value === "2" ? undefined : Number(value) as 1 | 3 })} disabled={disabled} />
         <Choice label="Son image" value={layout.detailImage ?? "side"} options={[{ value: "side", label: "À côté du titre" }, { value: "banner", label: "En bannière" }, { value: "none", label: "Sans" }]} onChange={(detailImage) => set({ detailImage: detailImage === "side" ? undefined : detailImage })} disabled={disabled || !layout.imageColumn} hint={layout.imageColumn ? undefined : "Choisis d’abord une image dans « Éléments »"} />
       </div>
@@ -804,7 +820,7 @@ function CalendarPages(ctx: Ctx, calendars: string[]): Page[] {
       </div>
       <div className={settingsGroup}>
         <p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p>
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
           <Choice label={withGrid ? "Hauteur des jours" : "Espacement"} value={look.density ?? "normal"} options={withGrid ? [{ value: "compact", label: "Basse" }, { value: "normal", label: "Normale" }, { value: "airy", label: "Haute" }] : densityOptions} onChange={(density) => setLook({ density: density === "normal" ? undefined : density })} disabled={disabled} />
           <Choice label="En-tête du mois" value={layout.monthStyle ?? "plain"} options={[{ value: "plain", label: "Sobre" }, { value: "season", label: "À la couleur de la saison" }]} onChange={(monthStyle) => set({ monthStyle: monthStyle === "plain" ? undefined : monthStyle })} disabled={disabled} />
           <Toggle checked={!layout.hideSeasons} onChange={(shown) => set({ hideSeasons: shown ? undefined : true })} disabled={disabled}>Afficher la saison</Toggle>
@@ -947,11 +963,11 @@ function DashboardPages(ctx: Ctx): Page[] {
       <div className={settingsGroup}>
         <p className={settingsTitle}><LayoutGrid className="size-3.5" />La grille</p>
         <Range text="Tuiles par rangée" value={layout.tileColumns ?? 3} min={1} max={6} onChange={(value) => set({ tileColumns: value === 3 ? undefined : value as 1 | 2 | 4 | 5 | 6 })} disabled={disabled} />
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
           <Choice label="Tuiles" value={look.tileStyle ?? "plain"} options={[{ value: "plain", label: "Sobres" }, { value: "accent", label: "Liseré coloré" }, { value: "tinted", label: "Teintées" }]} onChange={(tileStyle) => setLook({ tileStyle: tileStyle === "plain" ? undefined : tileStyle })} disabled={disabled} />
           <Choice label="Espacement" value={look.density ?? "normal"} options={densityOptions} onChange={(density) => setLook({ density: density === "normal" ? undefined : density })} disabled={disabled} />
         </div>
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
           <Choice label="Coins" value={look.radius ?? "md"} options={radiusOptions} onChange={(radius) => setLook({ radius: radius === "md" ? undefined : radius })} disabled={disabled} />
           <Toggle checked={Boolean(look.shadow)} onChange={(shadow) => setLook({ shadow: shadow || undefined })} disabled={disabled}>Ombre</Toggle>
           <Choice label="Police des nombres" value={look.titleFont ?? "display"} options={[{ value: "display", label: "Titre" }, { value: "sans", label: "Texte" }]} onChange={(titleFont) => setLook({ titleFont: titleFont === "display" ? undefined : titleFont })} disabled={disabled} />
@@ -1000,7 +1016,7 @@ function GalleryPages(ctx: Ctx): Page[] {
         onRadius={(galleryRadiusPx) => set({ galleryRadiusPx })}
       />
       <ColumnField label="Largeur selon une colonne nombre" value={layout.gallerySizeColumn} columns={columns} onChange={(gallerySizeColumn) => set({ gallerySizeColumn })} empty="— Toutes la même largeur —" disabled={disabled} hint="La plus grande valeur prend la largeur réglée, les autres en proportion (une taille, une importance)" />
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
         <Choice label="Image" value={layout.galleryFit ?? "cover"} options={[{ value: "cover", label: "Remplit" }, { value: "contain", label: "Entière" }]} onChange={(galleryFit) => set({ galleryFit: galleryFit === "cover" ? undefined : galleryFit })} disabled={disabled} />
         <Toggle checked={look.imageShape === "circle"} onChange={(circle) => setLook({ imageShape: circle ? "circle" : undefined })} disabled={disabled}>Rondes (médaillons)</Toggle>
         <Toggle checked={!layout.galleryStill} onChange={(zoom) => set({ galleryStill: zoom ? undefined : true })} disabled={disabled}>Zoom au survol</Toggle>
@@ -1009,7 +1025,7 @@ function GalleryPages(ctx: Ctx): Page[] {
     { key: "captions", label: "Légendes", icon: <LayoutList className="size-3.5" />, render: () => <>
       <div className={settingsGroup}>
         <p className={settingsTitle}><LayoutList className="size-3.5" />Les légendes</p>
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
           {/* Le cabinet, la planche et les médaillons écrivent toujours le nom dessous ; le mur, posé sur l'image, toujours au survol. */}
           {nameAlwaysBelow
             ? <p className={hintText}>{style === "cabinet" ? "Le cabinet" : style === "strip" ? "La planche" : "Les médaillons"} écrivent toujours le nom sous l’image.</p>
@@ -1033,7 +1049,7 @@ function GalleryPages(ctx: Ctx): Page[] {
     { key: "look", label: "Apparence", icon: <Palette className="size-3.5" />, render: () => <>
       <div className={settingsGroup}>
         <p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p>
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
           <Choice label="Espacement" value={look.density ?? "normal"} options={densityOptions} onChange={(density) => setLook({ density: density === "normal" ? undefined : density })} disabled={disabled} />
           <Choice label="Vignettes" value={look.surface ?? "plain"} options={[{ value: "plain", label: "Nues" }, { value: "boxed", label: "Encadrées (polaroïd)" }]} onChange={(surface) => setLook({ surface: surface === "plain" ? undefined : surface })} disabled={disabled} />
           <Toggle checked={Boolean(look.shadow)} onChange={(shadow) => setLook({ shadow: shadow || undefined })} disabled={disabled}>Ombre</Toggle>
@@ -1065,11 +1081,11 @@ function TimelinePages(ctx: Ctx, calendars: string[]): Page[] {
         <Choice label="Chaque ligne" value={style} options={[{ value: "dots", label: "Un point" }, { value: "icons", label: "Un médaillon" }, { value: "chapters", label: "Un chapitre" }, { value: "bars", label: "Une barre de durée" }, { value: "lanes", label: "Sur un fil" }]} onChange={(timelineStyle) => set({ timelineStyle: timelineStyle === "dots" ? undefined : timelineStyle })} disabled={disabled} />
         {style === "bars" && <ColumnField label="Colonne de la fin (date ou année)" value={layout.endColumn} columns={columns} onChange={(endColumn) => set({ endColumn })} empty="— Sans fin : un instant —" disabled={disabled} hint="Chaque ligne devient une barre du début à la fin sur l’axe des années" />}
         {style === "lanes" && <ColumnField label="Un fil par valeur de" value={layout.laneColumn} columns={columns} onChange={(laneColumn) => set({ laneColumn })} empty="— Choisir… —" disabled={disabled} hint="Une colonne liée (personnage, lieu…) : un fil horizontal par valeur, les événements posés dessus" />}
-        {!axis && <div className="flex flex-wrap items-end gap-3">
+        {!axis && <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
           <Choice label="Axe" value={layout.timelineAxis ?? "vertical"} options={[{ value: "vertical", label: "Vertical" }, { value: "horizontal", label: "Frise horizontale" }]} onChange={(timelineAxis) => set({ timelineAxis: timelineAxis === "vertical" ? undefined : timelineAxis })} disabled={disabled} />
           {layout.timelineAxis !== "horizontal" && <Choice label="Disposition" value={layout.timelineSide ?? "alternate"} options={[{ value: "alternate", label: "Des deux côtés" }, { value: "right", label: "D’un seul côté" }, { value: "groups", label: "Un côté par groupe" }]} onChange={(timelineSide) => set({ timelineSide: timelineSide === "alternate" ? undefined : timelineSide })} disabled={disabled} hint="« Un côté par groupe » suit la colonne des périodes ci-dessous" />}
         </div>}
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
           <Choice label="Un jalon par" value={String(layout.milestoneEvery ?? 1)} options={[{ value: "1", label: "An" }, { value: "10", label: "Décennie" }, { value: "100", label: "Siècle" }, { value: "1000", label: "Millénaire" }]} onChange={(value) => set({ milestoneEvery: value === "1" ? undefined : Number(value) as 10 | 100 | 1000 })} disabled={disabled} />
           {!axis && <Choice label="La date de chaque élément" value={layout.dateStyle ?? "label"} options={[{ value: "label", label: "Écrite au-dessus" }, { value: "badge", label: "En étiquette" }, { value: "hidden", label: "Cachée" }]} onChange={(dateStyle) => set({ dateStyle: dateStyle === "label" ? undefined : dateStyle })} disabled={disabled} />}
         </div>
@@ -1110,7 +1126,7 @@ function TreePages(ctx: Ctx): Page[] {
         <ColumnField label="Colonne du parent" value={layout.parentColumn} columns={columns} onChange={(parentColumn) => set({ parentColumn })} empty="— Choisir… —" disabled={disabled} hint="La case nomme une autre ligne du même onglet (une ville dont « Pays » vaut « Valdor » se range sous Valdor)" />
         <Choice label="Dessin" value={style} options={[{ value: "lines", label: "Lignes" }, { value: "indent", label: "Retrait" }, { value: "boxed", label: "Cartes emboîtées" }, { value: "org", label: "Organigramme" }, { value: "mindmap", label: "Carte mentale" }]} onChange={(treeStyle) => set({ treeStyle: treeStyle === "lines" ? undefined : treeStyle })} disabled={disabled} />
         <p className={hintText}>{style === "org" ? "Les enfants en rangée sous leur parent, reliés par un trait ; l’élément en carte si tu le veux." : style === "mindmap" ? "La racine au centre, ses branches de part et d’autre, chacune à sa couleur." : style === "boxed" ? "Chaque nœud encadré, ses enfants dedans ; l’élément en carte si tu le veux." : "Un nœud par ligne, en retrait sous son parent."}</p>
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
           <Choice label="Espacement" value={look.density ?? "normal"} options={densityOptions} onChange={(density) => setLook({ density: density === "normal" ? undefined : density })} disabled={disabled} />
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -1169,7 +1185,7 @@ function CodexPages(ctx: Ctx): Page[] {
           <ColumnField label="Image de chaque fiche" value={layout.imageColumn} columns={columns} onChange={(imageColumn) => set({ imageColumn })} empty="— Aucune —" disabled={disabled} />
           {layout.imageColumn && style !== "sketch" && <Choice label="Posée" value={look.codexImage ?? "side"} options={[{ value: "side", label: "Dans l’encadré" }, { value: "banner", label: "En bannière" }]} onChange={(codexImage) => setLook({ codexImage: codexImage === "side" ? undefined : codexImage })} disabled={disabled} />}
         </div>
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
           <Choice label="Le texte" value={String(layout.proseColumns ?? 1)} options={[{ value: "1", label: "Sur une colonne" }, { value: "2", label: "Sur deux colonnes" }]} onChange={(value) => set({ proseColumns: value === "2" ? 2 : undefined })} disabled={disabled} />
           <Toggle checked={Boolean(look.dropCap)} onChange={(dropCap) => setLook({ dropCap: dropCap || undefined })} disabled={disabled}>Lettrine au premier paragraphe</Toggle>
           <Toggle checked={Boolean(layout.chapterNumbers)} onChange={(chapterNumbers) => set({ chapterNumbers: chapterNumbers || undefined })} disabled={disabled}>Fiches numérotées (chapitres)</Toggle>
@@ -1201,7 +1217,7 @@ function CodexPages(ctx: Ctx): Page[] {
     { key: "toc", label: "Sommaire", icon: <ListTree className="size-3.5" />, render: () => <>
       <div className={settingsGroup}>
         <p className={settingsTitle}><ListTree className="size-3.5" />Le sommaire et les pages</p>
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
           <Toggle checked={Boolean(layout.showToc)} onChange={(showToc) => set({ showToc: showToc || undefined })} disabled={disabled}>Un sommaire</Toggle>
           {layout.showToc && <Choice label="Placé" value={layout.tocPosition ?? "side"} options={[{ value: "side", label: "À côté des fiches" }, { value: "top", label: "Au-dessus" }]} onChange={(tocPosition) => set({ tocPosition: tocPosition === "side" ? undefined : tocPosition })} disabled={disabled} />}
           <Toggle checked={Boolean(layout.codexPages)} onChange={(codexPages) => set({ codexPages: codexPages || undefined })} disabled={disabled} title="Deux fiches face à face, feuilletées ; les sections ne s’appliquent pas">Double page</Toggle>
@@ -1215,7 +1231,7 @@ function CodexPages(ctx: Ctx): Page[] {
         <Choice label="Style" value={style} options={[{ value: "book", label: "Livre" }, { value: "scroll", label: "Parchemin" }, { value: "plain", label: "Nu" }, { value: "board", label: "Journal de bord" }, { value: "sketch", label: "Croquis" }]} onChange={(codexStyle) => set({ codexStyle: codexStyle === "book" ? undefined : codexStyle })} disabled={disabled} />
         {style === "board" && <ColumnField label="Colonne de la date (en tampon, et l’ordre des entrées)" value={layout.dateColumn} columns={columns} onChange={(dateColumn) => set({ dateColumn })} empty="— Aucune —" disabled={disabled} />}
         {style === "sketch" && <p className={hintText}>L’image d’abord, posée de travers ; le texte et les notes en écriture penchée sur papier pointillé.</p>}
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
           <Choice label="Marges" value={look.density ?? "normal"} options={densityOptions} onChange={(density) => setLook({ density: density === "normal" ? undefined : density })} disabled={disabled} />
           {style !== "plain" && <Choice label="Coins" value={look.radius ?? "lg"} options={radiusOptions} onChange={(radius) => setLook({ radius: radius === "lg" ? undefined : radius })} disabled={disabled} />}
           {style !== "plain" && style !== "scroll" && style !== "board" && style !== "sketch" && <Toggle checked={Boolean(look.shadow)} onChange={(shadow) => setLook({ shadow: shadow || undefined })} disabled={disabled}>Ombre</Toggle>}
@@ -1510,6 +1526,14 @@ export function IndexPresentationsEditor({ kind, versionId = MAIN_PRESENTATION_I
     const values = new Map(Object.entries(sample).map(([header, cell]) => [foldName(header), cell]))
     return form ? <IndexFormView layout={form.layout} columns={cardColumns.length ? cardColumns : columns.map((header) => ({ header }))} valueOf={(header) => values.get(foldName(header)) ?? ""} compact /> : null
   }
+  // Le détail modifiable, comme dans l'index : on peut y taper pour essayer (rien n'est enregistré).
+  const renderEditForm = (key: string, formId: string, locked: string[]) => {
+    const form = forms.find((item) => item.id === formId) ?? forms[0]
+    const sample = rows[Number(key)] ?? {}
+    const values = new Map(Object.entries(sample).map(([header, cell]) => [foldName(header), cell]))
+    const fields = (cardColumns.length ? cardColumns : columns.map((header) => ({ header, spec: { kind: "rich" } as CardColumn["spec"] }))).filter((column) => column.spec.kind !== "id").map((column) => ({ key: column.header, label: column.header, spec: column.spec, value: values.get(foldName(column.header)) ?? "" }))
+    return <IndexRowForm key={`${key}:${formId}`} rowKey={key} fields={fields} layout={form?.layout} onSave={() => undefined} locked={locked} />
+  }
   const kindLabel = presentationKinds.find((entry) => entry.value === kind)?.label ?? ""
   const previewNameOf = (key: string) => (rows[Number(key)]?.[nameColumn] ?? "").replace(/<[^>]+>/g, "").trim()
   const previewValueOf = (key: string, header: string) => rows[Number(key)]?.[header] ?? ""
@@ -1528,14 +1552,18 @@ export function IndexPresentationsEditor({ kind, versionId = MAIN_PRESENTATION_I
     specOf={(header) => specs.get(foldName(header))}
     cardOf={(_rowKey, cardId) => pickCard({ cards }, cardId === DEFAULT_ITEM_CARD ? null : cardId)}
     onOpen={() => undefined}
+    // « Ajouter » se montre comme dans l'index (ici, il n'ajoute rien) ; le détail modifiable aussi.
+    onAdd={() => undefined}
+    renderEditForm={renderEditForm}
     renderCard={renderCard}
     renderForm={forms.length ? renderForm : undefined}
     renderStat={stats.length ? renderStat : undefined}
     presentations={value}
     empty="Pas encore de ligne dans cet onglet."
   />
-  // Deux volets : les réglages à gauche, l'aperçu à droite, chacun avec sa barre de défilement.
-  return <div className="grid min-h-0 gap-3 lg:h-full lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
+  // Deux volets, comme l'atelier des cartes : les réglages à gauche (assez larges pour en poser
+  // plusieurs par ligne), l'aperçu à droite ; « ⤢ » l'ouvre en grand. Chacun a sa barre de défilement.
+  return <div className="grid min-h-0 gap-3 lg:h-full lg:grid-cols-[minmax(0,1fr)_minmax(20rem,30rem)] xl:grid-cols-[minmax(0,1fr)_minmax(22rem,34rem)]">
     <div className="grid content-start gap-2 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
       <div className="flex justify-end"><Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={disabled} onClick={() => setStarting(true)} title="Repartir d’une forme de base, remplie avec les colonnes de cet onglet et dessinée sur ses lignes"><Sparkles className="size-3.5" />Forme de base</Button></div>
       <PresentationKindSettings kind={kind} layout={layout} columns={columns} onChange={setLayout} element={cardColumns.length ? { columns: cardColumns, samples: rows, tabCards: cards } : undefined} cards={cards.map((card) => ({ id: card.id, name: card.name }))} forms={forms.map((form) => ({ id: form.id, name: form.name }))} hovers={hovers} stats={stats.map((stat) => ({ id: stat.id, title: stat.title }))} presentations={value} optionsOf={optionsOf} disabled={disabled} />

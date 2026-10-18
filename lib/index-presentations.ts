@@ -127,6 +127,12 @@ export type PresentationLook = {
   fieldColor?: "muted" | "accent"
   /** Liste : l'image change de côté une ligne sur deux. */
   zigzag?: boolean
+  /**
+   * La taille de la vue, en rem : sa hauteur au plus (au-delà, elle défile ; le maître-détail : sa
+   * liste) et sa largeur au plus (centrée). Absentes : toute la place.
+   */
+  maxHeight?: number
+  maxWidth?: number
 }
 
 export type Presentation = {
@@ -416,7 +422,7 @@ const clickValues = presentationClicks.map((entry) => entry.value)
  * « Modifier » (`edit: "button"`), par les rôles choisis (aucun : tous ceux qui peuvent écrire),
  * certains champs restant en lecture (`locked`) ; sa largeur ; précédent / suivant.
  */
-export type PresentationDetail = { kind?: "fields" | "form" | "card" | "children"; form?: string; card?: string; width?: "narrow" | "normal" | "wide"; nav?: boolean; edit?: "inline" | "button"; editRoles?: ViewRole[]; locked?: string[] }
+export type PresentationDetail = { kind?: "fields" | "form" | "card" | "children"; form?: string; card?: string; width?: "narrow" | "normal" | "wide"; nav?: boolean; edit?: "inline" | "button"; editRoles?: ViewRole[]; locked?: string[]; /** Un bouton « Ouvrir la fiche » sous le détail (absent : pas de bouton). */ sheetButton?: boolean }
 export type GroupFormulaOp = "count" | "sum" | "avg" | "min" | "max"
 export const groupFormulaOps: Array<{ value: GroupFormulaOp; label: string }> = [
   { value: "count", label: "Nombre de lignes" }, { value: "sum", label: "Somme" }, { value: "avg", label: "Moyenne" }, { value: "min", label: "Plus petite valeur" }, { value: "max", label: "Plus grande valeur" },
@@ -511,6 +517,9 @@ const lookChoices: { [K in keyof PresentationLook]-?: readonly unknown[] } = {
   titleCaps: [true],
   fieldColor: ["muted", "accent"],
   hideFieldLabels: [true],
+  // Bornés à part (en rem).
+  maxHeight: [],
+  maxWidth: [],
 }
 
 /** L'apparence propre : seulement les choix connus ; `undefined` si rien n'est réglé. */
@@ -525,6 +534,10 @@ export function cleanPresentationLook(value: unknown): PresentationLook | undefi
   if (imageWidth) look.imageWidth = imageWidth
   const imageHeight = bounded(raw.imageHeight, 12, 240)
   if (imageHeight) look.imageHeight = imageHeight
+  const maxHeight = bounded(raw.maxHeight, 8, 120)
+  if (maxHeight) look.maxHeight = maxHeight
+  const maxWidth = bounded(raw.maxWidth, 16, 160)
+  if (maxWidth) look.maxWidth = maxWidth
   return Object.keys(look).length ? look as PresentationLook : undefined
 }
 
@@ -658,6 +671,7 @@ export function cleanPresentation(value: unknown): Presentation | undefined {
     const width = oneOf(input.width, ["narrow", "normal", "wide"] as const)
     if (width && width !== "normal") detail.width = width
     if (input.nav === true) detail.nav = true
+    if (input.sheetButton === true) detail.sheetButton = true
     const edit = oneOf(input.edit, ["inline", "button"] as const)
     if (edit) detail.edit = edit
     const editRoles = cleanViewRoles(input.editRoles)

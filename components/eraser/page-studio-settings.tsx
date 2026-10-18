@@ -342,7 +342,7 @@ function ViewSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { 
       </div>
     </Field>}
     <div className="grid grid-cols-2 gap-2">
-      <Field label="Au plus (lignes)" hint="0 : toutes">
+      <Field label="Au plus (lignes)" hint={presentation ? "0 : toutes. Pour en montrer peu puis « Charger plus », règle le pied de la vue (Général › Pied)." : "0 : toutes"}>
         <input type="number" min={0} max={500} className={fieldClass} value={block.limit} onChange={(event) => onChange({ limit: Math.max(0, Math.min(500, Number.parseInt(event.target.value, 10) || 0)) })} />
       </Field>
       <Field label="Hauteur">
@@ -357,7 +357,8 @@ function ViewSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { 
         {columns.map((column) => <option key={column} value={column}>{column}</option>)}
       </select>
     </Field>}
-    {block.tab && !linked && <Field label="Au clic sur une ligne" hint={block.click && block.click !== "-" ? "« {ID} » et « {Colonne} » prennent les valeurs de la ligne. La page ouverte vérifie toujours qui peut la voir." : !block.click ? "Sa fiche : sa page de ligne s’il y en a une, sinon sa page d’Eraser (une classe…) ou l’index (MJ et admins)." : undefined}>
+    {block.tab && !linked && presentation && <Field label="Au clic sur une ligne" hint={<>Celui de la vue : il se règle avec elle (dans l’index, Modifier › {kindLabel} › Éléments et clic, ou « Propre à cette page »). Sur une page, la fiche s’ouvre ici, en lecture, jamais dans l’index ; la page de la ligne, si elle en a une.{block.click ? <>{" "}<button type="button" className="font-medium text-primary hover:underline" onClick={() => onChange({ click: undefined })}>Retirer l’ancien réglage du bloc</button></> : null}</>}><span /></Field>}
+    {block.tab && !linked && !presentation && <Field label="Au clic sur une ligne" hint={block.click && block.click !== "-" ? "« {ID} » et « {Colonne} » prennent les valeurs de la ligne. La page ouverte vérifie toujours qui peut la voir." : !block.click ? "Sa fiche : sa page de ligne s’il y en a une, sinon sa page d’Eraser (une classe…) ou l’index (MJ et admins)." : undefined}>
       <select className={fieldClass} value={!block.click ? "" : block.click === "-" ? "-" : "href"} onChange={(event) => onChange({ click: event.target.value === "href" ? block.index === "campaigns" ? "/campagne/{ID}" : "/" : event.target.value || undefined })}>
         <option value="">Ouvrir sa fiche</option>
         <option value="href">Ouvrir une adresse…</option>
