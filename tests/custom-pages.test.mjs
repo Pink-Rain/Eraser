@@ -580,3 +580,41 @@ test("les pages d'Eraser dessinées par le moteur : un plan aux identifiants sta
   assert.equal(blueprints.enginePageOf("/regles/classes/CLA-1"), null);
   assert.equal(blueprints.enginePageOf("/"), "/");
 });
+
+test("le bloc Image : un lien du Drive passe par Eraser, son allure se relit sans les défauts", () => {
+  assert.equal(pages.pageImageUrl("https://drive.google.com/file/d/1VX_xEkd_3xheAbCdEf/view?usp=sharing"), "/api/pages/images/1VX_xEkd_3xheAbCdEf");
+  assert.equal(pages.pageImageUrl("https://drive.google.com/open?id=1VX_xEkd_3xheAbCdEf"), "/api/pages/images/1VX_xEkd_3xheAbCdEf");
+  assert.equal(pages.pageImageUrl("https://exemple.fr/file/d/1VX_xEkd_3xheAbCdEf"), "https://exemple.fr/file/d/1VX_xEkd_3xheAbCdEf");
+  assert.equal(pages.pageImageUrl("/api/resources/index-images/abc"), "/api/resources/index-images/abc");
+  assert.equal(pages.cleanImageLook({ width: 100, radius: 16, fadeAmount: 70, align: "center", frame: "card" }), undefined);
+  assert.deepEqual(pages.cleanImageLook({ width: 3, radius: 99, fade: "bottom", fadeAmount: 70, align: "right", frame: "none", focus: "top" }), { width: 15, align: "right", frame: "none", radius: 64, fade: "bottom", fadeAmount: 70, focus: "top" });
+  assert.deepEqual(pages.cleanImageLook({ fade: "diagonale" }), undefined);
+  const block = pages.cleanBlock({ id: "b1", type: "image", src: "https://drive.google.com/file/d/1VX_xEkd_3xheAbCdEf/view", look: { width: 50, fade: "edges" } });
+  assert.deepEqual(block.look, { width: 50, fade: "edges" });
+  assert.equal(pages.cleanBlock({ id: "b2", type: "image", src: "" }).look, undefined);
+  assert.equal(pages.imageFadeMask(undefined), undefined);
+  assert.equal(pages.imageFadeMask("bottom", 40), "linear-gradient(to bottom, #000 60%, transparent)");
+  assert.match(pages.imageFadeMask("edges", 30), /^radial-gradient\(closest-side, #000 70%/);
+});
+
+test("les largeurs des colonnes d'une section : bornées, ramenées à 100, oubliées si elles valent la disposition", () => {
+  assert.deepEqual(pages.cleanSectionWidths([70, 30], "2"), [70, 30]);
+  assert.deepEqual(pages.cleanSectionWidths([7, 3], "2"), [70, 30]);
+  assert.equal(pages.cleanSectionWidths([50, 50], "2"), undefined);
+  assert.equal(pages.cleanSectionWidths([200 / 3, 100 / 3], "side-r"), undefined);
+  assert.equal(pages.cleanSectionWidths([60, 40], "3"), undefined);
+  assert.equal(pages.cleanSectionWidths([60, 40], "1"), undefined);
+  assert.deepEqual(pages.cleanSectionWidths([95, 5], "2"), [85, 15]);
+  assert.deepEqual(pages.cleanSectionWidths([90, 5, 5], "3"), [70, 15, 15]);
+  const [section] = pages.cleanSections([{ id: "s1", layout: "3", cols: [[], [], []], widths: [50, 25, 25] }]);
+  assert.deepEqual(section.widths, [50, 25, 25]);
+  assert.equal(pages.cleanSections([{ id: "s2", layout: "2", cols: [[], []], widths: "70,30" }])[0].widths, undefined);
+});
+
+test("les modules de l'accueil d'origine : mes personnages, mes campagnes", async () => {
+  const modules = await vite.ssrLoadModule("/lib/eraser-modules.ts");
+  assert.ok(modules.eraserModuleKeys.includes("accueil-personnages"));
+  assert.ok(modules.eraserModuleKeys.includes("accueil-campagnes"));
+  const block = pages.cleanBlock({ id: "m1", type: "module", module: "accueil-campagnes" });
+  assert.equal(block.module, "accueil-campagnes");
+});

@@ -39,7 +39,7 @@ export type CardEditorExtras = {
 
 /** Les actions proposées d'un clic, avec leurs réglages de départ : ce qu'on veut faire le plus souvent. */
 const quickButtons: Array<{ key: string; label: string; hint: string; icon: string; button: Omit<CardButton, "id">; only?: "world" | "objects" }> = [
-  { key: "form", label: "Ouvrir un formulaire, ici", hint: "La fiche courte, la fiche de combat… dans une fenêtre, sans quitter la page.", icon: "file-text", button: { label: "Ouvrir", icon: "file-text", steps: [{ type: "open-form" }] }, only: "world" },
+  { key: "form", label: "Ouvrir un de ses formulaires", hint: "La fiche courte, la fiche de combat… dans une fenêtre, là où l’on est (index ou page), modifiable par qui peut écrire.", icon: "file-text", button: { label: "Ouvrir", icon: "file-text", steps: [{ type: "open-form" }] }, only: "world" },
   { key: "page", label: "Ouvrir la page de la ligne", hint: "Celle d’un personnage, d’une campagne ; sinon sa fiche.", icon: "external-link", button: { label: "Page", icon: "external-link", look: "outline", steps: [{ type: "open-page" }] }, only: "world" },
   { key: "row", label: "Une ligne d’un autre index", hint: "Le lieu de ce PNJ, la religion de ce peuple : sa fiche, par son nom.", icon: "link", button: { label: "Voir", icon: "link", look: "outline", steps: [{ type: "open-row", index: "", row: "" }] }, only: "world" },
   { key: "eraser", label: "Une page d’Eraser", hint: "Un index, une page créée, le tabletop…", icon: "compass", button: { label: "Aller", icon: "compass", look: "outline", steps: [{ type: "open-eraser", href: "" }] } },

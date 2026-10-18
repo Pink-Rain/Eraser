@@ -43,6 +43,7 @@ import { isBuiltinWorldIndexKey, worldIndexDefinitions } from "@/lib/world-index
 import { numberCorrection } from "@/lib/index-numbers"
 import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
 import { findEntry, isTrashedEntry, objectHeaderIndex, type IndexEditorModel, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
+import { useEditorDock } from "@/components/eraser/editor-dock"
 import { ALL_SOURCES, windowIdOfSelectKey, windowSelectKey, type FilterCondition } from "@/lib/index-windows"
 import { builtinPresentationPresets, type Presentation } from "@/lib/index-presentations"
 import { filterFromGridFilters, filterWindowOf, resolveSavedViewPresentation, savedViewFromWindow, type SavedView } from "@/lib/index-saved-views"
@@ -98,7 +99,11 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   const [tables, setTables] = useState(() => initialTables.map(unpackTableRows))
   // Le schéma de chaque classeur (onglet « Eraser · colonnes ») : types choisis dans « Modifier », colonnes à la corbeille.
   const [schemas, setSchemas] = useState<Schemas>(initialSchemas)
-  const [editor, setEditor] = useState<IndexEditorModel | null>(null)
+  // « Modifier » vit dans le dock de la coque : changer de page le garde (réduit), revenir le reprend.
+  const dock = useEditorDock()
+  const dockKey = "index:objets"
+  const [editor, setEditor] = useState<IndexEditorModel | null>(() => (dock?.modelOf(dockKey) as { model?: IndexEditorModel } | undefined)?.model ?? null)
+  const closeEditor = useCallback(() => { setEditor(null); dock?.hide(dockKey) }, [dock])
   const [editorError, setEditorError] = useState("")
   // Le tableau affiché est dans l'adresse (`?onglet=`) : chaque onglet de l'application a le sien.
   const pathname = usePathname()
@@ -122,7 +127,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   // Tableau ou cartes, et la carte choisie : retenus sur ce poste.
   const [display, setDisplay] = usePersistentState<IndexDisplay>("eraser:object-index:display", "table", isIndexDisplay)
   const [cardChoice, setCardChoice] = usePersistentState<string>("eraser:object-index:card", "", isCardChoice)
-  const [editorMode, setEditorMode] = useState<EditorMode>("columns")
+  const [editorMode, setEditorMode] = useState<EditorMode>(() => (dock?.modelOf(dockKey) as { mode?: EditorMode } | undefined)?.mode ?? "columns")
   const { viewRole, selectedCampaignId } = useShellData()
   const [viewDialog, setViewDialog] = useState<{ mode: "new" | "edit"; draft?: Partial<SavedView>; notice?: string } | null>(null)
   // Une case modifiée dans une fenêtre : en revenant à un tableau, il est relu.
@@ -680,7 +685,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
       setTables(payload.tables)
       if (payload.schemas) setSchemas((current) => ({ ...current, ...payload.schemas }))
       setVersion((current) => current + 1)
-      setEditor(null)
+      closeEditor()
     } catch (reason) {
       setEditorError(reason instanceof Error ? reason.message : "Les changements n’ont pas pu être écrits.")
     }
@@ -724,6 +729,37 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   // au-dessus » n’aurait plus de sens, l’entrée disparaît le temps du tri.
   const inSheetOrder = !sort && !query.trim()
 
+  // L'éditeur (« Modifier »), posé dans le dock de la coque à chaque rendu (il y reste en changeant de page).
+  const editorNode = editor ? <IndexEditor
+        model={editor}
+        sampleRows={Object.fromEntries(tables.filter((table) => table.fileId === editor.key).map((table) => [table.tabName, table.rows.slice(0, 3).map((row) => Object.fromEntries(table.headers.map((header, index) => [header, row.values[index] ?? ""])))]))}
+        open
+        pending={pending === "schema"}
+        error={editorError}
+        onClose={() => { if (pending !== "schema") closeEditor() }}
+        onApply={(operations) => void applyEditor(operations)}
+        onDeleteIndex={() => undefined}
+        layouts={settings.layouts}
+        onSaveLayouts={settings.saveLayouts}
+        cardsIndex="objects"
+        cards={settings.cards}
+        onSaveCards={settings.saveCards}
+        locks={settings.locks}
+        onSaveLocks={settings.saveLocks}
+        presentations={settings.presentations}
+        onSavePresentations={settings.savePresentations}
+        viewPresets={settings.viewPresets}
+        onSaveViewPreset={settings.saveViewPreset}
+        onDeleteViewPreset={settings.deleteViewPreset}
+        previewRows={Object.fromEntries(tables.filter((table) => table.fileId === editor.key).map((table) => [table.tabName, table.rows.slice(0, 40).map((row) => Object.fromEntries(table.headers.map((header, index) => [header, row.values[index] ?? ""])))]))}
+        // « Onglet ouvert d'abord » propose les valeurs de toutes les lignes, pas seulement celles des aperçus.
+        valuesOf={(tabName, header) => { const table = tables.filter((table) => table.fileId === editor.key).find((item) => item.tabName === tabName); const at = table ? table.headers.findIndex((item) => foldName(item) === foldName(header)) : -1; return table && at >= 0 ? [...new Set(table.rows.map((row) => row.values[at] ?? "").filter(Boolean))].slice(0, 2000) : [] }}
+        optionsOf={(tabName, header) => { const table = tables.find((candidate) => candidate.fileId === editor.key && candidate.tabName === tabName); return (table ? specIn(table, header, schemas).options ?? [] : []).map((option) => ({ value: option.value, color: option.color })) }}
+        statsPanel={<IndexStats {...statsProps} canEdit={!busy} />}
+        initialMode={editorMode}
+        initialTab={selected?.tabName}
+      /> : null
+  useEffect(() => { if (dock && editor && editorNode) dock.show(dockKey, { model: editor, mode: editorMode }, editorNode) })
   return (
     <ReferenceScopeProvider scope={referenceScope}>
     <section className="flex flex-col gap-3" {...{ [IN_PLACE_ATTRIBUTE]: pathname }}>
@@ -770,35 +806,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         </div>
       </div>
 
-      {editor && <IndexEditor
-        model={editor}
-        sampleRows={Object.fromEntries(tables.filter((table) => table.fileId === editor.key).map((table) => [table.tabName, table.rows.slice(0, 3).map((row) => Object.fromEntries(table.headers.map((header, index) => [header, row.values[index] ?? ""])))]))}
-        open
-        pending={pending === "schema"}
-        error={editorError}
-        onClose={() => { if (pending !== "schema") setEditor(null) }}
-        onApply={(operations) => void applyEditor(operations)}
-        onDeleteIndex={() => undefined}
-        layouts={settings.layouts}
-        onSaveLayouts={settings.saveLayouts}
-        cardsIndex="objects"
-        cards={settings.cards}
-        onSaveCards={settings.saveCards}
-        locks={settings.locks}
-        onSaveLocks={settings.saveLocks}
-        presentations={settings.presentations}
-        onSavePresentations={settings.savePresentations}
-        viewPresets={settings.viewPresets}
-        onSaveViewPreset={settings.saveViewPreset}
-        onDeleteViewPreset={settings.deleteViewPreset}
-        previewRows={Object.fromEntries(tables.filter((table) => table.fileId === editor.key).map((table) => [table.tabName, table.rows.slice(0, 40).map((row) => Object.fromEntries(table.headers.map((header, index) => [header, row.values[index] ?? ""])))]))}
-        // « Onglet ouvert d'abord » propose les valeurs de toutes les lignes, pas seulement celles des aperçus.
-        valuesOf={(tabName, header) => { const table = tables.filter((table) => table.fileId === editor.key).find((item) => item.tabName === tabName); const at = table ? table.headers.findIndex((item) => foldName(item) === foldName(header)) : -1; return table && at >= 0 ? [...new Set(table.rows.map((row) => row.values[at] ?? "").filter(Boolean))].slice(0, 2000) : [] }}
-        optionsOf={(tabName, header) => { const table = tables.find((candidate) => candidate.fileId === editor.key && candidate.tabName === tabName); return (table ? specIn(table, header, schemas).options ?? [] : []).map((option) => ({ value: option.value, color: option.color })) }}
-        statsPanel={<IndexStats {...statsProps} canEdit={!busy} />}
-        initialMode={editorMode}
-        initialTab={selected?.tabName}
-      />}
+      {!dock && editorNode}
 
       {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
 

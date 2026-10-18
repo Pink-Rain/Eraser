@@ -94,3 +94,20 @@ test("la Liste : le maître-détail montre la ligne cliquée, « Ouvrir la fiche
   assert.match(sized, /max-width:40rem/);
   assert.match(sized, /max-height:20rem/);
 });
+
+test("une page : les largeurs réglées d'une section, l'allure d'une image, l'image du Drive par Eraser", async () => {
+  const { PageSections, ImageView } = await vite.ssrLoadModule("/components/eraser/custom-page-view.tsx");
+  const image = (look) => ({ id: "i", vis: "tous", type: "image", src: "https://drive.google.com/file/d/1VX_xEkd_3xheAbCdEf/view", caption: "Carte", ratio: "16/9", fit: "cover", ...(look ? { look } : {}) });
+  const render = (block) => React.createElement(ImageView, { block });
+  const sized = renderToStaticMarkup(React.createElement(PageSections, { sections: [{ id: "s", layout: "2", framed: false, widths: [70, 30], cols: [[image()], [image()]] }], render }));
+  assert.match(sized, /--section-cols:minmax\(0,70fr\) minmax\(0,30fr\)/);
+  assert.match(sized, /src="\/api\/pages\/images\/1VX_xEkd_3xheAbCdEf"/);
+  // Sans réglage : la disposition, comme avant.
+  assert.doesNotMatch(renderToStaticMarkup(React.createElement(PageSections, { sections: [{ id: "s", layout: "2", framed: false, cols: [[image()], [image()]] }], render })), /--section-cols/);
+  const looked = renderToStaticMarkup(React.createElement(ImageView, { block: image({ width: 40, align: "right", frame: "none", radius: 0, fade: "bottom" }) }));
+  assert.match(looked, /max-width:40%/);
+  assert.match(looked, /ml-auto/);
+  assert.match(looked, /mask-image:linear-gradient\(to bottom, #000 60%, transparent\)/);
+  assert.match(looked, /border-radius:0/);
+  assert.doesNotMatch(looked, /shadow-\[/);
+});

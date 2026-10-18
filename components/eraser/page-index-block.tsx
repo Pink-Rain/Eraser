@@ -2,13 +2,16 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { createContext, useCallback, useContext, useDeferredValue, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import { ChevronRight, LoaderCircle, RotateCcw, Search, TriangleAlert, X } from "lucide-react"
 
 import { CardActionsContext, IndexCard, IndexCardGrid, roleRowOf, type CardActions, type CardRowSource } from "@/components/eraser/index-card"
 import { useRolesOf } from "@/components/eraser/view-roles"
 import { IndexFormView } from "@/components/eraser/index-form-view"
 import { IndexEntryForm, primeWorldIndexData } from "@/components/eraser/index-cells"
+import { IndexRowForm } from "@/components/eraser/index-row-sheet"
+import type { IndexColumnSpec } from "@/lib/index-columns"
+import type { IndexLayout } from "@/lib/index-layouts"
 import { IndexStats } from "@/components/eraser/index-stats"
 import { IndexPresentation } from "@/components/eraser/index-presentation"
 import type { BacklinksBlock, SearchBlock, StatBlock, ViewBlock } from "@/lib/custom-pages"
@@ -134,6 +137,32 @@ function ReadTable({ data, open, onRow, linkOf }: { data: ViewData; open: (href?
   </div>
 }
 
+/**
+ * Une ligne modifiable sur une page (le détail modifiable, un bouton « Modifier ») : le formulaire de
+ * l'onglet, ses champs enregistrés d'eux-mêmes dans l'index, comme dans sa fiche. Seulement quand le
+ * serveur a donné l'identifiant de la ligne (jamais à un joueur) ; le serveur vérifie qui peut écrire.
+ * Le bloc relit l'index en refermant, pas à chaque frappe (le quota de Google est partagé).
+ */
+function PageRowForm({ data, rowKey, form, locked = [], valueOf, specOf, onChanged }: { data: ViewData; rowKey: string; form?: IndexLayout; locked?: string[]; valueOf: (rowKey: string, header: string) => string; specOf: (header: string) => IndexColumnSpec | undefined; onChanged?: () => void }) {
+  const row = data.rows.find((item) => item.key === rowKey)
+  const pendingRef = useRef<Promise<unknown> | null>(null)
+  const changedRef = useRef(onChanged)
+  useEffect(() => { changedRef.current = onChanged })
+  // Refermé (ou une autre ligne) : le bloc relit l'index une fois ce qui partait enregistré.
+  useEffect(() => () => { const pending = pendingRef.current; if (pending) void pending.finally(() => changedRef.current?.()) }, [])
+  const fields = data.headers.filter((header) => !/^id$/i.test(header.trim())).map((header) => ({ key: header, label: header, spec: specOf(header) ?? { kind: "rich" as const }, value: valueOf(rowKey, header) }))
+  const save = async (_key: string, changes: Record<string, string>) => {
+    const request = (async () => {
+      const response = await fetch("/api/resources/world-indexes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: data.index, action: "update-fields", tabName: data.tab, rowNumber: 2, rowId: row?.id ?? "", rowName: row?.name ?? "", fields: changes }) })
+      const payload = (await response.json().catch(() => ({}))) as { error?: string }
+      if (!response.ok) throw new Error(payload.error || "Ce champ n’a pas pu être enregistré.")
+    })()
+    pendingRef.current = request.catch(() => undefined)
+    await request
+  }
+  return <IndexRowForm rowKey={rowKey} fields={fields} layout={form} onSave={save} locked={locked} />
+}
+
 function ViewContent({ data, block, searching = false, onChanged }: { data: ViewData; block: ViewBlock; searching?: boolean; /** Une ligne ajoutée ici : le bloc relit l'index. */ onChanged?: () => void }) {
   const router = useRouter()
   const byKey = useMemo(() => new Map(data.rows.map((row) => [row.key, row])), [data.rows])
@@ -152,7 +181,9 @@ function ViewContent({ data, block, searching = false, onChanged }: { data: View
   const inPlace = !block.click || isPresentationKind(data.layout?.kind)
   const rowPageOf = useCallback((rowKey: string) => { const href = byKey.get(rowKey)?.href; return href && !href.includes("?ligne=") ? href : undefined }, [byKey])
   const openRowPage = useCallback((rowKey: string) => { const href = rowPageOf(rowKey); if (!href) return false; router.push(href); return true }, [rowPageOf, router])
-  const [sheet, setSheet] = useState<{ row: string; form: string } | null>(null)
+  const [sheet, setSheet] = useState<{ row: string; form: string; card?: string } | null>(null)
+  // La ligne se modifie ici seulement si le serveur a donné son identifiant (MJ et admins ; jamais un joueur).
+  const editable = useCallback((rowKey: string) => Boolean(byKey.get(rowKey)?.id) && data.index !== "", [byKey, data.index])
   // « Ajouter » de la barre d'outils : une ligne neuve dans l'onglet, ici, dans une fenêtre (le serveur vérifie qui peut écrire).
   const [adding, setAdding] = useState(false)
   const [addState, setAddState] = useState<{ pending: boolean; error: string }>({ pending: false, error: "" })
@@ -183,12 +214,21 @@ function ViewContent({ data, block, searching = false, onChanged }: { data: View
       const step = button.steps[0]
       if (step?.type === "open-url" && /^https?:\/\//i.test(fill(step.url).trim())) { window.open(fill(step.url).trim(), "_blank", "noopener,noreferrer"); return }
       if (step?.type === "open-eraser" && fill(step.href).trim().startsWith("/")) { router.push(fill(step.href).trim()); return }
+      // Ce qui s'ouvre sur la ligne s'ouvre ici, dans la page : sa fiche, un formulaire (modifiable pour qui peut écrire), une carte.
+      if (step?.type === "open-sheet") return setSheet({ row: rowKey, form: "principal" })
+      if (step?.type === "open-form") return setSheet({ row: rowKey, form: step.form || "principal" })
+      if (step?.type === "show-card") return setSheet({ row: rowKey, form: "principal", card: step.card || DEFAULT_ITEM_CARD })
+      if (step?.type === "open-page") { if (!openRowPage(rowKey)) setSheet({ row: rowKey, form: "principal" }); return }
+      // Ce qui modifie la ligne (une valeur, +1, supprimer…) se fait dans son index (MJ et admins).
       openRow(rowKey)
     },
     rolesOf: (rowKey) => rolesOf(roleRowOf(byKey.get(rowKey)?.name ?? "", data.headers, (header) => valueOf(rowKey, header))),
     openForm: (rowKey, form) => inPlace ? setSheet({ row: rowKey, form: form || "principal" }) : openRow(rowKey),
     openPage: (rowKey) => inPlace ? void (openRowPage(rowKey) || setSheet({ row: rowKey, form: "principal" })) : openRow(rowKey),
   }), [byKey, data.headers, inPlace, openRow, openRowPage, rolesOf, router, valueOf])
+  const formOf = useCallback((formId: string) => data.forms?.[formId] ?? data.forms?.principal ?? Object.values(data.forms ?? {})[0], [data.forms])
+  // Le détail modifiable d'une vue (« Modifiable directement », « Avec Modifier ») marche aussi sur une page.
+  const renderEditForm = useCallback((rowKey: string, formId: string, locked: string[]) => editable(rowKey) ? <PageRowForm key={`${rowKey}:${formId}`} data={data} rowKey={rowKey} form={formOf(formId)} locked={locked} valueOf={valueOf} specOf={specOf} onChanged={onChanged} /> : null, [data, editable, formOf, onChanged, specOf, valueOf])
   // Le calendrier lit l'Index des calendriers : la page le lui donne (un joueur ne peut pas le lire).
   useEffect(() => { if (data.calendars) primeWorldIndexData("calendars", { tables: data.calendars }) }, [data.calendars])
   const card = data.cards ? pickCard(data.cards, null) : null
@@ -207,11 +247,12 @@ function ViewContent({ data, block, searching = false, onChanged }: { data: View
     return stat ? <IndexStats stats={[{ ...stat, pinned: true }]} groups={data.statGroups} pinnedOnly single rows={data.rows.map((row) => row.key)} columns={data.headers} tabs={[data.tab]} valueOf={valueOf} tabOf={() => data.tab} nameOf={(rowKey) => byKey.get(rowKey)?.name ?? ""} optionsOf={(header) => (specOf(header)?.options ?? []).map((option) => ({ value: option.value, color: option.color }))} onOpen={data.rows.some((row) => row.href) ? (rowKey) => openRow(rowKey) : undefined} canEdit={false} onSave={async () => undefined} /> : null
   }, [byKey, data.headers, data.rows, data.statGroups, data.stats, data.tab, openRow, specOf, valueOf])
   const empty = searching ? "Aucune ligne ne correspond à la recherche." : "Aucune ligne dans cette vue pour le moment."
-  // La fiche ouverte ici par un bouton de carte (« Ouvrir un formulaire », « Ouvrir la page » sans page) : en lecture.
+  // La fiche (ou un formulaire, une carte) ouverte ici par un bouton de carte : modifiable pour qui peut écrire, sinon en lecture.
+  const sheetCard = sheet?.card && data.cards ? pickCard(data.cards, sheet.card === DEFAULT_ITEM_CARD ? null : sheet.card) : null
   const sheetDialog = sheet && byKey.has(sheet.row) ? <Dialog open onOpenChange={(value) => { if (!value) setSheet(null) }}>
     <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-3xl">
       <DialogHeader><DialogTitle className="font-display text-2xl">{byKey.get(sheet.row)?.name || "Sans nom"}</DialogTitle><DialogDescription>{data.title} › {data.tab}</DialogDescription></DialogHeader>
-      {renderForm(sheet.row, sheet.form) ?? <dl className="grid gap-3 sm:grid-cols-2">{data.headers.map((header) => { const value = strip(valueOf(sheet.row, header)); return value ? <div key={header} className="min-w-0"><dt className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{header}</dt><dd className="mt-0.5 break-words text-sm">{value}</dd></div> : null })}</dl>}
+      {sheetCard ? <IndexCard card={sheetCard} row={rowSource(sheet.row)} /> : (editable(sheet.row) ? <PageRowForm key={`${sheet.row}:${sheet.form}`} data={data} rowKey={sheet.row} form={formOf(sheet.form)} valueOf={valueOf} specOf={specOf} onChanged={onChanged} /> : renderForm(sheet.row, sheet.form)) ?? <dl className="grid gap-3 sm:grid-cols-2">{data.headers.map((header) => { const value = strip(valueOf(sheet.row, header)); return value ? <div key={header} className="min-w-0"><dt className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{header}</dt><dd className="mt-0.5 break-words text-sm">{value}</dd></div> : null })}</dl>}
     </DialogContent>
   </Dialog> : null
   const addDialog = adding ? <Dialog open onOpenChange={(value) => { if (!value && !addState.pending) setAdding(false) }}>
@@ -237,6 +278,7 @@ function ViewContent({ data, block, searching = false, onChanged }: { data: View
     onOpen={openRow}
     onOpenPage={inPlace ? openRowPage : openRow}
     inPlace={inPlace}
+    renderEditForm={renderEditForm}
     onAdd={() => { setAddState({ pending: false, error: "" }); setAdding(true) }}
     renderCard={data.cards ? renderCard : undefined}
     cardOf={data.cards ? (_rowKey, cardId) => pickCard(data.cards!, cardId === DEFAULT_ITEM_CARD ? null : cardId) : undefined}

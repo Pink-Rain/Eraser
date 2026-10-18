@@ -226,8 +226,10 @@ export function viewBlockData(source: IndexSource, input: ViewBlockInput, settin
   if (chosen) {
     const layout = fitLayoutToColumns(chosen, headers)
     // Les formulaires que la vue lit (élément, détail) : celui de l'onglet, sinon celui d'Eraser, sinon l'automatique sur les colonnes visibles.
-    // Le formulaire principal aussi : sur une page, la fiche d'une ligne s'ouvre ici, en lecture.
-    const wanted = [...new Set([DEFAULT_FORM_ID, ...(layout.itemForm ? [layout.itemForm] : []), ...(layout.detail?.kind === "form" ? [layout.detail.form ?? DEFAULT_FORM_ID] : [])])]
+    // Le formulaire principal aussi : sur une page, la fiche d'une ligne s'ouvre ici.
+    // Tous les formulaires de l'onglet : un bouton de carte peut ouvrir l'un d'eux sur la page.
+    const named = Object.entries(settings.layouts ?? {}).find(([name]) => foldName(name) === foldName(table.tabName))?.[1]?.forms?.map((item) => item.id) ?? []
+    const wanted = [...new Set([DEFAULT_FORM_ID, ...named, ...(layout.itemForm ? [layout.itemForm] : []), ...(layout.detail?.kind === "form" ? [layout.detail.form ?? DEFAULT_FORM_ID] : [])])]
     const forms = Object.fromEntries(wanted.map((id) => [id, tabFormOrBuiltin(settings.layouts, source.key, table.tabName, id) ?? automaticLayoutFor("form", headers.map((header) => ({ header, spec: specs[header] })))]))
     // Le tableau de bord : ses tuiles « vue » lisent les autres vues de l'onglet, ses tuiles « stat » les statistiques de l'index, ses tuiles « carte » les cartes.
     const tiles = layout.kind === "dashboard" ? layout.tiles ?? [] : []

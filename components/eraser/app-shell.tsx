@@ -1,5 +1,6 @@
 "use client"
 
+import { EditorDockProvider } from "@/components/eraser/editor-dock"
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react"
 import { installNavigationCacheGuard } from "@/lib/navigation-cache"
 import { PortraitFramingEffect } from "@/components/eraser/portrait-framing"
@@ -855,9 +856,12 @@ export function AppShell({
             <PageEditContext.Provider value={setEditPageId}>
             {pendingPage && <PendingPage pending={pendingPage} />}
             {/* La page actuelle reste montée (cachée) pendant que la suivante arrive. */}
+            {/* « Modifier » d'un index reste ouvert en changeant de page : il vit ici, pas dans la page. */}
+            <EditorDockProvider>
             <div data-view-role={viewRole} className={pendingPage ? "hidden" : "contents"}>
               {children}
             </div>
+            </EditorDockProvider>
             </PageEditContext.Provider>
           </ShellDataContext.Provider>
         </div>

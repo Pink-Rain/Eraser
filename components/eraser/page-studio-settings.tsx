@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react"
 import { Check, ChevronDown, Copy, ExternalLink, LoaderCircle, Plus, RefreshCw, TriangleAlert, X } from "lucide-react"
 
 import { IconPicker } from "@/components/eraser/index-gauge"
+import { Range } from "@/components/eraser/editor-controls"
 import { PageIcon, calloutTones, formatWhen } from "@/components/eraser/custom-page-view"
 import { blockIcons } from "@/components/eraser/page-studio-icons"
 import { PresentationKindSettings } from "@/components/eraser/index-presentations-editor"
@@ -18,7 +19,10 @@ import {
   blockCatalog,
   blockVisibilities,
   blockVisibleTo,
+  cleanImageLook,
   cleanImageSource,
+  IMAGE_LOOK_DEFAULTS,
+  imageFadeMask,
   pageHref,
   pagePlaces,
   pageRoles,
@@ -29,6 +33,8 @@ import {
   viewBlockKinds,
   viewHeights,
   type BlockVisibility,
+  type ImageFade,
+  type ImageLook,
   type PageBlock,
   type PageDraft,
   type PagePlace,
@@ -459,12 +465,13 @@ export function BlockSettings({ block, pages, live, rowOf, onChange, onDuplicate
     case "image": {
       const valid = !block.src || cleanImageSource(block.src) === block.src
       content = <>
-        <Field label="Adresse de l’image" error={valid ? undefined : "Une adresse https://, un fichier d’Eraser (/api/…) ou une colonne de la ligne ({Portrait})."} hint={rowOf?.index ? "Page de ligne : « {Portrait} » prend l’image de cette colonne de la ligne." : "Une image du Drive partagé, d’un index (clic droit › copier l’adresse de l’image) ou du web (https)."}>
+        <Field label="Adresse de l’image" error={valid ? undefined : "Une adresse https://, un fichier d’Eraser (/api/…) ou une colonne de la ligne ({Portrait})."} hint={rowOf?.index ? "Page de ligne : « {Portrait} » prend l’image de cette colonne de la ligne." : "Le lien de partage d’une image du Drive (Partager › Copier le lien), une image d’un index (clic droit › copier l’adresse de l’image) ou du web (https)."}>
           <input className={fieldClass} value={block.src} placeholder="https://…" onChange={(event) => set({ src: event.target.value.trim() }, "src")} />
         </Field>
         <Field label="Légende"><input className={fieldClass} value={block.caption} maxLength={300} placeholder="Facultative (sert aussi de texte de remplacement)" onChange={(event) => set({ caption: event.target.value }, "caption")} /></Field>
         <Field label="Format"><Segmented size="sm" label="Format" value={block.ratio} onChange={(ratio) => set({ ratio })} options={[{ value: "auto", label: "Libre" }, { value: "21/9", label: "21:9" }, { value: "16/9", label: "16:9" }, { value: "4/3", label: "4:3" }, { value: "1/1", label: "1:1" }, { value: "3/4", label: "3:4" }]} /></Field>
         <Field label="Cadrage"><Segmented label="Cadrage" value={block.fit} onChange={(fit) => set({ fit })} options={[{ value: "cover", label: "Remplir le cadre" }, { value: "contain", label: "Image entière" }]} /></Field>
+        <ImageLookSettings block={block} onChange={(look) => set({ look })} />
       </>
       break
     }
@@ -585,6 +592,43 @@ function RowCondition({ rowOf, value, onChange }: { rowOf: { index: string; tab?
   return <>
     <WhereEditor where={value} columns={columns} choices={choices} rowPage={false} onChange={onChange} />
     <Hint>Sans condition : sur la page de chaque ligne. Sinon, seulement sur celles qui les remplissent (« Type est Boss ») ; ailleurs, le bloc n’est pas envoyé du tout.</Hint>
+  </>
+}
+
+const imageFades: Array<{ value: ImageFade | ""; label: string }> = [
+  { value: "", label: "Aucun" },
+  { value: "bottom", label: "Vers le bas" },
+  { value: "top", label: "Vers le haut" },
+  { value: "left", label: "Vers la gauche" },
+  { value: "right", label: "Vers la droite" },
+  { value: "sides", label: "Les deux côtés" },
+  { value: "ends", label: "En haut et en bas" },
+  { value: "edges", label: "Tout autour" },
+]
+
+/** L'allure d'une image : sa taille, sa place, son cadre, ses coins, un dégradé vers le transparent. */
+function ImageLookSettings({ block, onChange }: { block: Extract<PageBlock, { type: "image" }>; onChange: (look: ImageLook | undefined) => void }) {
+  const look = block.look ?? {}
+  const update = (patch: Partial<ImageLook>) => onChange(cleanImageLook({ ...look, ...patch }))
+  const width = look.width ?? IMAGE_LOOK_DEFAULTS.width
+  return <>
+    <Range text="Largeur" value={width} min={15} max={100} step={5} format={(value) => value === 100 ? "toute la colonne" : `${value} %`} onChange={(value) => update({ width: value })} />
+    {width < 100 && <Field label="Place"><Segmented size="sm" label="Place" value={look.align ?? "center"} onChange={(align) => update({ align: align === "center" ? undefined : align })} options={[{ value: "left", label: "À gauche" }, { value: "center", label: "Au centre" }, { value: "right", label: "À droite" }]} /></Field>}
+    <Field label="Cadre"><Segmented size="sm" label="Cadre" value={look.frame ?? "card"} onChange={(frame) => update({ frame: frame === "card" ? undefined : frame })} options={[{ value: "card", label: "Encadrée", title: "Une bordure, un fond et une ombre" }, { value: "tint", label: "Fond seul", title: "Un fond léger, sans bordure ni ombre" }, { value: "none", label: "Rien", title: "L’image seule, posée sur la page" }]} /></Field>
+    <Range text="Coins arrondis" value={look.radius ?? IMAGE_LOOK_DEFAULTS.radius} min={0} max={64} step={2} format={(value) => value ? `${value} px` : "droits"} onChange={(value) => update({ radius: value })} />
+    {block.fit === "cover" && block.ratio !== "auto" && <Field label="Point fort" hint="Ce qui reste visible quand l’image déborde du format."><Segmented size="sm" label="Point fort" value={look.focus ?? "center"} onChange={(focus) => update({ focus: focus === "center" ? undefined : focus })} options={[{ value: "center", label: "Centre" }, { value: "top", label: "Haut" }, { value: "bottom", label: "Bas" }, { value: "left", label: "Gauche" }, { value: "right", label: "Droite" }]} /></Field>}
+    <Field label="Dégradé vers le transparent" hint={look.fade ? "L’image se fond dans la page de ce côté." : undefined}>
+      <div role="group" aria-label="Dégradé vers le transparent" className="flex flex-wrap gap-1">
+        {imageFades.map((fade) => {
+          const mask = imageFadeMask(fade.value || undefined, 50)
+          return <button key={fade.value} type="button" title={fade.label} aria-label={fade.label} aria-pressed={(look.fade ?? "") === fade.value} onClick={() => update({ fade: fade.value || undefined })}
+            className="grid size-9 place-items-center rounded-lg border bg-card transition hover:border-foreground/40 aria-pressed:border-foreground aria-pressed:ring-2 aria-pressed:ring-foreground/15">
+            {fade.value ? <span className="block h-5 w-7 rounded-[3px] bg-gradient-to-br from-[#927640] to-[#3b5c8a]" style={{ maskImage: mask, WebkitMaskImage: mask }} /> : <X className="size-3.5 text-muted-foreground" />}
+          </button>
+        })}
+      </div>
+    </Field>
+    {look.fade && <Range text="Étendue du dégradé" value={look.fadeAmount ?? IMAGE_LOOK_DEFAULTS.fadeAmount} min={5} max={100} step={5} format={(value) => `${value} %`} onChange={(value) => update({ fadeAmount: value })} />}
   </>
 }
 

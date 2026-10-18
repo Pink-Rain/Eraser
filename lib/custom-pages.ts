@@ -50,7 +50,24 @@ export type TitleBlock = Common & { type: "title"; eyebrow: string; text: string
 export type TextBlock = Common & { type: "text"; html: string }
 export type CalloutBlock = Common & { type: "callout"; tone: CalloutTone; title: string; html: string }
 export type QuoteBlock = Common & { type: "quote"; text: string; cite: string }
-export type ImageBlock = Common & { type: "image"; src: string; caption: string; ratio: ImageRatio; fit: "cover" | "contain" }
+/**
+ * L'allure d'une image ; chaque réglage absent vaut son défaut : toute la largeur, centrée, dans
+ * un cadre (bordure, fond, ombre), arrondie de 16 px, sans dégradé, cadrée au centre.
+ * `fade` : le bord (ou les bords) qui s'efface vers le transparent ; `fadeAmount` : la part de
+ * l'image qu'il couvre (en %).
+ */
+export type ImageLook = {
+  width?: number
+  align?: "left" | "right"
+  frame?: "tint" | "none"
+  radius?: number
+  fade?: ImageFade
+  fadeAmount?: number
+  focus?: "top" | "bottom" | "left" | "right"
+}
+export type ImageFade = "bottom" | "top" | "left" | "right" | "sides" | "ends" | "edges"
+export const IMAGE_LOOK_DEFAULTS = { width: 100, radius: 16, fadeAmount: 40 } as const
+export type ImageBlock = Common & { type: "image"; src: string; caption: string; ratio: ImageRatio; fit: "cover" | "contain"; look?: ImageLook }
 export type SeparatorBlock = Common & { type: "separator"; glyph: SeparatorGlyph }
 /** Un lien vers une page créée ici (`pageId`) ou une adresse d'Eraser (`href`). */
 export type LinkBlock = Common & { type: "link"; pageId: string; href: string; title: string; description: string; style: "card" | "compact" }
@@ -107,7 +124,8 @@ export type SearchBlock = Common & { type: "search"; placeholder: string; headin
 export type ModuleBlock = Common & { type: "module"; module: EraserModuleKey; place: PageSection; heading: string }
 export type PageBlock = TitleBlock | TextBlock | CalloutBlock | QuoteBlock | ImageBlock | SeparatorBlock | LinkBlock | SecretBlock | NotesBlock | ViewBlock | StatBlock | RowFieldsBlock | BacklinksBlock | SearchBlock | ModuleBlock
 
-export type PageSectionBlock = { id: string; layout: SectionLayout; framed: boolean; cols: PageBlock[][] }
+/** `widths` : la part de chaque colonne (en %, leur somme fait 100), quand on l'a réglée ; absente : celle de la disposition. */
+export type PageSectionBlock = { id: string; layout: SectionLayout; framed: boolean; widths?: number[]; cols: PageBlock[][] }
 
 /** Ce qui se publie (et se restaure avec « Revenir à la version publiée »). */
 /** `hideHeader` : sans l'en-tête de la page (titre, icône, description), quand un bloc en tient lieu. */
@@ -341,6 +359,61 @@ export function cleanImageSource(value: unknown) {
   return ""
 }
 
+/**
+ * L'adresse que la page affiche pour une image : un lien de partage du Drive
+ * (drive.google.com/file/d/…, open?id=…, uc?id=…) passe par Eraser, qui le lit avec son compte
+ * Google ; une page web ne sait pas l'afficher telle quelle. Le reste ne change pas.
+ */
+export function pageImageUrl(source: string) {
+  const match = /^https:\/\/(?:drive|docs)\.google\.com\//i.test(source) && (source.match(/\/(?:file\/)?d\/([A-Za-z0-9_-]{10,})/) ?? source.match(/[?&]id=([A-Za-z0-9_-]{10,})/))
+  return match ? `/api/pages/images/${match[1]}` : source
+}
+
+/** L'allure d'une image remise en forme : seuls les réglages qui s'écartent du défaut restent. */
+export function cleanImageLook(value: unknown): ImageLook | undefined {
+  if (!value || typeof value !== "object") return undefined
+  const raw = value as Record<string, unknown>
+  const look: ImageLook = {}
+  const bounded = (input: unknown, min: number, max: number) => typeof input === "number" && Number.isFinite(input) ? Math.round(Math.min(max, Math.max(min, input))) : undefined
+  const width = bounded(raw.width, 15, 100)
+  if (width !== undefined && width !== IMAGE_LOOK_DEFAULTS.width) look.width = width
+  if (raw.align === "left" || raw.align === "right") look.align = raw.align
+  if (raw.frame === "tint" || raw.frame === "none") look.frame = raw.frame
+  const radius = bounded(raw.radius, 0, 64)
+  if (radius !== undefined && radius !== IMAGE_LOOK_DEFAULTS.radius) look.radius = radius
+  if (typeof raw.fade === "string" && (["bottom", "top", "left", "right", "sides", "ends", "edges"] as string[]).includes(raw.fade)) {
+    look.fade = raw.fade as ImageFade
+    const amount = bounded(raw.fadeAmount, 5, 100)
+    if (amount !== undefined && amount !== IMAGE_LOOK_DEFAULTS.fadeAmount) look.fadeAmount = amount
+  }
+  if (raw.focus === "top" || raw.focus === "bottom" || raw.focus === "left" || raw.focus === "right") look.focus = raw.focus
+  return Object.keys(look).length ? look : undefined
+}
+
+const withImageLook = (value: unknown) => {
+  const look = cleanImageLook(value)
+  return look ? { look } : {}
+}
+
+/**
+ * Le masque d'un dégradé vers le transparent (`mask-image`) : opaque au milieu, transparent au
+ * bord choisi, sur `amount` % de l'image.
+ */
+export function imageFadeMask(fade: ImageFade | undefined, amount: number = IMAGE_LOOK_DEFAULTS.fadeAmount) {
+  if (!fade) return undefined
+  const part = Math.min(100, Math.max(5, amount))
+  const solid = `${100 - part}%`
+  switch (fade) {
+    case "bottom": return `linear-gradient(to bottom, #000 ${solid}, transparent)`
+    case "top": return `linear-gradient(to top, #000 ${solid}, transparent)`
+    case "left": return `linear-gradient(to left, #000 ${solid}, transparent)`
+    case "right": return `linear-gradient(to right, #000 ${solid}, transparent)`
+    case "sides": return `linear-gradient(to right, transparent, #000 ${part / 2}%, #000 ${100 - part / 2}%, transparent)`
+    case "ends": return `linear-gradient(to bottom, transparent, #000 ${part / 2}%, #000 ${100 - part / 2}%, transparent)`
+    case "edges": return `radial-gradient(closest-side, #000 ${solid}, transparent)`
+  }
+}
+
 /** Un lien accepté : une page d'Eraser (adresse relative) ou une adresse https. */
 export function cleanLinkHref(value: unknown) {
   const raw = typeof value === "string" ? value.trim().slice(0, PAGE_LIMITS.src) : ""
@@ -390,7 +463,7 @@ export function cleanBlock(input: unknown): PageBlock | null {
     case "text": return { ...common, type, html: html(raw.html) }
     case "callout": return { ...common, type, tone: oneOf(raw.tone, ["info", "mj", "secret", "alerte"] as const, "info"), title: text(raw.title, 160), html: html(raw.html) }
     case "quote": return { ...common, type, text: text(raw.text, 600), cite: text(raw.cite, 200) }
-    case "image": return { ...common, type, src: cleanImageSource(raw.src), caption: text(raw.caption, 300), ratio: oneOf(raw.ratio, ["auto", "21/9", "16/9", "4/3", "1/1", "3/4"] as const, "16/9"), fit: oneOf(raw.fit, ["cover", "contain"] as const, "cover") }
+    case "image": return { ...common, type, src: cleanImageSource(raw.src), caption: text(raw.caption, 300), ratio: oneOf(raw.ratio, ["auto", "21/9", "16/9", "4/3", "1/1", "3/4"] as const, "16/9"), fit: oneOf(raw.fit, ["cover", "contain"] as const, "cover"), ...withImageLook(raw.look) }
     case "separator": return { ...common, type, glyph: oneOf(raw.glyph, ["ornement", "etoile", "points", "trait"] as const, "ornement") }
     case "link": return { ...common, type, pageId: isId(raw.pageId) ? raw.pageId : "", href: isId(raw.pageId) ? "" : cleanLinkHref(raw.href), title: text(raw.title, 160), description: text(raw.description, 300), style: oneOf(raw.style, ["card", "compact"] as const, "card") }
     case "secret": return { ...common, type, title: text(raw.title, 160), html: html(raw.html) }
@@ -420,6 +493,38 @@ export function cleanBlock(input: unknown): PageBlock | null {
   }
 }
 
+/** Une colonne d'une section, au moins (en %). */
+export const MIN_COLUMN_WIDTH = 15
+
+/** La part de chaque colonne d'une disposition (en %), telle qu'elle est sans réglage. */
+export function defaultSectionWidths(layout: SectionLayout) {
+  const weights = sectionLayouts.find((item) => item.value === layout)?.columns ?? [1]
+  const total = weights.reduce((sum, weight) => sum + weight, 0)
+  return weights.map((weight) => weight / total * 100)
+}
+
+/**
+ * Les largeurs réglées d'une section : une part par colonne, d'au moins `MIN_COLUMN_WIDTH` %,
+ * ramenées à 100 en tout ; absentes si elles ne lisent pas ou valent celles de la disposition.
+ */
+export function cleanSectionWidths(value: unknown, layout: SectionLayout): number[] | undefined {
+  const wanted = sectionLayouts.find((item) => item.value === layout)?.columns.length ?? 1
+  if (wanted < 2 || !Array.isArray(value) || value.length !== wanted || !value.every((item) => typeof item === "number" && Number.isFinite(item) && item > 0)) return undefined
+  const total = (value as number[]).reduce((sum, item) => sum + item, 0)
+  let parts = (value as number[]).map((item) => item / total * 100)
+  // Une colonne trop étroite prend le minimum, pris sur les autres (à proportion).
+  for (let pass = 0; pass < wanted; pass += 1) {
+    const low = parts.map((part) => part < MIN_COLUMN_WIDTH)
+    if (!low.some(Boolean)) break
+    const free = parts.reduce((sum, part, index) => low[index] ? sum : sum + part, 0)
+    const room = 100 - MIN_COLUMN_WIDTH * low.filter(Boolean).length
+    parts = parts.map((part, index) => low[index] ? MIN_COLUMN_WIDTH : part / free * room)
+  }
+  const widths = parts.map((part) => Math.round(part * 10) / 10)
+  const defaults = defaultSectionWidths(layout)
+  return widths.every((item, index) => Math.abs(item - defaults[index]) < 0.6) ? undefined : widths
+}
+
 /** Les sections d'une page : dispositions connues, autant de colonnes que la disposition en veut. */
 export function cleanSections(input: unknown): PageSectionBlock[] {
   const seen = new Set<string>()
@@ -442,7 +547,8 @@ export function cleanSections(input: unknown): PageSectionBlock[] {
         target.push(block)
       }
     })
-    return [{ id: isId(raw.id) && !seen.has(raw.id) ? raw.id : newId("s"), layout, framed: raw.framed === true, cols }]
+    const widths = cleanSectionWidths(raw.widths, layout)
+    return [{ id: isId(raw.id) && !seen.has(raw.id) ? raw.id : newId("s"), layout, framed: raw.framed === true, ...(widths ? { widths } : {}), cols }]
   })
   return sections.length ? sections : [{ id: newId("s"), layout: "1", framed: false, cols: [[]] }]
 }

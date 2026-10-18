@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useMemo, useState, type ReactNode } from "react"
+import { useMemo, useState, type CSSProperties, type ReactNode } from "react"
 import { ChevronRight, EyeOff, Puzzle, FileText, ImageOff, Info, LoaderCircle, LockKeyhole, NotebookPen, PenLine, ShieldAlert, Sparkles, TriangleAlert, WandSparkles } from "lucide-react"
 
 import { usePageEditTarget } from "@/components/eraser/app-shell"
@@ -16,7 +16,7 @@ import { fillRowPage, unpackRowContext, type RowContext } from "@/lib/custom-pag
 import { arrangeLayout, resolveLayoutColor, type LayoutBlock, type LayoutField } from "@/lib/index-layouts"
 import { eraserModules, moduleSections } from "@/lib/eraser-modules"
 import { RichTextField } from "@/components/eraser/rich-text"
-import { placeLabel, sectionLayouts, studioHref, type CalloutTone, type ImageRatio, type PageBlock, type PageView, type SectionLayout, type ViewedBlock, type ViewedSection } from "@/lib/custom-pages"
+import { IMAGE_LOOK_DEFAULTS, imageFadeMask, pageImageUrl, placeLabel, sectionLayouts, studioHref, type CalloutTone, type ImageRatio, type PageBlock, type PageView, type SectionLayout, type ViewedBlock, type ViewedSection } from "@/lib/custom-pages"
 
 /**
  * Les pages du créateur de pages, telles qu'on les lit : les sections et leurs colonnes,
@@ -34,6 +34,17 @@ export const layoutGrid: Record<SectionLayout, string> = {
   "3": "grid-cols-[minmax(0,1fr)] @[38rem]:grid-cols-2 @[56rem]:grid-cols-3",
   "side-r": "grid-cols-[minmax(0,1fr)] @[38rem]:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]",
   "side-l": "grid-cols-[minmax(0,1fr)] @[38rem]:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]",
+}
+
+/** Une section aux largeurs réglées : ses colonnes côte à côte dès que la place le permet (`--section-cols`). */
+const widthsGrid = (columns: number) => columns === 3
+  ? "grid-cols-[minmax(0,1fr)] @[38rem]:grid-cols-2 @[56rem]:grid-cols-[var(--section-cols)]"
+  : "grid-cols-[minmax(0,1fr)] @[38rem]:grid-cols-[var(--section-cols)]"
+
+/** La grille d'une section : sa disposition, ou ses largeurs réglées. */
+export function sectionGrid(layout: SectionLayout, widths?: number[]): { className: string; style?: CSSProperties } {
+  if (!widths || widths.length !== layoutColumns(layout)) return { className: layoutGrid[layout] }
+  return { className: widthsGrid(widths.length), style: { "--section-cols": widths.map((width) => `minmax(0,${width}fr)`).join(" ") } as CSSProperties }
 }
 
 export const calloutTones: Record<CalloutTone, { label: string; icon: typeof Info; box: string; title: string }> = {
@@ -89,18 +100,34 @@ export function QuoteView({ block }: { block: Extract<PageBlock, { type: "quote"
   </figure>
 }
 
+const imageFrames = {
+  card: "border bg-muted/50 shadow-[0_10px_30px_rgb(67_50_31/0.07)]",
+  tint: "bg-muted/50",
+  none: "",
+}
+const imageFocus = { top: "object-top", bottom: "object-bottom", left: "object-left", right: "object-right" }
+
 export function ImageView({ block }: { block: Extract<PageBlock, { type: "image" }> }) {
   const [failed, setFailed] = useState("")
   const ratio = imageRatios[block.ratio]
-  const broken = !block.src || failed === block.src
-  return <figure className="grid gap-2">
-    <div className="relative overflow-hidden rounded-2xl border bg-muted/50 shadow-[0_10px_30px_rgb(67_50_31/0.07)]" style={ratio ? { aspectRatio: ratio } : undefined}>
+  const source = pageImageUrl(block.src)
+  const broken = !block.src || failed === source
+  const look = block.look ?? {}
+  const width = look.width ?? IMAGE_LOOK_DEFAULTS.width
+  const mask = imageFadeMask(look.fade, look.fadeAmount)
+  const place = look.align === "left" ? "mr-auto" : look.align === "right" ? "ml-auto" : "mx-auto"
+  const fromDrive = source !== block.src
+  return <figure className={`grid w-full gap-2 ${place}`} style={width < 100 ? { maxWidth: `${width}%` } : undefined}>
+    <div className={`relative overflow-hidden ${imageFrames[broken ? "card" : look.frame ?? "card"]}`} style={{ borderRadius: look.radius ?? IMAGE_LOOK_DEFAULTS.radius, ...(ratio ? { aspectRatio: ratio } : {}), ...(mask && !broken ? { maskImage: mask, WebkitMaskImage: mask } : {}) }}>
       {broken
-        ? <div className={`flex flex-col items-center justify-center gap-2 text-sm text-muted-foreground ${ratio ? "absolute inset-0" : "py-14"}`}><ImageOff className="size-6 opacity-60" />{block.src ? "L’image n’a pas pu être chargée." : "Aucune image choisie."}</div>
+        ? <div className={`flex flex-col items-center justify-center gap-2 px-4 text-center text-sm text-muted-foreground ${ratio ? "absolute inset-0" : "py-14"}`}>
+          <ImageOff className="size-6 opacity-60" />
+          {!block.src ? "Aucune image choisie." : fromDrive ? <><span>Le Drive n’a pas donné cette image.</span><span className="max-w-sm text-xs">Elle doit être dans le Drive d’Eraser, ou partagée « Tous les utilisateurs disposant du lien » ; un joueur ne la voit qu’une fois la page publiée.</span></> : "L’image n’a pas pu être chargée."}
+        </div>
         // eslint-disable-next-line @next/next/no-img-element -- images du Drive ou d'Eraser
-        : <img src={block.src} alt={block.caption} loading="lazy" onError={() => setFailed(block.src)} className={`${ratio ? "absolute inset-0 size-full" : "h-auto w-full"} ${block.fit === "contain" ? "object-contain" : "object-cover"}`} />}
+        : <img src={source} alt={block.caption} loading="lazy" onError={() => setFailed(source)} className={`${ratio ? "absolute inset-0 size-full" : "h-auto w-full"} ${block.fit === "contain" ? "object-contain" : "object-cover"} ${look.focus ? imageFocus[look.focus] : ""}`} />}
     </div>
-    {block.caption && <figcaption className="px-1 text-center text-xs italic text-muted-foreground">{block.caption}</figcaption>}
+    {block.caption && <figcaption className={`px-1 text-xs italic text-muted-foreground ${look.align === "left" ? "text-left" : look.align === "right" ? "text-right" : "text-center"}`}>{block.caption}</figcaption>}
   </figure>
 }
 
@@ -303,8 +330,10 @@ export function PageSections({ sections, render }: { sections: ViewedSection[]; 
       // Une colonne vide pour ce lecteur (blocs qu'il ne voit pas) laisse la place aux autres.
       const columns = section.cols.filter((column) => column.length)
       if (!columns.length) return null
-      const layout: SectionLayout = columns.length === section.cols.length ? section.layout : columns.length === 1 ? "1" : "2"
-      return <section key={section.id} className={`grid items-start gap-6 ${layoutGrid[layout]} ${section.framed ? "rounded-[1.5rem] border bg-card/80 p-4 shadow-[0_12px_35px_rgb(67_50_31/0.06)] sm:p-6" : ""}`}>
+      const whole = columns.length === section.cols.length
+      const layout: SectionLayout = whole ? section.layout : columns.length === 1 ? "1" : "2"
+      const grid = sectionGrid(layout, whole ? section.widths : undefined)
+      return <section key={section.id} style={grid.style} className={`grid items-start gap-6 ${grid.className} ${section.framed ? "rounded-[1.5rem] border bg-card/80 p-4 shadow-[0_12px_35px_rgb(67_50_31/0.06)] sm:p-6" : ""}`}>
         {columns.map((column, index) => <div key={index} className="grid min-w-0 content-start gap-5">
           {column.map((block) => <div key={block.id} id={`bloc-${block.id}`} className="min-w-0">{render(block)}</div>)}
         </div>)}

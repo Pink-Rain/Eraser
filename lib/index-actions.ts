@@ -36,10 +36,10 @@ export type ActionStepInfo = {
 
 /** Toutes les étapes, pour l'éditeur et le guide. */
 export const actionStepCatalog: ActionStepInfo[] = [
-  { type: "open-sheet", group: "Ouvrir", label: "Ouvrir la fiche", description: "Ouvre la fiche complète de la ligne (tous ses champs, y compris ceux du formulaire seulement).", fields: [] },
+  { type: "open-sheet", group: "Ouvrir", label: "Ouvrir sa fiche", description: "Ouvre la fiche de la ligne (son formulaire à l’étoile, tous ses champs) dans une fenêtre, là où l’on est : dans l’index, ou sur la page. Modifiable par qui peut écrire.", fields: [] },
   { type: "open-linked", group: "Ouvrir", label: "Ouvrir la ligne liée", description: "Ouvre l’index d’en face sur le premier nom d’une colonne liée ↔ ou d’une liste liée.", fields: [{ key: "column", label: "Relation", kind: "column" }], only: "world" },
   { type: "open-index", group: "Ouvrir", label: "Ouvrir un index", description: "Ouvre la page d’un autre index.", fields: [{ key: "index", label: "Index", kind: "index" }] },
-  { type: "open-form", group: "Ouvrir", label: "Ouvrir un formulaire, ici", description: "Ouvre un formulaire de l’onglet sur la ligne, dans une fenêtre, sans quitter la page (la fiche courte, la fiche de combat…).", fields: [{ key: "form", label: "Formulaire", kind: "form", hint: "Vide : le formulaire à l’étoile" }], only: "world" },
+  { type: "open-form", group: "Ouvrir", label: "Ouvrir un de ses formulaires", description: "Ouvre le formulaire choisi (la fiche courte, la fiche de combat…) sur la ligne, dans une fenêtre, là où l’on est : dans l’index, ou sur la page. Modifiable par qui peut écrire.", fields: [{ key: "form", label: "Formulaire", kind: "form", hint: "Vide : le formulaire à l’étoile" }], only: "world" },
   { type: "open-page", group: "Ouvrir", label: "Ouvrir la page de la ligne", description: "Ouvre la page de la ligne (celle d’un personnage, d’une campagne…), sinon sa fiche.", fields: [], only: "world" },
   { type: "open-row", group: "Ouvrir", label: "Ouvrir une ligne d’un autre index", description: "Ouvre la fiche d’une ligne d’un autre index, par son nom : un nom écrit (« Valombre ») ou pris dans une colonne (« {Lieu} »). Un formulaire de cet index peut être choisi.", fields: [{ key: "index", label: "Index", kind: "index" }, { key: "row", label: "Ligne (son nom)", kind: "text", hint: "{Lieu}, ou un nom écrit" }, { key: "form", label: "Formulaire", kind: "text", hint: "Vide : sa fiche" }], only: "world" },
   { type: "open-eraser", group: "Ouvrir", label: "Ouvrir une page d’Eraser", description: "Ouvre une page d’Eraser : l’accueil, un index, une page créée, le tabletop…", fields: [{ key: "href", label: "Page", kind: "text", hint: "/ressources/index/lieux" }] },
@@ -131,7 +131,7 @@ export function newStep(type: ActionStepType): ActionStep {
 /** Ce que fait une étape, en une ligne (liste des étapes de l'éditeur). */
 export function describeStep(step: ActionStep): string {
   switch (step.type) {
-    case "open-sheet": return "Ouvrir la fiche"
+    case "open-sheet": return "Ouvrir sa fiche"
     case "open-url": return `Ouvrir ${step.url || "une adresse"}`
     case "open-linked": return `Ouvrir la ligne liée par « ${step.column || "?"} »`
     case "open-index": return `Ouvrir l’index ${step.index || "?"}`
@@ -150,7 +150,7 @@ export function describeStep(step: ActionStep): string {
     case "notify": return `Message : ${step.message || "…"}`
     case "chat": return `Chat${step.audience === "gm" ? " (MJ)" : ""} : ${step.message || "…"}`
     case "campaign-inventory": return "Ajouter à un inventaire (campagne, personnage, PNJ)"
-    case "open-form": return step.form && step.form !== "principal" ? `Ouvrir le formulaire « ${step.form} », ici` : "Ouvrir le formulaire, ici"
+    case "open-form": return step.form && step.form !== "principal" ? `Ouvrir son formulaire « ${step.form} »` : "Ouvrir son formulaire à l’étoile"
     case "open-page": return "Ouvrir la page de la ligne"
     case "open-row": return `Ouvrir « ${step.row || "?"} » dans ${step.index || "?"}`
     case "open-eraser": return `Ouvrir ${step.href || "une page d’Eraser"}`

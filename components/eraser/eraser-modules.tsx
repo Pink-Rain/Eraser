@@ -7,7 +7,7 @@ import { ClassAccentSampler } from "@/components/eraser/class-accent-sampler"
 import { ClassPresentationPanel, ClassSupplementsPanel } from "@/components/eraser/class-detail"
 import { classImageUrl } from "@/lib/class-images"
 import { listClasses } from "@/lib/google-sheets"
-import { HomeAchievementsPanel, HomeGreeting, HomeMain, HomeSide, HomeTodos } from "@/components/eraser/home-shell"
+import { HomeAchievementsPanel, HomeCampaigns, HomeCharacters, HomeGreeting, HomeMain, HomeSide, HomeTodos } from "@/components/eraser/home-shell"
 import { getClassContent } from "@/lib/class-content"
 import { IndexDirectory } from "@/components/eraser/index-directory"
 import { MenuLinkPanel } from "@/components/eraser/menu-page"
@@ -75,6 +75,8 @@ function render(block: ModuleBlock, context: ModuleContext): ReactNode {
     case "repertoire-index": return manager ? <div className="grid gap-4"><div className="flex justify-end"><NewIndexButton /></div><IndexDirectory /></div> : null
     case "accueil-salutation": return <HomeGreeting />
     case "accueil-principal": return <HomeMain />
+    case "accueil-personnages": return <HomeCharacters />
+    case "accueil-campagnes": return <HomeCampaigns />
     case "accueil-cote": return <HomeSide />
     case "accueil-succes": return <HomeAchievementsPanel />
     case "accueil-a-faire": return context.account.role === "admin" ? <HomeTodos /> : null

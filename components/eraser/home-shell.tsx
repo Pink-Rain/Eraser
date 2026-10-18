@@ -547,6 +547,21 @@ export function HomeMain() {
   return viewRole === "mj" ? <CampaignColumn campaigns={campaigns} loading={!listsLoaded} /> : viewRole === "admin" ? <TodoColumn /> : <CharacterColumn characters={characters} loading={!listsLoaded} />
 }
 
+/**
+ * Mes personnages, comme sur l'accueil d'origine : recherche, campagne, tri, grille ou liste.
+ * La coque ne les lit qu'en vue joueur : rien dans une autre vue.
+ */
+export function HomeCharacters() {
+  const { characters, listsLoaded, viewRole } = useShellData()
+  return viewRole === "joueur" ? <CharacterColumn characters={characters} loading={!listsLoaded} /> : null
+}
+
+/** Mes campagnes, comme sur l'accueil d'origine, avec « Nouvelle campagne » ; lues en vue MJ seulement. */
+export function HomeCampaigns() {
+  const { campaigns, listsLoaded, viewRole } = useShellData()
+  return viewRole === "mj" ? <CampaignColumn campaigns={campaigns} loading={!listsLoaded} /> : null
+}
+
 /** Les choses à faire des admins. */
 export function HomeTodos() {
   return <TodoColumn />

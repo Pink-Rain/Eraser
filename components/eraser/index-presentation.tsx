@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react"
+import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import { BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, ImageOff, Pencil, Plus, Search, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -414,6 +414,14 @@ function SectionMenu({ names, accent, side }: { names: string[]; accent?: string
  */
 function SectionTabs({ groups, layout, valueOf, accent, render }: { groups: Array<{ name: string; rows: string[]; color?: string }>; layout: Presentation; valueOf: PresentationProps["valueOf"]; accent?: string; render: (rows: string[]) => ReactNode }) {
   const [active, setActive] = useState(groups[0]?.name ?? "")
+  // La ligne regardée change d'onglet de groupe : l'onglet suit (sans effet : réglé pendant le rendu).
+  const followed = useContext(FollowedRow)
+  const [seen, setSeen] = useState(followed)
+  if (followed !== seen) {
+    setSeen(followed)
+    const owner = groups.find((group) => group.rows.includes(followed))
+    if (owner && owner.name !== active) setActive(owner.name)
+  }
   const current = groups.find((group) => group.name === active) ?? groups[0]
   const tabs: GroupTabs = layout.groupTabs ?? {}
   const place = tabs.place ?? "top"
@@ -471,6 +479,23 @@ function DraggableRow({ row, from, children }: { row: string; from: string; chil
   return <div draggable onDragStart={() => drag.start(row, from)} className={`cursor-grab active:cursor-grabbing ${drag.dragged?.row === row ? "opacity-50" : ""}`}>{children}</div>
 }
 const SectionOfRow = createContext("")
+
+/**
+ * La ligne qu'on regarde (dans le détail, la fenêtre) : la liste la suit quand on passe à une autre
+ * (« Précédent / suivant », un clic) — elle défile jusqu'à elle, et ses onglets de groupe passent au sien.
+ */
+const FollowedRow = createContext("")
+
+/** Fait défiler jusqu'à la ligne regardée quand elle change (pas à l'ouverture). */
+function useFollowRow(row: string, root: { current: HTMLElement | null }) {
+  const last = useRef(row)
+  useEffect(() => {
+    if (!row || last.current === row) { last.current = row; return }
+    last.current = row
+    const node = root.current?.querySelector(`[data-row-key="${typeof CSS !== "undefined" && CSS.escape ? CSS.escape(row) : row.replace(/"/g, '\\"')}"]`)
+    if (node instanceof HTMLElement) node.scrollIntoView({ block: "nearest", behavior: "smooth" })
+  }, [row, root])
+}
 function Movable({ row, children }: { row: string; children: ReactNode }) {
   return <DraggableRow row={row} from={useContext(SectionOfRow)}>{children}</DraggableRow>
 }
@@ -551,7 +576,7 @@ function ListLayout(props: PresentationProps) {
   const number = (index: number) => layout.numbered ? <span className="w-6 shrink-0 text-right font-display text-sm font-semibold tabular-nums" style={{ color: accentOf(look) }}>{index + 1}.</span> : null
   if (card) {
     // Chaque élément est une carte : une, deux ou trois par rangée, sections comprises.
-    return <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} onCommit={props.onCommit} render={(group) => <Paged rows={group} render={(shown) => <div className={`grid items-start ${layout.compact || look.density === "compact" ? "gap-1.5" : "gap-3"} ${cardTemplate ? "" : columnsClass}`} style={cardTemplate ? cardGridStyle(cardTemplate) : undefined}>{shown.map((row, index) => <Movable key={row} row={row}><div className="flex min-w-0 items-start gap-1.5">{number(index)}<div className={`min-w-0 flex-1 ${props.chosen === row && props.clickOf?.(row) !== "below" ? "rounded-xl ring-2 ring-primary/45 ring-offset-2 ring-offset-background" : ""}`}>{card(row) ?? <Item row={row} props={props} framed />}{props.chosen === row && props.clickOf?.(row) === "below" && <div className="mt-2"><DetailPanel row={row} rows={rows} props={props} inline /></div>}</div></div></Movable>)}</div>} />} />
+    return <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} onCommit={props.onCommit} render={(group) => <Paged rows={group} render={(shown) => <div className={`grid items-start ${layout.compact || look.density === "compact" ? "gap-1.5" : "gap-3"} ${cardTemplate ? "" : columnsClass}`} style={cardTemplate ? cardGridStyle(cardTemplate) : undefined}>{shown.map((row, index) => <Movable key={row} row={row}><div data-row-key={row} className="flex min-w-0 items-start gap-1.5">{number(index)}<div className={`min-w-0 flex-1 ${props.chosen === row && props.clickOf?.(row) !== "below" ? "rounded-xl ring-2 ring-primary/45 ring-offset-2 ring-offset-background" : ""}`}>{card(row) ?? <Item row={row} props={props} framed />}{props.chosen === row && props.clickOf?.(row) === "below" && <div className="mt-2"><DetailPanel row={row} rows={rows} props={props} inline /></div>}</div></div></Movable>)}</div>} />} />
   }
   const boxed = look.surface === "boxed"
   const zebra = look.surface === "zebra"
@@ -565,7 +590,7 @@ function ListLayout(props: PresentationProps) {
     const chosenBelow = props.chosen === row && props.clickOf?.(row) === "below"
     // La ligne montrée dans le panneau à côté : marquée dans la liste.
     const chosenSide = props.chosen === row && !chosenBelow
-    return <li key={row} aria-current={chosenSide || undefined} className={`min-w-0 ${paddings[layout.compact ? "compact" : look.density ?? "normal"]} ${boxed ? `border bg-card ${boxClass(look)}` : columnsClass ? "border-b" : ""} ${zebra && index % 2 === 1 ? "bg-muted/35" : ""} ${chosenBelow ? "ring-1 ring-primary/40" : ""} ${chosenSide ? "bg-primary/[0.07] ring-1 ring-inset ring-primary/35" : ""} ${frame.className}`} style={frame.style}>
+    return <li key={row} data-row-key={row} aria-current={chosenSide || undefined} className={`min-w-0 ${paddings[layout.compact ? "compact" : look.density ?? "normal"]} ${boxed ? `border bg-card ${boxClass(look)}` : columnsClass ? "border-b" : ""} ${zebra && index % 2 === 1 ? "bg-muted/35" : ""} ${chosenBelow ? "ring-1 ring-primary/40" : ""} ${chosenSide ? "bg-primary/[0.07] ring-1 ring-inset ring-primary/35" : ""} ${frame.className}`} style={frame.style}>
       <Movable row={row}><WithRowHover row={row}><div className={`flex min-w-0 items-center ${look.density === "airy" ? "gap-3" : "gap-2"} ${flipped ? "flex-row-reverse text-right" : ""}`}>
         {number(index)}
         <RowImage src={rowImage(layout, row, valueOf)} look={look} size={layout.compact ? "sm" : undefined} />
@@ -646,7 +671,7 @@ function KanbanLayout(props: PresentationProps) {
             const drawn = card?.(row)
             const drag = { draggable: movable(row), onDragStart: () => { setDragged(row); setDraggedFrom(lane.name) }, onDragEnd: () => { setDragged(""); setOver(null) }, title: onCommit && !movable(row) ? "Plusieurs valeurs ou texte mis en forme : modifie la case dans la fiche" : undefined }
             const cursor = `${movable(row) ? "cursor-grab active:cursor-grabbing" : ""} ${dragged === row ? "opacity-50" : ""}`
-            return <div key={row} {...drag} className={`min-w-0 ${cursor}`}>{drawn ?? <Item row={row} props={props} fields={(layout.fields ?? []).filter((field) => field !== column)} framed={look.surface !== "plain"} className={look.surface === "plain" ? "border-b border-border/70" : ""} />}{props.chosen === row && props.clickOf?.(row) === "below" && <div className="mt-1.5"><DetailPanel row={row} rows={rows} props={props} inline /></div>}</div>
+            return <div key={row} data-row-key={row} {...drag} className={`min-w-0 ${cursor}`}>{drawn ?? <Item row={row} props={props} fields={(layout.fields ?? []).filter((field) => field !== column)} framed={look.surface !== "plain"} className={look.surface === "plain" ? "border-b border-border/70" : ""} />}{props.chosen === row && props.clickOf?.(row) === "below" && <div className="mt-1.5"><DetailPanel row={row} rows={rows} props={props} inline /></div>}</div>
           })}
         </div>}
       </section>
@@ -708,10 +733,11 @@ function DetailPanel({ row, rows, props, inline = false }: { row: string; rows: 
   </div> : null
   // Le détail en carte : celle choisie, sinon l'élément de la vue (son élément sur mesure, ou sa carte).
   const ownCard = kind === "card" && !detail.card && layout.itemCard === PRESENTATION_ITEM_CARD && layout.itemTemplate ? layout.itemTemplate : null
-  const drawn = editNow ? props.renderEditForm!(row, detail.form || "principal", detail.locked ?? [])
-    : kind === "form" && renderForm ? renderForm(row, detail.form || "principal")
+  // Une ligne que le lecteur ne peut pas modifier ici (`null`) se lit dans le même formulaire.
+  const drawn = (editNow ? props.renderEditForm!(row, detail.form || "principal", detail.locked ?? []) : null)
+    ?? (kind === "form" && renderForm ? renderForm(row, detail.form || "principal")
     : ownCard ? <IndexCard card={ownCard} row={{ value: (header) => props.valueOf(row, header), spec: props.specOf ?? noSpecs }} />
-    : kind === "card" && renderCard ? renderCard(row, detail.card || (layout.itemCard === PRESENTATION_ITEM_CARD ? "*" : layout.itemCard) || "*") : null
+    : kind === "card" && renderCard ? renderCard(row, detail.card || (layout.itemCard === PRESENTATION_ITEM_CARD ? "*" : layout.itemCard) || "*") : null)
   const body = drawn
     ? <div className={inline ? "p-2" : look.density === "compact" ? "p-3" : "p-4"}>{kind === "card" ? <div className="mx-auto w-full max-w-xl">{drawn}</div> : drawn}</div>
     : <DetailFields row={row} props={props} />
@@ -738,16 +764,19 @@ function MasterDetailLayout(props: PresentationProps) {
   const [chosen, setChosen] = useState("")
   const selected = rows.includes(chosen) ? chosen : rows[0] ?? ""
   const right = layout.masterSide === "right"
+  // « Précédent / suivant » dans le détail : la liste défile jusqu'à la ligne (et change d'onglet de groupe).
+  const masterRef = useRef<HTMLDivElement>(null)
+  useFollowRow(chosen, masterRef)
   const columns = right ? masterWidthsRight[look.masterWidth ?? "normal"] : masterWidths[look.masterWidth ?? "normal"]
   return <div className={`grid gap-4 ${columns}`}>
-    <div className={`${look.maxHeight ? "" : "max-h-[70vh]"} overflow-y-auto border bg-card/70 p-1.5 ${radii[look.radius ?? "md"]} ${right ? "md:order-2" : ""}`} style={look.maxHeight ? { maxHeight: `${look.maxHeight}rem` } : undefined}>
+    <FollowedRow.Provider value={chosen}><div ref={masterRef} className={`${look.maxHeight ? "" : "max-h-[70vh]"} overflow-y-auto border bg-card/70 p-1.5 ${radii[look.radius ?? "md"]} ${right ? "md:order-2" : ""}`} style={look.maxHeight ? { maxHeight: `${look.maxHeight}rem` } : undefined}>
       <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} render={(group) => <div className={look.surface === "plain" ? "divide-y" : look.surface === "boxed" ? "grid gap-1" : "space-y-0.5"}>{group.map((row) => {
         const rowTint = rowColor(layout, row, valueOf, optionsOf)
         const current = row === selected
         const frame = current ? { className: "" } : accentFrame(look, rowTint)
         // Au clic : la ligne s'affiche dans le détail (d'office) ; un rôle peut avoir un autre clic (la fiche, la page, rien).
         const choose = () => { const action = props.clickOf?.(row) ?? "side"; if (action === "side" || action === "below" || action === "center") setChosen(row); else onOpen(row) }
-        return <WithRowHover key={row} row={row}><button type="button" aria-current={current} onClick={choose} style={current ? { backgroundColor: accentOf(look), ...frame.style } : frame.style} className={`block w-full text-left ${look.surface === "boxed" ? `border ${current ? "border-transparent" : "bg-card"} ${boxClass(look)}` : "rounded-lg"} ${paddings[look.density ?? "compact"]} ${frame.className} ${current ? "text-white" : "hover:bg-muted"}`}>
+        return <WithRowHover key={row} row={row}><button type="button" data-row-key={row} aria-current={current} onClick={choose} style={current ? { backgroundColor: accentOf(look), ...frame.style } : frame.style} className={`block w-full text-left ${look.surface === "boxed" ? `border ${current ? "border-transparent" : "bg-card"} ${boxClass(look)}` : "rounded-lg"} ${paddings[look.density ?? "compact"]} ${frame.className} ${current ? "text-white" : "hover:bg-muted"}`}>
           <span className="flex min-w-0 items-center gap-2">
             <RowIcon layout={layout} row={row} valueOf={valueOf} color={current ? undefined : rowTint} />
             <RowImage src={rowImage(layout, row, valueOf)} look={look} size={look.imageSize ?? "sm"} />
@@ -759,7 +788,7 @@ function MasterDetailLayout(props: PresentationProps) {
           </span>
         </button></WithRowHover>
       })}</div>} />
-    </div>
+    </div></FollowedRow.Provider>
     <div className={`grid min-w-0 content-start gap-3 ${right ? "md:order-1" : ""}`}>
       {props.detailTop}
       {selected
@@ -1732,8 +1761,12 @@ export function IndexPresentation(input: PresentationProps) {
   const maxHeight = layout.look?.maxHeight
   const maxWidth = layout.look?.maxWidth
   const body = <ViewLayoutBody props={{ ...props, detailTop }} click={structural} />
-  return <ViewSpecs.Provider value={input.specOf ?? noSpecs}><RowHovers.Provider value={wrap}>
-    <div className={cn("grid min-w-0 gap-3", maxWidth && "mx-auto w-full")} style={maxWidth ? { maxWidth: `${maxWidth}rem` } : undefined}>
+  // La ligne regardée (panneau à côté, dessous, fenêtre au centre) : la liste la suit.
+  const rootRef = useRef<HTMLDivElement>(null)
+  const followed = picked?.row ?? ""
+  useFollowRow(followed, rootRef)
+  return <ViewSpecs.Provider value={input.specOf ?? noSpecs}><RowHovers.Provider value={wrap}><FollowedRow.Provider value={followed}>
+    <div ref={rootRef} className={cn("grid min-w-0 gap-3", maxWidth && "mx-auto w-full")} style={maxWidth ? { maxWidth: `${maxWidth}rem` } : undefined}>
       {top}
       {maxHeight && layout.kind !== "master-detail" ? <div className="min-w-0 overflow-y-auto overscroll-contain pr-1 [scrollbar-width:thin]" style={{ maxHeight: `${maxHeight}rem` }}>{body}</div> : body}
       {footer}
@@ -1744,7 +1777,7 @@ export function IndexPresentation(input: PresentationProps) {
         <DetailPanel row={center} rows={rows} props={{ ...props, ...(picked?.form && props.renderForm && !props.layout.detail?.kind ? { layout: { ...props.layout, detail: { ...props.layout.detail, kind: "form" as const, form: picked.form === "principal" ? undefined : picked.form } } } : {}), onChoose: (row) => setChosen({ row, mode: "center", form: picked?.form }) }} />
       </DialogContent>
     </Dialog>}
-  </RowHovers.Provider></ViewSpecs.Provider>
+  </FollowedRow.Provider></RowHovers.Provider></ViewSpecs.Provider>
 }
 
 const noSpecs = () => undefined

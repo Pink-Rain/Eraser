@@ -1,5 +1,6 @@
 "use client"
 
+import { usePathname } from "next/navigation"
 import { useMemo, useState, type DragEvent, type ReactNode } from "react"
 import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X, PanelLeftClose, PanelLeftOpen, Maximize2, Minimize2 } from "lucide-react"
 
@@ -810,6 +811,10 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   const [asideOpen, setAsideOpen] = useState(true)
   // « Réduire » : l'éditeur se cache (ses brouillons restent) ; fermer avec des changements demande confirmation.
   const [minimized, setMinimized] = useState(false)
+  // Changer de page (l'éditeur reste ouvert dans la coque) : il se réduit ; « Reprendre » le rouvre tel quel.
+  const pathname = usePathname()
+  const [openedOn, setOpenedOn] = useState(pathname)
+  if (pathname !== openedOn) { setOpenedOn(pathname); setMinimized(true) }
   const [confirmClose, setConfirmClose] = useState(false)
   // La carte modifiée, par onglet (le panneau des cartes et l'éditeur la partagent).
   const [selectedCard, setSelectedCard] = useState<Record<string, string | null>>({})

@@ -1,43 +1,45 @@
-# Eraser 0.1.1-alpha.228 — Les listes sur les pages, la fiche qui ne quitte plus la page
+# Eraser 0.1.1-alpha.229 — Les pages qui se règlent pour de bon, l'éditeur qui ne se ferme plus
 
 Cette version arrive **sans réinstallation** (même enveloppe que l'alpha 227) : Eraser la
 télécharge, redémarre son serveur et recharge la page tout seul. Rien n'est effacé dans Google
 Sheets, ni dans les réglages, ni dans les pages : les vues gardent leurs clés.
 
-## Une liste posée sur une page
+## Les boutons des cartes, sur une page
 
-- **Cliquer une ligne n'ouvre plus l'index.** Sur une page, la fiche s'ouvre ici, en lecture,
-  dans une fenêtre au centre ; on ne quitte la page que pour la page de la ligne, si elle en a une.
-- **Un joueur peut cliquer** : il lit la ligne comme le MJ, sans rien pouvoir modifier.
-- Le **maître-détail** montre la ligne cliquée dans son détail, comme l'éditeur l'annonce (il
-  ouvrait la fiche) ; c'est vrai aussi dans l'index.
-- **« Ajouter »** de la barre d'outils marche sur une page : le formulaire d'ajout s'ouvre dans une
-  fenêtre (MJ et admins ; le serveur vérifie qui peut écrire). Dans l'index aussi, il s'ouvre en
-  fenêtre au lieu de tout en haut de la page, hors de vue.
-- Dans les réglages d'un bloc qui montre une vue (liste, kanban…), **« Au clic sur une ligne »**
-  n'est plus proposé : il doublait celui de la vue, avec moins de choix. Un ancien réglage du bloc
-  ne compte plus pour ces vues (« Retirer l'ancien réglage du bloc » le nettoie). Le tableau et les
-  cartes gardent le leur.
+- Un bouton réglé sur **« Ouvrir un de ses formulaires »** (ou « Ouvrir sa fiche ») **ouvre la
+  fenêtre ici, sur la page** : il n'emmène plus dans l'index. Qui peut écrire y modifie la ligne
+  directement ; un joueur la lit.
+- Les intitulés disent ce qu'ils font : « Ouvrir sa fiche », « Ouvrir un de ses formulaires »,
+  avec, dessous, « dans une fenêtre, là où l'on est : dans l'index, ou sur la page ».
 
-## « Ouvrir la fiche »
+## Précédent / suivant
 
-- Le bouton **« Ouvrir la fiche » sous le détail ne s'affiche plus d'office** : il se demande dans
-  « Éléments et clic › Au clic : le détail › Bouton « Ouvrir la fiche » ». Jamais sur une page.
+- La liste **suit la ligne que l'on regarde** : elle défile jusqu'à elle, et change d'onglet de
+  groupe quand la ligne suivante est dans un autre.
 
-## La taille des listes
+## « Modifier » reste ouvert
 
-- **Apparences › Taille** : la hauteur au plus (au-delà, la liste défile dans son cadre ; le
-  maître-détail : sa liste) et la largeur au plus (la vue se centre).
+- L'éditeur des vues d'un index (**« Modifier »**) ne se ferme plus quand on change de page : il
+  se réduit, garde ce qui n'est pas enregistré, et se reprend tel quel en revenant à l'index.
 
-## L'éditeur de la Liste
+## Le bloc Image des pages
 
-- Plus compact, comme l'atelier des cartes : les réglages à gauche sur toute la largeur, plusieurs
-  par ligne ; l'aperçu à droite (« ⤢ » l'ouvre en grand).
-- L'aperçu montre le bouton **« Ajouter »** et le **détail modifiable** comme dans l'index (on peut
-  y taper pour essayer : rien n'est enregistré).
+- **Une image du Drive s'affiche** : on colle son lien de partage (Partager › Copier le lien) ;
+  Eraser la lit avec son compte Google. Une image d'un autre Drive doit être partagée « Tous les
+  utilisateurs disposant du lien ».
+- **Son allure se règle** : sa largeur et sa place (à gauche, au centre, à droite), son cadre
+  (encadrée, fond seul, rien), ses coins arrondis, son point fort quand elle déborde du format, et
+  un **dégradé vers le transparent** : vers le bas, le haut, un côté, les deux côtés, en haut et
+  en bas, tout autour, avec son étendue.
 
-## Les formulaires
+## Les colonnes des pages
 
-- **Un même champ plusieurs fois** : « Dupliquer » (sur la barre d'un champ) le place une fois de
-  plus, marqué « copie » ; la copie montre et modifie la même case (un rappel du nom dans un autre
-  onglet, les PV en haut et dans « Combat »…).
+- **La largeur des colonnes d'une section se règle** : dans l'atelier, glisser la séparation entre
+  deux colonnes (par pas de 5 % ; Alt : au pour cent près ; aussi aux flèches du clavier). Un
+  double-clic, ou la croix de la pastille des largeurs, rend celles de la disposition.
+
+## L'accueil en modules
+
+- **« Mes personnages »** et **« Mes campagnes »** de l'accueil d'origine sont des modules
+  d'Eraser : un bloc « Module d'Eraser » les pose sur n'importe quelle page, avec leur recherche,
+  leur tri et leur grille ou liste (mes personnages en vue joueur, mes campagnes en vue MJ).

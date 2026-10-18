@@ -19,6 +19,8 @@ export type EraserModuleKey =
   | "repertoire-index"
   | "accueil-salutation"
   | "accueil-principal"
+  | "accueil-personnages"
+  | "accueil-campagnes"
   | "accueil-cote"
   | "accueil-succes"
   | "accueil-a-faire"
@@ -35,6 +37,8 @@ export const eraserModules: EraserModule[] = [
   { key: "repertoire-index", label: "Répertoire des index", hint: "Les cartes des index, leurs étoiles et leurs dossiers, « Nouvel index »" },
   { key: "accueil-salutation", label: "Accueil : bonjour", hint: "« Bonjour, … » et la vue en cours" },
   { key: "accueil-principal", label: "Accueil : colonne principale", hint: "Mes personnages (joueur), mes campagnes (MJ) ou les choses à faire (admin)" },
+  { key: "accueil-personnages", label: "Accueil : mes personnages", hint: "Vue joueur : ses personnages, comme sur l’accueil d’origine (recherche, campagne, tri, grille ou liste)" },
+  { key: "accueil-campagnes", label: "Accueil : mes campagnes", hint: "Vue MJ : ses campagnes, comme sur l’accueil d’origine (recherche, tri, grille ou liste, « Nouvelle campagne »)" },
   { key: "accueil-cote", label: "Accueil : colonne de côté", hint: "Règles, joueurs et MJ, index favoris, outils" },
   { key: "accueil-succes", label: "Accueil : succès", hint: "Les succès du compte" },
   { key: "accueil-a-faire", label: "Accueil : choses à faire", hint: "La liste des choses à faire des admins (admins seulement)" },

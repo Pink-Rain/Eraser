@@ -12,11 +12,12 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { BlockView, CalloutFrame, ImageView, ModulePlaceholder, PageHeader, PageIcon, PageSections, SeparatorView, calloutTones, layoutGrid, type BlockContext, type PageLinkTarget } from "@/components/eraser/custom-page-view"
+import { BlockView, CalloutFrame, ImageView, ModulePlaceholder, PageHeader, PageIcon, PageSections, SeparatorView, calloutTones, type BlockContext, type PageLinkTarget } from "@/components/eraser/custom-page-view"
 import { PageSearchBlock, PageSearchProvider, PageStatBlock, PageViewBlock } from "@/components/eraser/page-index-block"
 import { describeCondition } from "@/lib/index-windows"
 import { rowOfRoute } from "@/lib/page-replacements"
 import { blockIcons } from "@/components/eraser/page-studio-icons"
+import { SectionGrid, fmtWidth } from "@/components/eraser/page-section-grid"
 import { BlockSettings, PageSettings, Segmented, VisibilityPill, roleDot } from "@/components/eraser/page-studio-settings"
 import { IndexRichText } from "@/components/eraser/index-references"
 import { RichTextField } from "@/components/eraser/rich-text"
@@ -472,7 +473,15 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
     while (section.cols.length > wanted) { const extra = section.cols.pop()!; section.cols[section.cols.length - 1].push(...extra) }
     while (section.cols.length < wanted) section.cols.push([])
     section.layout = layout
+    delete section.widths
   }), [change])
+
+  const setWidths = useCallback((sectionId: string, widths: number[] | undefined) => change((draft) => {
+    const section = draft.sections.find((item) => item.id === sectionId)
+    if (!section) return
+    if (widths) section.widths = widths
+    else delete section.widths
+  }, `widths:${sectionId}`), [change])
 
   /* ----- Glisser-déposer ----- */
 
@@ -671,19 +680,20 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
           {pageClosed && <p className="flex items-start gap-2 rounded-xl border border-dashed px-3.5 py-2.5 text-[13px] text-muted-foreground"><LockKeyhole className="mt-0.5 size-4 shrink-0" />Le rôle {roleLabels[viewAs]} ne voit pas cette page ({doc.place === "ressources" || doc.place === "bac-a-sable" ? "section réservée aux MJ et aux admins" : doc.place === "administration" ? "section réservée aux admins" : "réglage « Qui voit la page »"}).</p>}
 
           <PageSearchProvider present={doc.sections.some((section) => section.cols.some((column) => column.some((block) => block.type === "search")))}>
-          {doc.sections.map((section, si) => <section key={section.id} aria-label={`Section ${si + 1}`} className="grid gap-1.5">
+          {doc.sections.map((section, si) => <section key={section.id} aria-label={`Section ${si + 1}`} className="group/section grid gap-1.5">
             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-0.5 text-xs text-muted-foreground">
               <span className="text-[10.5px] font-bold uppercase tracking-[0.14em]">Section {si + 1}</span>
               <Segmented size="sm" label={`Disposition de la section ${si + 1}`} value={section.layout} onChange={(layout) => setLayout(section.id, layout)} options={sectionLayouts.map((item) => ({ value: item.value, label: <LayoutGlyph layout={item.value} />, title: item.label }))} />
               <label className="inline-flex cursor-pointer items-center gap-1 max-sm:hidden"><input type="checkbox" checked={section.framed} onChange={(event) => change((draft) => { draft.sections[si].framed = event.target.checked })} className="accent-primary" />Encadrée</label>
+              {section.widths && <span className="inline-flex items-center gap-0.5 rounded-full border bg-card py-0.5 pl-2 pr-0.5 text-[10.5px] font-semibold tabular-nums">{section.widths.map(fmtWidth).join(" · ")}<button type="button" title="Rendre les largeurs de la disposition" aria-label="Rendre les largeurs de la disposition" onClick={() => setWidths(section.id, undefined)} className="grid size-4 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><X className="size-3" /></button></span>}
               <span className="ml-auto inline-flex">
                 <ToolButton label="Monter la section" disabled={si === 0} onClick={() => change((draft) => { const [moved] = draft.sections.splice(si, 1); draft.sections.splice(si - 1, 0, moved) })}><ArrowUp className="size-3.5" /></ToolButton>
                 <ToolButton label="Descendre la section" disabled={si === sectionCount - 1} onClick={() => change((draft) => { const [moved] = draft.sections.splice(si, 1); draft.sections.splice(si + 1, 0, moved) })}><ArrowDown className="size-3.5" /></ToolButton>
                 <ToolButton label="Supprimer la section" danger disabled={sectionCount === 1} onClick={() => { const count = section.cols.flat().length; change((draft) => { draft.sections.splice(si, 1) }); notify(count ? `Section supprimée (${count} bloc${count > 1 ? "s" : ""})` : "Section supprimée", { label: "Annuler", run: undo }) }}><Trash2 className="size-3.5" /></ToolButton>
               </span>
             </div>
-            <div className={`grid items-start gap-3.5 ${layoutGrid[section.layout]} ${section.framed ? "rounded-[18px] border bg-card/80 p-3" : ""}`}>
-              {section.cols.map((column, ci) => <div key={ci} onDragOver={(event) => overColumn(event, section.id, ci)} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDrop((current) => current?.section === section.id && current.column === ci ? null : current) }} onDrop={dropOn}
+            <SectionGrid layout={section.layout} widths={section.widths} framed={section.framed} onWidths={(widths) => setWidths(section.id, widths)}>
+              {section.cols.map((column, ci) => <div key={ci} data-col onDragOver={(event) => overColumn(event, section.id, ci)} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDrop((current) => current?.section === section.id && current.column === ci ? null : current) }} onDrop={dropOn}
                 className={`grid min-h-12 min-w-0 content-start gap-2.5 rounded-[14px] p-0.5 outline outline-1 outline-dashed transition ${drop?.section === section.id && drop.column === ci ? "bg-[#3b5c8a]/[0.04] outline-2 outline-[#3b5c8a]" : section.cols.length > 1 ? "outline-border/60" : "outline-transparent"}`}>
                 {column.map((block, bi) => {
                   const reason = hiddenReason(block, viewAs, doc.live)
@@ -722,7 +732,7 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
                 {drop?.section === section.id && drop.column === ci && drop.index >= column.length && <div className="h-1 rounded-full bg-[#3b5c8a] shadow-[0_0_0_3px_rgb(59_92_138/0.2)]" />}
                 <AddHere empty={!column.length} onAdd={(type) => insert(type, { section: section.id, column: ci, index: column.length })} />
               </div>)}
-            </div>
+            </SectionGrid>
           </section>)}
           </PageSearchProvider>
           <button type="button" onClick={() => change((draft) => { draft.sections.push({ id: newId("s"), layout: "1", framed: false, cols: [[]] }) })} className="justify-self-center rounded-xl border border-dashed px-4 py-2 text-[12.5px] text-muted-foreground transition hover:border-[#3b5c8a] hover:text-foreground"><Plus className="mr-1 inline size-3.5" />Ajouter une section</button>

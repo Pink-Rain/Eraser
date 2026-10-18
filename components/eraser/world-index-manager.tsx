@@ -16,6 +16,7 @@ import { IndexRowForm, IndexRowSheet } from "@/components/eraser/index-row-sheet
 import { RowPageLink, rowPageFor } from "@/components/eraser/row-page-link"
 import { useRolesOf } from "@/components/eraser/view-roles"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { useEditorDock } from "@/components/eraser/editor-dock"
 import { OwnerSelector } from "@/components/eraser/owner-selector"
 import type { EditorMode } from "@/components/eraser/index-editor"
 import { SavedViewDialog, savedViewMark, useIndexSettings } from "@/components/eraser/index-windows"
@@ -232,7 +233,11 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   // « Ajouter » de la barre d'outils d'une vue : le formulaire s'ouvre dans une fenêtre (la vue peut être loin sous le haut de la page).
   const [creatingInDialog, setCreatingInDialog] = useState(false)
   const [creatingTab, setCreatingTab] = useState(definition.tabs[0]?.name ?? "")
-  const [editor, setEditor] = useState<IndexEditorModel | null>(null)
+  // « Modifier » vit dans le dock de la coque : changer de page le garde (réduit), revenir le reprend.
+  const dock = useEditorDock()
+  const dockKey = `index:${indexKey}`
+  const [editor, setEditor] = useState<IndexEditorModel | null>(() => (dock?.modelOf(dockKey) as { model?: IndexEditorModel } | undefined)?.model ?? null)
+  const closeEditor = useCallback(() => { setEditor(null); dock?.hide(dockKey) }, [dock, dockKey])
   const [editorError, setEditorError] = useState("")
   const [version, setVersion] = useState(0)
   // Les lignes réécrites depuis leur fiche : le tableau (ou les cartes) les redessine aussitôt.
@@ -275,7 +280,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   const [display, setDisplay] = usePersistentState<IndexDisplay>(`eraser:world-index:${storeKey}:display`, "table", isIndexDisplay)
   const [cardChoice, setCardChoice] = usePersistentState<string>(`eraser:world-index:${storeKey}:card`, "", isCardChoice)
   // « Modifier » s'ouvre sur les colonnes, ou sur les cartes depuis la vue en cartes.
-  const [editorMode, setEditorMode] = useState<EditorMode>("columns")
+  const [editorMode, setEditorMode] = useState<EditorMode>(() => (dock?.modelOf(dockKey) as { mode?: EditorMode } | undefined)?.mode ?? "columns")
   // Le dialogue des vues : nouvelle (vide, ou pré-remplie par « Enregistrer comme vue »), ou celle choisie.
   const [viewDialog, setViewDialog] = useState<{ mode: "new" | "edit"; draft?: Partial<SavedView>; notice?: string } | null>(null)
   // Les vues de l'index : celles prévues par Eraser (Actifs, Passifs, Bonus des sorts), puis les vues
@@ -1502,7 +1507,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     const payload = (await response.json().catch(() => ({}))) as { error?: string }
     setPending("")
     if (!response.ok) return setEditorError(payload.error || "L’index n’a pas pu être mis à la corbeille.")
-    setEditor(null)
+    closeEditor()
     router.push("/ressources")
   }
 
@@ -1515,13 +1520,45 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       if (!response.ok || !payload.data) throw new Error(payload.error || "Les changements n’ont pas pu être écrits.")
       applyData(payload.data, seq)
       announceWorldIndexChange([indexKey], origin)
-      setEditor(null)
+      closeEditor()
     } catch (reason) {
       setEditorError(reason instanceof Error ? reason.message : "Les changements n’ont pas pu être écrits.")
     }
     setPending("")
   }
 
+  // L'éditeur de l'index (« Modifier »), posé dans le dock de la coque à chaque rendu (il y reste en changeant de page).
+  const editorNode = editor ? <IndexEditor
+        model={editor}
+        sampleRows={Object.fromEntries(tables.map((owner) => [owner.tabName, owner.rows.slice(0, 3).map((row) => Object.fromEntries(owner.headers.map((header, index) => [header, row.values[index] ?? ""])))]))}
+        open
+        pending={pending === "schema"}
+        error={editorError}
+        onClose={() => { if (pending !== "schema") closeEditor() }}
+        onApply={(operations) => void applyEditor(operations)}
+        onDeleteIndex={() => void deleteIndex()}
+        layouts={settings.layouts}
+        onSaveLayouts={settings.saveLayouts}
+        cardsIndex={indexKey}
+        cards={settings.cards}
+        onSaveCards={settings.saveCards}
+        locks={settings.locks}
+        onSaveLocks={settings.saveLocks}
+        presentations={settings.presentations}
+        onSavePresentations={settings.savePresentations}
+        viewPresets={settings.viewPresets}
+        onSaveViewPreset={settings.saveViewPreset}
+        onDeleteViewPreset={settings.deleteViewPreset}
+        previewRows={Object.fromEntries(tables.map((owner) => [owner.tabName, owner.rows.slice(0, 40).map((row) => Object.fromEntries(owner.headers.map((header, index) => [header, row.values[index] ?? ""])))]))}
+        // « Onglet ouvert d'abord » propose les valeurs de toutes les lignes, pas seulement celles des aperçus.
+        valuesOf={(tabName, header) => { const table = tables.find((item) => item.tabName === tabName); const at = table ? table.headers.findIndex((item) => foldName(item) === foldName(header)) : -1; return table && at >= 0 ? [...new Set(table.rows.map((row) => row.values[at] ?? "").filter(Boolean))].slice(0, 2000) : [] }}
+        optionsOf={(tabName, header) => (specOf(tabName, header).options ?? []).map((option) => ({ value: option.value, color: option.color }))}
+        stats={indexStats}
+        statsPanel={<IndexStats stats={indexStats} groups={settings.statGroups} rows={statRowKeys} columns={statHeaders} tabs={statTabs} valueOf={statValueOf} tabOf={statTabOf} nameOf={layoutNameOf} optionsOf={statOptionsOf} separatorOf={statSeparatorOf} onOpen={(rowKey, list) => { setSheetError(""); setStatSheetRows(list ?? null); setDetails(rowKey) }} canEdit={!busy} onSave={saveStats} />}
+        initialMode={editorMode}
+        initialTab={table?.tabName}
+      /> : null
+  useEffect(() => { if (dock && editor && editorNode) dock.show(dockKey, { model: editor, mode: editorMode }, editorNode) })
   const peekFound = cardPeek ? locate(cardPeek.row) : null
   const peekCard = cardPeek && peekFound ? pickCard(tabCardsOf(settings.cards, indexKey, peekFound.table.tabName), cardPeek.card === DEFAULT_ITEM_CARD ? null : cardPeek.card) : null
   return (
@@ -1586,36 +1623,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       </div>
 
       {settings.savedViewsUnavailable && !embed && <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">Les vues enregistrées n’ont pas pu être lues sur le serveur partagé d’Eraser : seuls les onglets-fenêtres de la feuille sont montrés, et une vue ne peut pas être enregistrée pour l’instant.</p>}
-      {editor && <IndexEditor
-        model={editor}
-        sampleRows={Object.fromEntries(tables.map((owner) => [owner.tabName, owner.rows.slice(0, 3).map((row) => Object.fromEntries(owner.headers.map((header, index) => [header, row.values[index] ?? ""])))]))}
-        open
-        pending={pending === "schema"}
-        error={editorError}
-        onClose={() => { if (pending !== "schema") setEditor(null) }}
-        onApply={(operations) => void applyEditor(operations)}
-        onDeleteIndex={() => void deleteIndex()}
-        layouts={settings.layouts}
-        onSaveLayouts={settings.saveLayouts}
-        cardsIndex={indexKey}
-        cards={settings.cards}
-        onSaveCards={settings.saveCards}
-        locks={settings.locks}
-        onSaveLocks={settings.saveLocks}
-        presentations={settings.presentations}
-        onSavePresentations={settings.savePresentations}
-        viewPresets={settings.viewPresets}
-        onSaveViewPreset={settings.saveViewPreset}
-        onDeleteViewPreset={settings.deleteViewPreset}
-        previewRows={Object.fromEntries(tables.map((owner) => [owner.tabName, owner.rows.slice(0, 40).map((row) => Object.fromEntries(owner.headers.map((header, index) => [header, row.values[index] ?? ""])))]))}
-        // « Onglet ouvert d'abord » propose les valeurs de toutes les lignes, pas seulement celles des aperçus.
-        valuesOf={(tabName, header) => { const table = tables.find((item) => item.tabName === tabName); const at = table ? table.headers.findIndex((item) => foldName(item) === foldName(header)) : -1; return table && at >= 0 ? [...new Set(table.rows.map((row) => row.values[at] ?? "").filter(Boolean))].slice(0, 2000) : [] }}
-        optionsOf={(tabName, header) => (specOf(tabName, header).options ?? []).map((option) => ({ value: option.value, color: option.color }))}
-        stats={indexStats}
-        statsPanel={<IndexStats stats={indexStats} groups={settings.statGroups} rows={statRowKeys} columns={statHeaders} tabs={statTabs} valueOf={statValueOf} tabOf={statTabOf} nameOf={layoutNameOf} optionsOf={statOptionsOf} separatorOf={statSeparatorOf} onOpen={(rowKey, list) => { setSheetError(""); setStatSheetRows(list ?? null); setDetails(rowKey) }} canEdit={!busy} onSave={saveStats} />}
-        initialMode={editorMode}
-        initialTab={table?.tabName}
-      />}
+      {!dock && editorNode}
 
       {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
 

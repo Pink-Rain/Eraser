@@ -408,7 +408,7 @@ export const calendarScaleOf = (layout: Pick<Presentation, "calendarScale" | "lo
 
 export type PresentationClick = "sheet" | "page" | "side" | "center" | "below" | "none"
 export const presentationClicks: Array<{ value: PresentationClick; label: string; hint: string }> = [
-  { value: "sheet", label: "Ouvrir la fiche", hint: "Le formulaire étoilé de la ligne (d’office)." },
+  { value: "sheet", label: "Ouvrir sa fiche", hint: "Son formulaire à l’étoile, dans une fenêtre, là où l’on est (d’office). Sur une page : ici, jamais dans l’index." },
   { value: "side", label: "Panneau à côté, toujours ouvert", hint: "La ligne choisie (la première d’office) dans un panneau à côté : la vue devient un maître-détail." },
   { value: "center", label: "Fenêtre au centre", hint: "Le détail de la ligne dans une fenêtre, par-dessus la vue." },
   { value: "below", label: "Afficher dessous", hint: "La ligne choisie se déplie sous l’élément (ou sous la vue)." },
