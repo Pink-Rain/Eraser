@@ -39,7 +39,7 @@ export function UpdatePrompt() {
   return <div role="alertdialog" aria-modal="true" aria-labelledby="eraser-update-title" className="fixed inset-0 z-[2000] grid place-items-center bg-background/80 p-6 backdrop-blur-sm">
     <div className="grid max-w-sm justify-items-center gap-5 rounded-3xl border bg-card/95 px-8 py-9 text-center shadow-2xl">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/favicon.png" alt="" className="size-20 animate-spin object-contain [animation-duration:2.4s]" />
+      <img src="/eraser-logo.png" alt="" className="size-20 animate-spin object-contain [animation-duration:2.4s]" />
       <div className="grid gap-1.5">
         <p id="eraser-update-title" className="font-display text-2xl font-semibold">Eraser est en changement.</p>
         <p className="text-muted-foreground">{applying ? "Le changement s’opère…" : "Souhaitez-vous rester dans le passé ?"}</p>

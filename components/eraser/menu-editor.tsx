@@ -52,7 +52,7 @@ function Preview({ items, role }: { items: ResolvedMenuItem[]; role: PageRole })
   return <nav aria-label="Aperçu du menu" className="grid gap-0.5 rounded-2xl bg-sidebar p-2.5 text-sidebar-foreground shadow-[0_14px_36px_rgb(20_16_12/0.25)]">
     <div className="mb-2 flex items-center gap-2 border-b border-sidebar-border px-1.5 pb-2.5">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/favicon.png" alt="" className="size-8 rounded-lg" />
+      <img src="/eraser-logo.png" alt="" className="size-8 rounded-lg" />
       <span><b className="block font-display text-[15px]">Eraser</b><small className="block text-[10px] uppercase tracking-[0.2em] text-sidebar-foreground/55">Vue {roleLabels[role].toLowerCase()}</small></span>
     </div>
     {items.map((item) => {

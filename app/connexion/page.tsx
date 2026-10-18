@@ -17,7 +17,7 @@ export default async function ConnexionPage({
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center text-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/favicon.png" alt="" className="size-16 object-contain" />
+          <img src="/eraser-logo.png" alt="" className="size-16 object-contain" />
           <h1 className="font-display mt-3 text-4xl font-semibold tracking-[-0.03em]">Eraser</h1>
         </div>
         <div className="rounded-3xl border bg-card/95 p-6 shadow-[0_24px_80px_rgb(65_44_24/0.12)] sm:p-7">

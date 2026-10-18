@@ -668,7 +668,7 @@ export function AppShell({
                   aria-label="Ouvrir mes personnages"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/favicon.png" alt="" className="size-full object-contain transition-transform hover:scale-105" />
+                  <img src="/eraser-logo.png" alt="" className="size-full object-contain transition-transform hover:scale-105" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="right" align="start" className="w-80">

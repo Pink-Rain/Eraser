@@ -130,7 +130,7 @@ export function DesktopTitlebar() {
         onMouseDown={handleBarMouseDown}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/favicon.png" alt="" className="size-5 shrink-0 object-contain" style={noDragStyle} />
+        <img src="/eraser-logo.png" alt="" className="size-5 shrink-0 object-contain" style={noDragStyle} />
         {/* Comme un navigateur : précédent, suivant, actualiser, puis les onglets. */}
         {!state.isCollapsed
           ? <><AppNavButtons /><AppTabStrip /></>
