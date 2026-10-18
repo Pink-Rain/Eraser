@@ -495,7 +495,7 @@ export function cleanBlock(input: unknown): PageBlock | null {
 }
 
 /** Une colonne d'une section, au moins (en %). */
-export const MIN_COLUMN_WIDTH = 15
+export const MIN_COLUMN_WIDTH = 5
 
 /** La part de chaque colonne d'une disposition (en %), telle qu'elle est sans réglage. */
 export function defaultSectionWidths(layout: SectionLayout) {

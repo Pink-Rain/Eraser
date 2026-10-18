@@ -1351,10 +1351,10 @@ export function PresentationsPanel({ kind: viewKind, family, tabName, columns, v
   const multi = Boolean(family && family.length > 1)
   const kinds = multi ? family! : [viewKind]
   const keyOf = (form: PresentationKind, id: string) => multi ? `${form}|${id}` : id
-  const chosenKind = multi && selectedId.includes("|") ? selectedId.split("|")[0] as PresentationKind : viewKind
   const all = kinds.flatMap((form) => presentationVersionsOf(value, form)
-    // Le kanban et le maître-détail principaux n'apparaissent que réglés (ou choisis) : la liste principale, toujours.
-    .filter((item) => !multi || item.id !== MAIN_PRESENTATION_ID || form === kinds[0] || Boolean(value[form]) || form === chosenKind)
+    // Le kanban et le maître-détail principaux n'apparaissent que réglés (ou choisis eux-mêmes) : la liste principale, toujours.
+    // Choisir une autre version kanban ne fait pas surgir le kanban principal.
+    .filter((item) => !multi || item.id !== MAIN_PRESENTATION_ID || form === kinds[0] || Boolean(value[form]) || selectedId === keyOf(form, MAIN_PRESENTATION_ID))
     .map((item) => ({ ...item, kind: form, key: keyOf(form, item.id), label: !multi ? item.name : item.id === MAIN_PRESENTATION_ID && !value.mains?.[form] ? `${listFormLabels[form] ?? form} · principale` : `${item.name} · ${listFormLabels[form] ?? form}` })))
   const picked = all.find((item) => item.key === selectedId) ?? all[0]
   const kind = picked.kind
@@ -1407,6 +1407,8 @@ export function PresentationsPanel({ kind: viewKind, family, tabName, columns, v
       items={all.map((item) => ({ id: item.key, name: item.label }))}
       selectedId={picked.key}
       starredId={keyOf(kind, MAIN_PRESENTATION_ID)}
+      // La Liste a une étoilée par forme : choisir une version kanban ne retire pas l'étoile de la liste principale.
+      isStarred={(key) => (multi ? key.split("|")[1] : key) === MAIN_PRESENTATION_ID}
       onSelect={onSelect}
       onStar={(key) => {
         // L'étoile passe à cette version : elle devient celle des pages (pour sa forme), avec son nom et

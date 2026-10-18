@@ -39,7 +39,9 @@ function WidthInput({ value, column, onCommit }: { value: number; column: number
     setDraft(null)
     if (draft.trim() && Number.isFinite(number)) onCommit(number)
   }
-  return <label className="inline-flex items-baseline gap-0.5 rounded-md px-1 py-0.5 tabular-nums transition focus-within:bg-background focus-within:ring-2 focus-within:ring-[#3b5c8a]/30 hover:bg-background/70" title={`Largeur de la colonne ${column} (en % de la section)`}>
+  // Une colonne très étroite (moins de 10 %) : sa case se resserre, sans le signe %.
+  const narrow = value < 10
+  return <label className={`inline-flex items-baseline gap-0.5 rounded-md ${narrow ? "px-0" : "px-1"} py-0.5 tabular-nums transition focus-within:bg-background focus-within:ring-2 focus-within:ring-[#3b5c8a]/30 hover:bg-background/70`} title={`Largeur de la colonne ${column} (en % de la section)`}>
     <input value={draft ?? String(Math.round(value))} inputMode="numeric" aria-label={`Largeur de la colonne ${column}, en %`}
       onChange={(event) => setDraft(event.target.value)} onBlur={commit}
       onKeyDown={(event) => {
@@ -48,7 +50,7 @@ function WidthInput({ value, column, onCommit }: { value: number; column: number
         else if (event.key === "ArrowUp" || event.key === "ArrowDown") { event.preventDefault(); setDraft(null); onCommit(Math.round(value) + (event.key === "ArrowUp" ? 1 : -1) * (event.altKey ? 1 : 5)) }
       }}
       className="w-[2.6ch] min-w-0 bg-transparent text-right text-[12px] font-semibold outline-none" />
-    <span className="text-[10.5px] text-muted-foreground">%</span>
+    {!narrow && <span className="text-[10.5px] text-muted-foreground">%</span>}
   </label>
 }
 

@@ -857,7 +857,7 @@ export function AppShell({
             {pendingPage && <PendingPage pending={pendingPage} />}
             {/* La page actuelle reste montée (cachée) pendant que la suivante arrive. */}
             {/* « Modifier » d'un index reste ouvert en changeant de page : il vit ici, pas dans la page. */}
-            <EditorDockProvider>
+            <EditorDockProvider areaRef={pageScrollerRef}>
             <div data-view-role={viewRole} className={pendingPage ? "hidden" : "contents"}>
               {children}
             </div>

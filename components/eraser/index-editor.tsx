@@ -1,8 +1,9 @@
 "use client"
 
-import { useMemo, useState, type DragEvent, type ReactNode } from "react"
+import { useMemo, useRef, useState, type DragEvent, type ReactNode } from "react"
 import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 
+import { useDockArea } from "@/components/eraser/editor-dock"
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexGuide, type GuideSection } from "@/components/eraser/index-guide"
 import { LayoutViewsPanel, PresetBar, useColumnPresets } from "@/components/eraser/index-presets-ui"
@@ -1132,6 +1133,13 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
     else onClose()
   }
   const canSave = !readOnly && !pending && !layoutSaving && canSubmit && pendingCount > 0 && problems.length === 0
+  // Posé dans le dock de la coque : la fenêtre couvre la zone des pages seulement et ne bloque rien
+  // autour (onglets, navigation, en-tête restent cliquables, on peut changer de page).
+  const dock = useDockArea()
+  const area = dock?.area
+  const GAP = 8
+  const windowRef = useRef<HTMLDivElement>(null)
+  const docked = area && area.width > 2 * GAP && area.height > 2 * GAP ? { left: area.left + GAP, top: area.top + GAP, width: area.width - 2 * GAP, height: area.height - 2 * GAP, maxWidth: "none", maxHeight: "none", translate: "none" } : undefined
 
   return <>
   <AlertDialog open={confirmClose} onOpenChange={setConfirmClose}>
@@ -1149,9 +1157,9 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
       </AlertDialogFooter>
     </AlertDialogContent>
   </AlertDialog>
-  <Dialog open={open} onOpenChange={(next) => { if (!next) requestClose() }}>
-    {/* Un clic hors de la fenêtre (un onglet, le menu) ne la ferme pas : seuls « Annuler », la croix et Échap. */}
-    <DialogContent onInteractOutside={(event) => event.preventDefault()} className="flex h-[94svh] max-h-[94svh] flex-col gap-3 sm:max-w-[min(96vw,1440px)]">
+  <Dialog open={open} modal={!dock} onOpenChange={(next) => { if (!next) requestClose() }}>
+    {/* Un clic hors de la fenêtre (un onglet, le menu) ne la ferme pas : seuls « Annuler », la croix et Échap (tapé dans la fenêtre). */}
+    <DialogContent ref={windowRef} onInteractOutside={(event) => event.preventDefault()} onEscapeKeyDown={(event) => { if (dock && !(event.target instanceof Node && windowRef.current?.contains(event.target))) event.preventDefault() }} style={docked} className="flex h-[94svh] max-h-[94svh] flex-col gap-3 sm:max-w-[min(96vw,1440px)]">
       <DialogHeader className="shrink-0">
         <div className="flex flex-wrap items-start justify-between gap-2 pr-8">
           <div>

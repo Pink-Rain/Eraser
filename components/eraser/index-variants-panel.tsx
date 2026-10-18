@@ -31,7 +31,7 @@ function Tool({ icon: Icon, label, onClick, disabled, className }: { icon: Lucid
   return <Button type="button" variant="ghost" size="icon-sm" className={cn(iconButton, className)} disabled={disabled} onClick={onClick} title={label} aria-label={label}><Icon /></Button>
 }
 
-export function VariantsPanel({ title, icon: Icon, noun, items, selectedId, starredId, onSelect, onStar, starHint, onRename, renameable = () => true, onMove, pinFirst = false, onNew, newHint, onDuplicate, onRemove, removable = () => true, full = false, empty, presets, onApplyPreset, onSavePreset, savePresetHint, onCopy, copyHint, onManagePresets, footer, disabled = false }: {
+export function VariantsPanel({ title, icon: Icon, noun, items, selectedId, starredId, isStarred = (id) => id === starredId, onSelect, onStar, starHint, onRename, renameable = () => true, onMove, pinFirst = false, onNew, newHint, onDuplicate, onRemove, removable = () => true, full = false, empty, presets, onApplyPreset, onSavePreset, savePresetHint, onCopy, copyHint, onManagePresets, footer, disabled = false }: {
   /** « Formulaires », « Survols », « Cartes », « Listes »… */
   title: string
   icon: LucideIcon
@@ -41,6 +41,8 @@ export function VariantsPanel({ title, icon: Icon, noun, items, selectedId, star
   selectedId: string
   /** La version qu'Eraser montre (l'étoile). */
   starredId: string
+  /** Plusieurs étoiles (la Liste : une par forme) ; d'office, seule `starredId` l'est. */
+  isStarred?: (id: string) => boolean
   onSelect: (id: string) => void
   /** Étoiler la version choisie ; absent : pas d'étoile. */
   onStar?: (id: string) => void
@@ -76,7 +78,7 @@ export function VariantsPanel({ title, icon: Icon, noun, items, selectedId, star
 }) {
   const selected = items.find((item) => item.id === selectedId) ?? items[0]
   const at = selected ? items.findIndex((item) => item.id === selected.id) : -1
-  const starred = selected?.id === starredId
+  const starred = selected ? isStarred(selected.id) : false
   const groups = [...new Set(presets.map((preset) => preset.group ?? ""))]
   // « ce formulaire », « ce survol » ; « cette carte », « cette vue ».
   const feminine = /^(carte|vue)$/.test(noun)
@@ -95,15 +97,15 @@ export function VariantsPanel({ title, icon: Icon, noun, items, selectedId, star
     {selected ? <>
       <div className="flex items-center gap-1">
         <NativeSelect value={selected.id} disabled={disabled} onChange={(event) => onSelect(event.target.value)} className="h-8 min-w-0 flex-1 py-0 text-xs" aria-label={`${noun[0].toLocaleUpperCase("fr")}${noun.slice(1)} modifié${feminine ? "e" : ""}`}>
-          {items.map((item) => <NativeSelectOption key={item.id} value={item.id}>{item.id === starredId ? "★ " : ""}{item.name}</NativeSelectOption>)}
+          {items.map((item) => <NativeSelectOption key={item.id} value={item.id}>{isStarred(item.id) ? "★ " : ""}{item.name}</NativeSelectOption>)}
         </NativeSelect>
         {onStar && <Button type="button" variant="ghost" size="icon-sm" className={cn("size-7", starred ? "text-[#c9a227]" : "text-muted-foreground hover:text-[#c9a227]")} disabled={disabled || starred} onClick={() => onStar(selected.id)} title={starred ? `À l’étoile : ${starHint}` : `Mettre l’étoile : ${starHint}`} aria-label={starred ? "À l’étoile" : "Mettre l’étoile"}><Star fill={starred ? "currentColor" : "none"} /></Button>}
       </div>
-      {(onRename && renameable(selected.id)) || (onMove && !(pinFirst && at === 0)) || onRemove ? <div className="flex items-center gap-0.5">
+      {(onRename && renameable(selected.id)) || (onMove && !(pinFirst && (at === 0 || starred))) || onRemove ? <div className="flex items-center gap-0.5">
         {onRename && renameable(selected.id)
           ? <Input value={selected.name} disabled={disabled} maxLength={60} onChange={(event) => onRename(selected.id, event.target.value)} className="h-7 min-w-0 flex-1 text-xs" aria-label={`Nom de ${the} ${noun}`} />
           : <span className="min-w-0 flex-1" />}
-        {onMove && items.length > (pinFirst ? 2 : 1) && !(pinFirst && at === 0) && <>
+        {onMove && items.length > (pinFirst ? 2 : 1) && !(pinFirst && (at === 0 || starred)) && <>
           <Tool icon={ArrowUp} label="Avancer dans la liste" disabled={disabled || at <= (pinFirst ? 1 : 0)} onClick={() => onMove(-1)} />
           <Tool icon={ArrowDown} label="Reculer dans la liste" disabled={disabled || at < 0 || at >= items.length - 1} onClick={() => onMove(1)} />
         </>}

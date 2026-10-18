@@ -1,40 +1,29 @@
-# Eraser 0.1.1-alpha.230 — « Modifier » qui reste ouvert, les colonnes des pages, les mêmes règles pour toutes les formes
+# Eraser 0.1.1-alpha.231 — « Modifier » qui laisse la main, l'étoile qui reste en place, des colonnes jusqu'à 5 %
 
 Cette version arrive **sans réinstallation** (même enveloppe que l'alpha 227) : Eraser la
 télécharge, redémarre son serveur et recharge la page tout seul. Rien n'est effacé dans Google
 Sheets, ni dans les réglages, ni dans les pages : aucune clé enregistrée ne change.
 
-## « Modifier » d'un index reste ouvert
+## « Modifier » d'un index ne bloque plus le reste
 
-- La fenêtre **ne se ferme plus quand on change de page** (ni d'onglet), et elle est toujours là,
-  avec ses modifications, en revenant.
-- **Un clic à côté ne la ferme plus** : seuls « Annuler », la croix et Échap la ferment.
-- « Réduire » et sa pastille « Reprendre » sont retirés.
+- La fenêtre se pose **sur la zone des pages seulement** : les onglets du haut, la navigation à
+  gauche et l'en-tête restent visibles et **cliquables** pendant qu'elle est ouverte. On peut donc
+  vraiment changer d'onglet ou de page sans la fermer ; elle garde ses modifications.
+- Elle suit la place disponible : replier la navigation ou agrandir la fenêtre d'Eraser l'élargit.
+- Un clic à côté ne la ferme toujours pas. **Échap** la ferme seulement s'il est tapé dans la
+  fenêtre (un Échap tapé dans une autre page ne la ferme plus par surprise).
 
-## Les colonnes des pages
+## L'étoile ne suit plus la sélection (vues)
 
-- **« − / + » sur chaque section** : ajouter ou retirer une colonne (jusqu'à 4). Une colonne retirée
-  rend ses blocs à la précédente.
-- **La règle des largeurs**, sous la barre de la section : la part de chaque colonne en %, à taper
-  (ou aux flèches ± 5 %), et les séparations à glisser. « Égaliser » remet tout égal.
-- Dans l'atelier, les colonnes restent côte à côte, à leurs vraies proportions, même sur un écran
-  de portable (elles s'empilaient avant 608 px de large).
+- Dans la Liste (liste, kanban, maître-détail), choisir une version pour la modifier ne déplace
+  plus l'étoile : chaque forme garde **sa** version étoilée, marquée ★ dans la liste.
+- Choisir une version kanban ne fait plus surgir le kanban principal dans la liste.
+- Les flèches « avancer / reculer » n'apparaissent plus sur une version étoilée, qui reste en tête.
 
-## Un champ plusieurs fois dans un formulaire
+## Colonnes des pages
 
-- Sous « Champs non placés », **« Placer un champ une fois de plus »** liste les champs déjà placés :
-  un clic en ajoute une copie à la fin, un glisser la pose dans une ligne. La copie montre et
-  modifie la même case.
-
-## Les mêmes règles pour toutes les formes
-
-Cartes, formulaires, survols, liste, chronologie, calendrier, galerie, tableau de bord,
-arborescence, codex, stats :
-
-- **Mettre l'étoile ne renomme plus rien** : chaque version garde son nom (il n'y a plus
-  d'« Ancien formulaire principal » ni d'« Ancienne vue principale »).
-- **La version à l'étoile se renomme et se supprime comme les autres** ; la supprimer passe l'étoile
-  à la suivante. La poubelle est toujours à la même place, grisée seulement quand il n'y a rien à
-  retirer (l'affichage d'origine d'Eraser).
-- La version à l'étoile passe en tête de la liste, pour toutes les formes (les cartes aussi).
-- Un bloc de page qui montre une version précise la retrouve même après qu'elle a reçu l'étoile.
+- Une colonne peut descendre jusqu'à **5 %** de la section (15 % avant), à la règle, aux poignées
+  ou en tapant sa part. Une colonne très étroite affiche sa part sans le signe %.
+- Précision sur l'alpha 230 : les colonnes de l'atelier s'empilaient quand **la zone de l'atelier**
+  était étroite (moins de 38rem), y compris sur un PC ; ce n'était pas lié au type d'écran.
+  Depuis l'alpha 230, elles restent côte à côte dès 28rem.

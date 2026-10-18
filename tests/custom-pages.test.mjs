@@ -604,8 +604,9 @@ test("les largeurs des colonnes d'une section : bornées, ramenées à 100, oubl
   assert.equal(pages.cleanSectionWidths([200 / 3, 100 / 3], "side-r"), undefined);
   assert.equal(pages.cleanSectionWidths([60, 40], "3"), undefined);
   assert.equal(pages.cleanSectionWidths([60, 40], "1"), undefined);
-  assert.deepEqual(pages.cleanSectionWidths([95, 5], "2"), [85, 15]);
-  assert.deepEqual(pages.cleanSectionWidths([90, 5, 5], "3"), [70, 15, 15]);
+  assert.deepEqual(pages.cleanSectionWidths([95, 5], "2"), [95, 5]);
+  assert.deepEqual(pages.cleanSectionWidths([98, 2], "2"), [95, 5]);
+  assert.deepEqual(pages.cleanSectionWidths([96, 2, 2], "3"), [90, 5, 5]);
   const [section] = pages.cleanSections([{ id: "s1", layout: "3", cols: [[], [], []], widths: [50, 25, 25] }]);
   assert.deepEqual(section.widths, [50, 25, 25]);
   assert.equal(pages.cleanSections([{ id: "s2", layout: "2", cols: [[], []], widths: "70,30" }])[0].widths, undefined);
