@@ -8,6 +8,7 @@ import { parseCardTemplate, parseTabCards } from "@/lib/index-cards"
 import { cleanTabLocks } from "@/lib/index-locks"
 import { listIndexLocks, saveIndexLocks } from "@/lib/index-locks-store"
 import { deleteViewPreset, listIndexPresentations, listIndexStatsRecord, listViewPresets, saveIndexPresentations, saveIndexStats, saveViewPreset } from "@/lib/index-presentations-store"
+import { cleanVersionMeta } from "@/lib/index-versions"
 import { cleanPresentation, parseTabPresentations } from "@/lib/index-presentations"
 import { listIndexSavedViews, removeIndexSavedView, saveIndexSavedView } from "@/lib/index-saved-views-store"
 import type { PresetColumn } from "@/lib/index-presets"
@@ -99,7 +100,7 @@ export async function POST(request: Request) {
     }
     if (body.action === "save-layouts") {
       // Mise en page de la fiche et du survol, onglet par onglet ; vide : l'affichage automatique.
-      const changes = (Array.isArray(body.changes) ? body.changes : []).map((change) => ({ tab: String(change.tab ?? ""), form: parseIndexLayout(change.form), hover: parseIndexLayout(change.hover), forms: parseNamedLayouts((change as { forms?: unknown }).forms), hovers: parseNamedLayouts((change as { hovers?: unknown }).hovers) }))
+      const changes = (Array.isArray(body.changes) ? body.changes : []).map((change) => ({ tab: String(change.tab ?? ""), form: parseIndexLayout(change.form), hover: parseIndexLayout(change.hover), forms: parseNamedLayouts((change as { forms?: unknown }).forms), hovers: parseNamedLayouts((change as { hovers?: unknown }).hovers), formMain: cleanVersionMeta((change as { formMain?: unknown }).formMain), hoverMain: cleanVersionMeta((change as { hoverMain?: unknown }).hoverMain) }))
       try {
         return NextResponse.json({ layouts: await saveIndexLayouts(String(body.index ?? ""), changes) })
       } catch (error) {

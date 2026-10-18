@@ -8,6 +8,7 @@
  * `{ form, hover }` en JSON. Revenir à l'affichage automatique efface l'entrée.
  */
 import { parseIndexLayout, parseTabLayouts, type IndexLayout, type LayoutPreset, type NamedLayout, type TabLayouts } from "@/lib/index-layouts"
+import type { VersionMeta } from "@/lib/index-versions"
 import { deleteSharedRecord, listSharedRecords, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
 
 const SCOPE = "index-layouts"
@@ -56,7 +57,7 @@ export async function listIndexLayouts(index: string): Promise<Record<string, Ta
 }
 
 /** Ce qu'un onglet enregistre : le formulaire et le survol étoilés, les autres formulaires et survols ; tout vide : l'affichage automatique. */
-export type TabLayoutChange = { tab: string; form: IndexLayout | null; hover: IndexLayout | null; forms?: NamedLayout[]; hovers?: NamedLayout[] }
+export type TabLayoutChange = { tab: string; form: IndexLayout | null; hover: IndexLayout | null; forms?: NamedLayout[]; hovers?: NamedLayout[]; formMain?: VersionMeta | null; hoverMain?: VersionMeta | null }
 
 /** Enregistre les mises en page d'onglets d'un index ; `null` partout : l'affichage automatique. */
 export async function saveIndexLayouts(index: string, changes: TabLayoutChange[]) {
@@ -68,7 +69,7 @@ export async function saveIndexLayouts(index: string, changes: TabLayoutChange[]
     const forms = (change.forms ?? []).filter((item) => parseIndexLayout(item.layout, { keepEmpty: true }))
     const hovers = (change.hovers ?? []).filter((item) => parseIndexLayout(item.layout, { keepEmpty: true }))
     if (!change.form && !change.hover && !forms.length && !hovers.length) { await deleteSharedRecord(SCOPE, key); continue }
-    const value = JSON.stringify({ ...(change.form ? { form: change.form } : {}), ...(change.hover ? { hover: change.hover } : {}), ...(forms.length ? { forms } : {}), ...(hovers.length ? { hovers } : {}) })
+    const value = JSON.stringify({ ...(change.form ? { form: change.form } : {}), ...(change.hover ? { hover: change.hover } : {}), ...(forms.length ? { forms } : {}), ...(hovers.length ? { hovers } : {}), ...(change.form && change.formMain ? { formMain: change.formMain } : {}), ...(change.hover && change.hoverMain ? { hoverMain: change.hoverMain } : {}) })
     if (value.length > MAX_VALUE) throw new Error("INDEX_LAYOUT_TOO_LARGE")
     await writeSharedRecord(SCOPE, key, value)
   }

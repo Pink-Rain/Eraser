@@ -2,8 +2,8 @@
 
 /**
  * Le dock de l'éditeur « Modifier » : l'éditeur d'un index est dessiné ici, dans la coque de
- * l'application, et non dans la page de l'index. Changer de page le garde donc ouvert (réduit,
- * avec « Reprendre ») et ses modifications en attente ; revenir à l'index le reprend tel quel.
+ * l'application, et non dans la page de l'index. Changer de page le laisse donc ouvert, avec ses
+ * modifications en attente ; revenir à l'index le retrouve tel quel.
  *
  * La page qui l'ouvre y pose son éditeur à chaque rendu (`show`), avec ce qu'il lui faut (son
  * modèle, à reprendre au retour) ; elle le retire en le fermant (`hide`). Quitter la page ne le

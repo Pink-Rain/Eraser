@@ -16,6 +16,7 @@
  * Google Sheets.
  */
 import { foldName } from "@/lib/index-columns"
+import { cleanVersionMeta, type VersionMeta } from "@/lib/index-versions"
 
 /** La largeur d'un champ, sur une ligne de 12 : ¼, ⅓, ½, ⅔, ¾, toute la ligne. */
 export type LayoutSpan = 3 | 4 | 6 | 8 | 9 | 12
@@ -233,7 +234,15 @@ export type NamedLayout = { id: string; name: string; layout: IndexLayout }
  * d'une ligne), `forms` les autres formulaires, `hover` le survol étoilé (celui des
  * citations « { »), `hovers` les autres survols, gardés pour passer de l'un à l'autre.
  */
-export type TabLayouts = { form?: IndexLayout; hover?: IndexLayout; forms?: NamedLayout[]; hovers?: NamedLayout[] }
+export type TabLayouts = {
+  form?: IndexLayout
+  hover?: IndexLayout
+  forms?: NamedLayout[]
+  hovers?: NamedLayout[]
+  /** Le nom et l'identifiant du formulaire (du survol) à l'étoile, quand il en a reçu (lib/index-versions.ts). */
+  formMain?: VersionMeta
+  hoverMain?: VersionMeta
+}
 
 export type LayoutKind = "form" | "hover"
 
@@ -243,20 +252,20 @@ export const DEFAULT_FORM_ID = "principal"
 /** Tous les formulaires d'un onglet, le formulaire étoilé en tête (sous l'identifiant `principal`). */
 export function tabFormsOf(entry: TabLayouts | null | undefined): NamedLayout[] {
   const others = (entry?.forms ?? []).filter((item) => item.id !== DEFAULT_FORM_ID)
-  return [...(entry?.form ? [{ id: DEFAULT_FORM_ID, name: "Formulaire principal", layout: entry.form }] : []), ...others]
+  return [...(entry?.form ? [{ id: DEFAULT_FORM_ID, name: entry.formMain?.name ?? "Formulaire principal", layout: entry.form }] : []), ...others]
 }
 
 /** Un formulaire d'un onglet par son identifiant ; absent ou inconnu : le formulaire étoilé. */
 export function formOf(entry: TabLayouts | null | undefined, formId?: string | null): IndexLayout | null {
   if (!entry) return null
-  if (formId && formId !== DEFAULT_FORM_ID) return entry.forms?.find((item) => item.id === formId)?.layout ?? entry.form ?? null
+  if (formId && formId !== DEFAULT_FORM_ID && formId !== entry.formMain?.id) return entry.forms?.find((item) => item.id === formId)?.layout ?? entry.form ?? null
   return entry.form ?? null
 }
 
 /** Le survol d'un onglet par l'identifiant de sa version (choisie par une présentation) ; absent ou inconnu : l'étoilé. */
 export function hoverVersionOf(entry: TabLayouts | null | undefined, hoverId?: string | null): IndexLayout | null {
   if (!entry) return null
-  if (hoverId && hoverId !== DEFAULT_FORM_ID) return entry.hovers?.find((item) => item.id === hoverId)?.layout ?? entry.hover ?? null
+  if (hoverId && hoverId !== DEFAULT_FORM_ID && hoverId !== entry.hoverMain?.id) return entry.hovers?.find((item) => item.id === hoverId)?.layout ?? entry.hover ?? null
   return entry.hover ?? null
 }
 
@@ -511,7 +520,14 @@ export function parseTabLayouts(input: unknown): TabLayouts | null {
   const forms = parseNamedLayouts(raw.forms)
   const hovers = parseNamedLayouts(raw.hovers)
   if (!form && !hover && !forms.length && !hovers.length) return null
-  return { ...(form ? { form } : {}), ...(hover ? { hover } : {}), ...(forms.length ? { forms } : {}), ...(hovers.length ? { hovers } : {}) }
+  // Le nom de la version à l'étoile n'a de sens qu'avec elle, et son identifiant n'est pas celui d'une autre.
+  const formMain = form ? cleanVersionMeta(raw.formMain) : undefined
+  const hoverMain = hover ? cleanVersionMeta(raw.hoverMain) : undefined
+  return {
+    ...(form ? { form } : {}), ...(hover ? { hover } : {}), ...(forms.length ? { forms } : {}), ...(hovers.length ? { hovers } : {}),
+    ...(formMain && !forms.some((item) => item.id === formMain.id) ? { formMain } : {}),
+    ...(hoverMain && !hovers.some((item) => item.id === hoverMain.id) ? { hoverMain } : {}),
+  }
 }
 
 /** Une liste de mises en page nommées (formulaires ou survols de plus) : lisibles, sans doublon, 12 au plus. */

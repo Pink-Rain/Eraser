@@ -15,6 +15,7 @@
 import { cellNumber, cellParts, cleanStats, type StatDefinition } from "@/lib/index-stats"
 import { parseCardTemplate, type CardTemplate } from "@/lib/index-cards"
 import { cleanViewRoles, isViewRole, type ViewRole } from "@/lib/view-roles"
+import { cleanVersionMeta, type VersionMeta } from "@/lib/index-versions"
 
 export { cellNumber }
 
@@ -1002,7 +1003,11 @@ export type NamedPresentation = { id: string; name: string; layout: Presentation
  * sous son genre, la version étoilée (celle que montrent les pages et le tableau de bord) ;
  * dans `named`, les autres versions, qu'un bloc de page peut choisir.
  */
-export type TabPresentations = Partial<Record<PresentationKind, Presentation>> & { named?: NamedPresentation[] }
+export type TabPresentations = Partial<Record<PresentationKind, Presentation>> & {
+  named?: NamedPresentation[]
+  /** Par forme, le nom et l'identifiant de la version à l'étoile, quand elle en a reçu (lib/index-versions.ts). */
+  mains?: Partial<Record<PresentationKind, VersionMeta>>
+}
 
 /** Le choix « une autre version de la vue » d'un bloc de page, rangé avec les presets (`vue:<id>`). */
 export const PRESENTATION_VARIANT_PREFIX = "vue:"
@@ -1032,6 +1037,15 @@ export function parseTabPresentations(input: unknown): TabPresentations | null {
   const seen = new Set<string>()
   const named = (Array.isArray((value as { named?: unknown }).named) ? (value as { named: unknown[] }).named : []).map(parseNamedView).filter((item): item is NamedPresentation => Boolean(item) && !seen.has(item!.id) && Boolean(seen.add(item!.id))).slice(0, 60)
   if (named.length) result.named = named
+  const rawMains = (value as { mains?: unknown }).mains
+  if (rawMains && typeof rawMains === "object") {
+    const mains: Partial<Record<PresentationKind, VersionMeta>> = {}
+    for (const [kind, meta] of Object.entries(rawMains as Record<string, unknown>)) {
+      const clean = isPresentationKind(kind) && result[kind] ? cleanVersionMeta(meta) : undefined
+      if (clean && !seen.has(clean.id)) mains[kind as PresentationKind] = clean
+    }
+    if (Object.keys(mains).length) result.mains = mains
+  }
   return result
 }
 
@@ -1049,6 +1063,8 @@ export function presentationEntries(entry: TabPresentations | null | undefined):
 export function presentationVariant(stored: Record<string, TabPresentations> | null | undefined, tab: string, id: string): Presentation | null {
   const fold = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").replace(/\s+/g, " ").trim()
   const entry = stored ? Object.entries(stored).find(([name]) => fold(name) === fold(tab))?.[1] : undefined
+  const main = Object.entries(entry?.mains ?? {}).find(([, meta]) => meta?.id === id)?.[0] as PresentationKind | undefined
+  if (main && entry?.[main]) return entry[main]!
   return namedPresentationsOf(entry).find((item) => item.id === id)?.layout ?? null
 }
 

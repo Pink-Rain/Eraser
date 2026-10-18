@@ -17,7 +17,7 @@ import { PageSearchBlock, PageSearchProvider, PageStatBlock, PageViewBlock } fro
 import { describeCondition } from "@/lib/index-windows"
 import { rowOfRoute } from "@/lib/page-replacements"
 import { blockIcons } from "@/components/eraser/page-studio-icons"
-import { SectionGrid, fmtWidth } from "@/components/eraser/page-section-grid"
+import { ColumnCount, SectionGrid, WidthRuler } from "@/components/eraser/page-section-grid"
 import { BlockSettings, PageSettings, Segmented, VisibilityPill, roleDot } from "@/components/eraser/page-studio-settings"
 import { IndexRichText } from "@/components/eraser/index-references"
 import { RichTextField } from "@/components/eraser/rich-text"
@@ -26,8 +26,11 @@ import {
   blockLabel,
   blockVisibilities,
   blockVisibleTo,
+  layoutForColumns,
+  MAX_SECTION_COLUMNS,
   newBlock,
   newId,
+  widthsForColumns,
   pageForViewer,
   pageHref,
   pageVisibleTo,
@@ -476,6 +479,18 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
     delete section.widths
   }), [change])
 
+  const setColumns = useCallback((sectionId: string, count: number) => change((draft) => {
+    const section = draft.sections.find((item) => item.id === sectionId)
+    if (!section || count < 1 || count > MAX_SECTION_COLUMNS || count === section.cols.length) return
+    const layout = layoutForColumns(count, section.layout)
+    const widths = widthsForColumns(section.widths, count, layout)
+    while (section.cols.length > count) { const extra = section.cols.pop()!; section.cols[section.cols.length - 1].push(...extra) }
+    while (section.cols.length < count) section.cols.push([])
+    section.layout = layout
+    if (widths) section.widths = widths
+    else delete section.widths
+  }), [change])
+
   const setWidths = useCallback((sectionId: string, widths: number[] | undefined) => change((draft) => {
     const section = draft.sections.find((item) => item.id === sectionId)
     if (!section) return
@@ -683,15 +698,17 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
           {doc.sections.map((section, si) => <section key={section.id} aria-label={`Section ${si + 1}`} className="group/section grid gap-1.5">
             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-0.5 text-xs text-muted-foreground">
               <span className="text-[10.5px] font-bold uppercase tracking-[0.14em]">Section {si + 1}</span>
+              <ColumnCount count={section.cols.length} onChange={(count) => setColumns(section.id, count)} />
               <Segmented size="sm" label={`Disposition de la section ${si + 1}`} value={section.layout} onChange={(layout) => setLayout(section.id, layout)} options={sectionLayouts.map((item) => ({ value: item.value, label: <LayoutGlyph layout={item.value} />, title: item.label }))} />
               <label className="inline-flex cursor-pointer items-center gap-1 max-sm:hidden"><input type="checkbox" checked={section.framed} onChange={(event) => change((draft) => { draft.sections[si].framed = event.target.checked })} className="accent-primary" />Encadrée</label>
-              {section.widths && <span className="inline-flex items-center gap-0.5 rounded-full border bg-card py-0.5 pl-2 pr-0.5 text-[10.5px] font-semibold tabular-nums">{section.widths.map(fmtWidth).join(" · ")}<button type="button" title="Rendre les largeurs de la disposition" aria-label="Rendre les largeurs de la disposition" onClick={() => setWidths(section.id, undefined)} className="grid size-4 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><X className="size-3" /></button></span>}
+
               <span className="ml-auto inline-flex">
                 <ToolButton label="Monter la section" disabled={si === 0} onClick={() => change((draft) => { const [moved] = draft.sections.splice(si, 1); draft.sections.splice(si - 1, 0, moved) })}><ArrowUp className="size-3.5" /></ToolButton>
                 <ToolButton label="Descendre la section" disabled={si === sectionCount - 1} onClick={() => change((draft) => { const [moved] = draft.sections.splice(si, 1); draft.sections.splice(si + 1, 0, moved) })}><ArrowDown className="size-3.5" /></ToolButton>
                 <ToolButton label="Supprimer la section" danger disabled={sectionCount === 1} onClick={() => { const count = section.cols.flat().length; change((draft) => { draft.sections.splice(si, 1) }); notify(count ? `Section supprimée (${count} bloc${count > 1 ? "s" : ""})` : "Section supprimée", { label: "Annuler", run: undo }) }}><Trash2 className="size-3.5" /></ToolButton>
               </span>
             </div>
+            {section.cols.length > 1 && <WidthRuler layout={section.layout} widths={section.widths} onChange={(widths) => setWidths(section.id, widths)} />}
             <SectionGrid layout={section.layout} widths={section.widths} framed={section.framed} onWidths={(widths) => setWidths(section.id, widths)}>
               {section.cols.map((column, ci) => <div key={ci} data-col onDragOver={(event) => overColumn(event, section.id, ci)} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDrop((current) => current?.section === section.id && current.column === ci ? null : current) }} onDrop={dropOn}
                 className={`grid min-h-12 min-w-0 content-start gap-2.5 rounded-[14px] p-0.5 outline outline-1 outline-dashed transition ${drop?.section === section.id && drop.column === ci ? "bg-[#3b5c8a]/[0.04] outline-2 outline-[#3b5c8a]" : section.cols.length > 1 ? "outline-border/60" : "outline-transparent"}`}>

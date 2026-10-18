@@ -32,19 +32,31 @@ export const layoutGrid: Record<SectionLayout, string> = {
   "1": "grid-cols-[minmax(0,1fr)]",
   "2": "grid-cols-[minmax(0,1fr)] @[38rem]:grid-cols-2",
   "3": "grid-cols-[minmax(0,1fr)] @[38rem]:grid-cols-2 @[56rem]:grid-cols-3",
+  "4": "grid-cols-[minmax(0,1fr)] @[38rem]:grid-cols-2 @[56rem]:grid-cols-4",
   "side-r": "grid-cols-[minmax(0,1fr)] @[38rem]:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]",
   "side-l": "grid-cols-[minmax(0,1fr)] @[38rem]:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]",
 }
 
 /** Une section aux largeurs réglées : ses colonnes côte à côte dès que la place le permet (`--section-cols`). */
-const widthsGrid = (columns: number) => columns === 3
+const widthsGrid = (columns: number) => columns >= 3
   ? "grid-cols-[minmax(0,1fr)] @[38rem]:grid-cols-2 @[56rem]:grid-cols-[var(--section-cols)]"
   : "grid-cols-[minmax(0,1fr)] @[38rem]:grid-cols-[var(--section-cols)]"
+
+const columnsVar = (widths: number[]) => ({ "--section-cols": widths.map((width) => `minmax(0,${width}fr)`).join(" ") }) as CSSProperties
 
 /** La grille d'une section : sa disposition, ou ses largeurs réglées. */
 export function sectionGrid(layout: SectionLayout, widths?: number[]): { className: string; style?: CSSProperties } {
   if (!widths || widths.length !== layoutColumns(layout)) return { className: layoutGrid[layout] }
-  return { className: widthsGrid(widths.length), style: { "--section-cols": widths.map((width) => `minmax(0,${width}fr)`).join(" ") } as CSSProperties }
+  return { className: widthsGrid(widths.length), style: columnsVar(widths) }
+}
+
+/**
+ * La grille d'une section dans l'atelier, plus étroit que la page : les colonnes y restent côte à
+ * côte, à leurs proportions, dès 28rem, pour qu'on les voie et qu'on les règle.
+ */
+export function studioSectionGrid(widths: number[]): { className: string; style?: CSSProperties } {
+  if (widths.length < 2) return { className: layoutGrid["1"] }
+  return { className: "grid-cols-[minmax(0,1fr)] @[28rem]:grid-cols-[var(--section-cols)]", style: columnsVar(widths) }
 }
 
 export const calloutTones: Record<CalloutTone, { label: string; icon: typeof Info; box: string; title: string }> = {

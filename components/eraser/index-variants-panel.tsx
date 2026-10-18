@@ -3,7 +3,8 @@
 /**
  * Le menu des vues de « Modifier », sous les onglets : le même pour le formulaire, le survol,
  * les cartes et chaque vue (liste, kanban…). En tête, les versions de la vue (la liste,
- * l'étoile pour celle qu'Eraser montre, nouvelle, dupliquer, renommer, retirer) ; dessous,
+ * l'étoile pour celle qu'Eraser montre, nouvelle, dupliquer, renommer, retirer — les mêmes règles
+ * pour toutes : l'étoile ne renomme rien, et la version à l'étoile passe en tête) ; dessous,
  * les presets (appliquer, enregistrer, copier vers d'autres onglets, gérer). Les boutons sont
  * des icônes, expliquées au survol. Les fenêtres communes (enregistrer en preset, copier vers,
  * gérer les presets) sont ici aussi.
@@ -98,7 +99,7 @@ export function VariantsPanel({ title, icon: Icon, noun, items, selectedId, star
         </NativeSelect>
         {onStar && <Button type="button" variant="ghost" size="icon-sm" className={cn("size-7", starred ? "text-[#c9a227]" : "text-muted-foreground hover:text-[#c9a227]")} disabled={disabled || starred} onClick={() => onStar(selected.id)} title={starred ? `À l’étoile : ${starHint}` : `Mettre l’étoile : ${starHint}`} aria-label={starred ? "À l’étoile" : "Mettre l’étoile"}><Star fill={starred ? "currentColor" : "none"} /></Button>}
       </div>
-      {(onRename && renameable(selected.id)) || (onMove && !(pinFirst && at === 0)) || (onRemove && removable(selected.id)) ? <div className="flex items-center gap-0.5">
+      {(onRename && renameable(selected.id)) || (onMove && !(pinFirst && at === 0)) || onRemove ? <div className="flex items-center gap-0.5">
         {onRename && renameable(selected.id)
           ? <Input value={selected.name} disabled={disabled} maxLength={60} onChange={(event) => onRename(selected.id, event.target.value)} className="h-7 min-w-0 flex-1 text-xs" aria-label={`Nom de ${the} ${noun}`} />
           : <span className="min-w-0 flex-1" />}
@@ -106,7 +107,8 @@ export function VariantsPanel({ title, icon: Icon, noun, items, selectedId, star
           <Tool icon={ArrowUp} label="Avancer dans la liste" disabled={disabled || at <= (pinFirst ? 1 : 0)} onClick={() => onMove(-1)} />
           <Tool icon={ArrowDown} label="Reculer dans la liste" disabled={disabled || at < 0 || at >= items.length - 1} onClick={() => onMove(1)} />
         </>}
-        {onRemove && removable(selected.id) && <Tool icon={Trash2} label={`Retirer ${this_} ${noun}`} disabled={disabled} onClick={onRemove} className="text-destructive/70 hover:text-destructive" />}
+        {/* Toujours à la même place ; grisé quand il n'y a rien à retirer (l'affichage d'origine d'Eraser). */}
+        {onRemove && <Tool icon={Trash2} label={removable(selected.id) ? `Retirer ${this_} ${noun}${starred && items.length > 1 ? " (l’étoile passe à la suivante)" : ""}` : `Rien à retirer : c’est l’affichage d’origine d’Eraser`} disabled={disabled || !removable(selected.id)} onClick={onRemove} className="text-destructive/70 hover:text-destructive" />}
       </div> : null}
     </> : empty}
 

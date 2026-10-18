@@ -220,6 +220,9 @@ function BlockSettings({ block, columns, onChange, disabled, forms }: { block: L
   }
 }
 
+/** Ce qu'on glisse depuis « Placer un champ une fois de plus » : une copie du champ nommé à la suite. */
+const COPY_DRAG = "\u0000copie-de:"
+
 /**
  * Le constructeur de mise en page d'un onglet : la fiche (et le formulaire d'ajout), ou le
  * survol d'une ligne citée. On range les colonnes et les blocs (paliers, tuiles,
@@ -229,6 +232,8 @@ function BlockSettings({ block, columns, onChange, disabled, forms }: { block: L
  * première ligne de l'onglet. Le point de départ est toujours la mise en page réellement
  * utilisée (celle réglée, celle d'Eraser, ou l'automatique écrite d'après les colonnes).
  */
+
+
 export function IndexLayoutEditor({ kind, columns, value, source = "saved", onChange, onReset, sample = {}, samples, valuesOf, resetLabel, disabled = false, forms, sampleRow, eraserStarters, indexTitle }: {
   kind: LayoutKind
   /** Les colonnes que la mise en page peut placer. */
@@ -279,6 +284,12 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
   const layout = value
   const placed = useMemo(() => new Set([...layout.aside, ...layout.sections.flatMap((section) => section.rows.flatMap((row) => row.fields))].map((field) => foldName(fieldColumnOf(field)))), [layout])
   const unplaced = columns.filter((column) => !placed.has(foldName(column.header)))
+  // Les champs déjà placés, qu'on peut placer une fois de plus (formulaire) : une copie montre et modifie la même case.
+  const copyable = hover ? [] : columns.filter((column) => placed.has(foldName(column.header)))
+  /** Le champ glissé posé là : un champ (déplacé ou placé), ou une copie d'un champ déjà placé. */
+  const dropped = (column: string, place: Place, index?: number) => column.startsWith(COPY_DRAG)
+    ? (() => { const key = copyKey(); return placeField(layout, key, place, index, { column: key, of: column.slice(COPY_DRAG.length) }) })()
+    : placeField(layout, column, place, index)
   const specOf = (header: string) => columns.find((column) => sameColumn(column.header, header))?.spec
   const known = (header: string) => columns.some((column) => sameColumn(column.header, header))
   const colorColumns = columns.filter((column) => normalizeSpec(column.spec).kind === "color" || /^couleur/i.test(column.header)).map((column) => column.header)
@@ -287,7 +298,7 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
   const dropProps = (place: Place, key: string) => ({
     onDragOver: (event: DragEvent) => { if (!dragging || disabled) return; event.preventDefault(); setOver(key) },
     onDragLeave: () => setOver((current) => current === key ? null : current),
-    onDrop: (event: DragEvent) => { event.preventDefault(); setOver(null); const column = dragging ?? event.dataTransfer.getData("text/plain"); setDragging(null); if (column) set(placeField(layout, column, place)) },
+    onDrop: (event: DragEvent) => { event.preventDefault(); setOver(null); const column = dragging ?? event.dataTransfer.getData("text/plain"); setDragging(null); if (column) set(dropped(column, place)) },
   })
 
   const addRow = (section: number, fields: LayoutField[] = []) => set({ ...layout, sections: layout.sections.map((entry, index) => index !== section ? entry : { ...entry, rows: [...entry.rows, { id: layoutId(), fields }] }) })
@@ -380,7 +391,7 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
       onDragStart={(event) => { setDragging(field.column); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", field.column) }}
       onDragEnd={() => { setDragging(null); setOver(null) }}
       onDragOver={(event) => { if (dragging && dragging !== field.column && !disabled) { event.preventDefault(); event.stopPropagation() } }}
-      onDrop={(event) => { event.preventDefault(); event.stopPropagation(); setOver(null); const column = dragging; setDragging(null); if (column && column !== field.column) set(placeField(layout, column, place, index)) }}
+      onDrop={(event) => { event.preventDefault(); event.stopPropagation(); setOver(null); const column = dragging; setDragging(null); if (column && column !== field.column) set(dropped(column, place, index)) }}
       className={cn("group/chip relative flex min-w-0 items-center gap-1 rounded-lg border px-1.5 py-1 text-xs shadow-xs", missing ? "border-destructive/40 bg-destructive/5" : isBlock ? "border-primary/40 bg-primary/5" : "bg-background", open && "ring-2 ring-primary/50")}
       // Sa part de la ligne, comme dans la fiche : un champ « ½ » seul n'en prend que la moitié.
       style={place.area === "row" ? { flex: `0 1 calc(${span} / 12 * 100% - 0.375rem)`, minWidth: "7.5rem" } : undefined}
@@ -641,8 +652,24 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
             className="inline-flex items-center gap-1 rounded-lg border border-dashed bg-background px-2 py-1 text-xs hover:border-primary hover:text-primary"
             title={`${indexColumnKinds[normalizeSpec(column.spec).kind].label} — cliquer pour l’ajouter`}
           ><Plus className="size-3" />{column.header}</button>)}
-          {!unplaced.length && <span className="text-[11px] text-muted-foreground">Toutes les colonnes sont placées.</span>}
+          {!unplaced.length && <span className="text-[11px] text-muted-foreground">Toutes les colonnes sont placées{copyable.length ? " : tu peux en placer une de plus, juste dessous." : "."}</span>}
         </div>
+        {copyable.length > 0 && <>
+          <p className="text-xs font-semibold">Placer un champ une fois de plus <span className="font-normal text-muted-foreground">— la copie montre et modifie la même case (le nom en haut et dans un onglet, les PV à deux endroits…)</span></p>
+          <div className="flex flex-wrap gap-1.5">
+            {copyable.map((column) => <button
+              key={column.header}
+              type="button"
+              draggable={!disabled}
+              disabled={disabled}
+              onDragStart={(event) => { setDragging(`${COPY_DRAG}${column.header}`); event.dataTransfer.effectAllowed = "copy"; event.dataTransfer.setData("text/plain", `${COPY_DRAG}${column.header}`) }}
+              onDragEnd={() => { setDragging(null); setOver(null) }}
+              onClick={() => addField({ column: copyKey(), of: column.header })}
+              className="inline-flex items-center gap-1 rounded-lg border border-dashed bg-background px-2 py-1 text-xs text-muted-foreground hover:border-primary hover:text-primary"
+              title={`Placer « ${column.header} » une fois de plus — cliquer pour l’ajouter à la fin, ou glisser dans une ligne`}
+            ><Copy className="size-3" />{column.header}</button>)}
+          </div>
+        </>}
         <div className="flex flex-wrap items-center gap-3 text-[11px]">
           <span className="text-muted-foreground">Les colonnes non placées (et celles ajoutées plus tard) :</span>
           <label className="flex items-center gap-1.5"><input type="radio" disabled={disabled} checked={(layout.rest ?? (hover ? "hide" : "show")) === "show"} onChange={() => set({ ...layout, rest: "show" })} />s’affichent à la suite</label>

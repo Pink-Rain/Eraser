@@ -34,7 +34,7 @@ export type PageSection = "regles" | "ressources" | "bac-a-sable" | "administrat
 /** Où vit la page : une section du menu, une campagne, ou nulle part (lien direct). */
 export type PagePlace = PageSection | "campagne" | "hors-menu"
 export type PageStatus = "brouillon" | "publiee"
-export type SectionLayout = "1" | "2" | "3" | "side-r" | "side-l"
+export type SectionLayout = "1" | "2" | "3" | "4" | "side-r" | "side-l"
 
 export type BlockType = "title" | "text" | "callout" | "quote" | "image" | "separator" | "link" | "secret" | "notes" | "view" | "stat" | "rowfields" | "backlinks" | "search" | "module"
 export type CalloutTone = "info" | "mj" | "secret" | "alerte"
@@ -203,6 +203,7 @@ export const sectionLayouts: Array<{ value: SectionLayout; label: string; column
   { value: "1", label: "Une colonne", columns: [1] },
   { value: "2", label: "Deux colonnes", columns: [1, 1] },
   { value: "3", label: "Trois colonnes", columns: [1, 1, 1] },
+  { value: "4", label: "Quatre colonnes", columns: [1, 1, 1, 1] },
   { value: "side-r", label: "Contenu et colonne à droite", columns: [2, 1] },
   { value: "side-l", label: "Colonne à gauche et contenu", columns: [1, 2] },
 ]
@@ -523,6 +524,29 @@ export function cleanSectionWidths(value: unknown, layout: SectionLayout): numbe
   const widths = parts.map((part) => Math.round(part * 10) / 10)
   const defaults = defaultSectionWidths(layout)
   return widths.every((item, index) => Math.abs(item - defaults[index]) < 0.6) ? undefined : widths
+}
+
+/** Une section n'a pas plus de colonnes. */
+export const MAX_SECTION_COLUMNS = 4
+
+/** La disposition d'une section de `count` colonnes ; à deux colonnes, `current` reste si elle en a deux. */
+export function layoutForColumns(count: number, current: SectionLayout = "1"): SectionLayout {
+  const wanted = Math.min(MAX_SECTION_COLUMNS, Math.max(1, Math.round(count)))
+  if (wanted === 2) return current === "side-r" || current === "side-l" || current === "2" ? current : "2"
+  return String(wanted) as SectionLayout
+}
+
+/**
+ * Les largeurs après l'ajout ou le retrait d'une colonne : une colonne ajoutée prend sa part
+ * égale, les autres gardent leurs proportions ; une colonne retirée rend sa place aux autres.
+ * Sans largeurs réglées : celles de la disposition (`undefined`).
+ */
+export function widthsForColumns(widths: number[] | undefined, count: number, layout: SectionLayout): number[] | undefined {
+  if (!widths) return undefined
+  const next = count > widths.length
+    ? [...widths.map((width) => width * widths.length / count), ...Array.from({ length: count - widths.length }, () => 100 / count)]
+    : widths.slice(0, count)
+  return cleanSectionWidths(next, layout)
 }
 
 /** Les sections d'une page : dispositions connues, autant de colonnes que la disposition en veut. */

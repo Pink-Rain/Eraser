@@ -1,8 +1,7 @@
 "use client"
 
-import { usePathname } from "next/navigation"
 import { useMemo, useState, type DragEvent, type ReactNode } from "react"
-import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X, PanelLeftClose, PanelLeftOpen, Maximize2, Minimize2 } from "lucide-react"
+import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexGuide, type GuideSection } from "@/components/eraser/index-guide"
@@ -47,6 +46,7 @@ import {
   type RollupFunction,
 } from "@/lib/index-columns"
 import { columnFormulaValue, computeFormulaDisplay, formulaDisplayText, formulaFunctions, formulaProblem, seededRandom } from "@/lib/index-formula"
+import type { VersionMeta } from "@/lib/index-versions"
 import { DEFAULT_FORM_ID, layoutId, renameLayoutColumns, serializeIndexLayout, serializeNamedLayouts, tabLayout, type IndexLayout, type LayoutKind, type NamedLayout, type TabLayouts } from "@/lib/index-layouts"
 import { automaticLayoutFor, builtinLayoutFor, eraserLayoutStarters, tabLayoutsOf } from "@/lib/index-layout-defaults"
 import { renameCardColumns, serializeTabCards, tabCardsOf, type CardColumn, type CardTemplate, type TabCards } from "@/lib/index-cards"
@@ -83,7 +83,7 @@ type DraftColumn = { id: string; original?: string; originalIndex?: number; head
 /** Une colonne dont le nom, le type ou la présence sont protégés. */
 const isLockedPolicy = (policy: ColumnPolicy) => policy.reasons.length > 0 || (!policy.rename && !policy.type && !policy.remove)
 /** Les mises en page touchées d'un onglet : les étoilées (`null` : retour à celle d'Eraser), les autres versions. */
-type LayoutDraft = { form?: IndexLayout | null; hover?: IndexLayout | null; forms?: NamedLayout[]; hovers?: NamedLayout[] }
+type LayoutDraft = { form?: IndexLayout | null; hover?: IndexLayout | null; forms?: NamedLayout[]; hovers?: NamedLayout[]; formMain?: VersionMeta | null; hoverMain?: VersionMeta | null }
 
 type DraftTab = { id: string; original?: string; name: string; itemLabel?: string; originalItemLabel?: string; columns: DraftColumn[]; removed: boolean; remove: boolean; removeReason?: string; rename?: boolean; renameReason?: string; addColumns: boolean; addColumnsReason?: string }
 
@@ -809,12 +809,6 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   const [guide, setGuide] = useState<GuideSection | null>(null)
   // Le panneau des onglets, à gauche : on le replie pour donner la place aux réglages.
   const [asideOpen, setAsideOpen] = useState(true)
-  // « Réduire » : l'éditeur se cache (ses brouillons restent) ; fermer avec des changements demande confirmation.
-  const [minimized, setMinimized] = useState(false)
-  // Changer de page (l'éditeur reste ouvert dans la coque) : il se réduit ; « Reprendre » le rouvre tel quel.
-  const pathname = usePathname()
-  const [openedOn, setOpenedOn] = useState(pathname)
-  if (pathname !== openedOn) { setOpenedOn(pathname); setMinimized(true) }
   const [confirmClose, setConfirmClose] = useState(false)
   // La carte modifiée, par onglet (le panneau des cartes et l'éditeur la partagent).
   const [selectedCard, setSelectedCard] = useState<Record<string, string | null>>({})
@@ -872,6 +866,13 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
     if (touched && key in touched) return touched[key] ?? []
     return savedLayoutsOf(draft)?.[key] ?? []
   }
+  /** Le nom et l'identifiant de la version à l'étoile (touchés, sinon enregistrés) ; `undefined` : jamais nommée. */
+  const mainMetaOf = (draft: DraftTab, kind: LayoutKind): VersionMeta | undefined => {
+    const key = kind === "form" ? "formMain" : "hoverMain"
+    const touched = layoutDrafts[draft.id]
+    if (touched && key in touched) return touched[key] ?? undefined
+    return savedLayoutsOf(draft)?.[key]
+  }
   const namedFormsOf = (draft: DraftTab) => namedLayoutsOf(draft, "form")
   const touchLayout = (draft: DraftTab, changes: LayoutDraft) => setLayoutDrafts((current) => ({ ...current, [draft.id]: { ...current[draft.id], ...changes } }))
   /**
@@ -882,7 +883,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   const layoutChanges = useMemo(() => tabs.flatMap((draft) => {
     if (draft.removed) return []
     const savedEntry = draft.original ? tabLayoutsOf(layouts, draft.original) : null
-    const saved = { form: savedEntry?.form ?? null, hover: savedEntry?.hover ?? null, forms: savedEntry?.forms ?? [], hovers: savedEntry?.hovers ?? [] }
+    const saved = { form: savedEntry?.form ?? null, hover: savedEntry?.hover ?? null, forms: savedEntry?.forms ?? [], hovers: savedEntry?.hovers ?? [], formMain: savedEntry?.formMain ?? null, hoverMain: savedEntry?.hoverMain ?? null }
     const touched = layoutDrafts[draft.id] ?? {}
     const renames = new Map(draft.columns.filter((item) => item.original && !item.removed && item.header.trim() && item.header.trim() !== item.original).map((item) => [foldName(item.original!), item.header.trim()]))
     const builtinRenamed = (kind: LayoutKind) => {
@@ -899,14 +900,17 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
     const hover = next("hover")
     const forms = ("forms" in touched ? touched.forms ?? [] : saved.forms).map((item) => ({ ...item, layout: renameLayoutColumns(item.layout, renames) }))
     const hovers = ("hovers" in touched ? touched.hovers ?? [] : saved.hovers).map((item) => ({ ...item, layout: renameLayoutColumns(item.layout, renames) }))
+    const formMain = "formMain" in touched ? touched.formMain ?? null : saved.formMain
+    const hoverMain = "hoverMain" in touched ? touched.hoverMain ?? null : saved.hoverMain
     const name = draft.name.trim()
     const renamed = Boolean(draft.original) && name !== draft.original
     const changed = renamed || serializeIndexLayout(form) !== serializeIndexLayout(saved.form) || serializeIndexLayout(hover) !== serializeIndexLayout(saved.hover) || serializeNamedLayouts(forms) !== serializeNamedLayouts(saved.forms) || serializeNamedLayouts(hovers) !== serializeNamedLayouts(saved.hovers)
+      || JSON.stringify(formMain) !== JSON.stringify(saved.formMain) || JSON.stringify(hoverMain) !== JSON.stringify(saved.hoverMain)
     if (!changed || !name) return []
     // Un onglet renommé : sa mise en page suit son nouveau nom, l'ancienne ligne est retirée.
     const retired = renamed && (saved.form || saved.hover || saved.forms.length || saved.hovers.length) ? [{ tab: draft.original!, form: null, hover: null, forms: [] as NamedLayout[], hovers: [] as NamedLayout[] }] : []
     if (renamed && !form && !hover && !forms.length && !hovers.length && !retired.length) return []
-    return [...retired, { tab: name, form, hover, forms, hovers }]
+    return [...retired, { tab: name, form, hover, forms, hovers, formMain, hoverMain }]
   }), [layoutDrafts, layouts, model.key, tabs])
 
   // Les cartes touchées, par onglet (identifiant du brouillon) ; `null` : retour aux cartes d'Eraser.
@@ -1120,7 +1124,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   const displayDisabled = columnDisabled
   const lockedTitle = (item: DraftColumn) => item.policy.reasons.length ? `${item.policy.reasons.join("\n")}\n\nModifiable sans risque : ${item.policy.allowed}\nPour le reste : « Modifier quand même », dans ses réglages.` : undefined
 
-  // Les changements pas encore enregistrés : fermer demande confirmation ; « Réduire » les garde en attente.
+  // Les changements pas encore enregistrés : fermer demande confirmation.
   const pendingCount = operations.length + layoutChanges.length + cardChanges.length + presentationChanges.length + lockChanges.length
   const requestClose = () => {
     if (pending) return
@@ -1130,31 +1134,26 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   const canSave = !readOnly && !pending && !layoutSaving && canSubmit && pendingCount > 0 && problems.length === 0
 
   return <>
-  {minimized && open && <div className="fixed right-4 bottom-4 z-50 flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full border bg-popover py-1.5 pr-1.5 pl-4 text-sm shadow-xl" role="status">
-    <Pencil className="size-4 shrink-0 text-primary" aria-hidden="true" />
-    <span className="min-w-0 truncate"><b className="font-semibold">{title ?? `Modifier « ${model.title} »`}</b>{pendingCount > 0 && <span className="text-muted-foreground"> · {pendingCount} changement{pendingCount > 1 ? "s" : ""} en attente</span>}</span>
-    <Button type="button" size="sm" className="h-8 rounded-full" onClick={() => setMinimized(false)}><Maximize2 />Reprendre</Button>
-    <Button type="button" variant="ghost" size="icon-sm" className="rounded-full" onClick={requestClose} aria-label="Fermer l’éditeur" title="Fermer l’éditeur"><X /></Button>
-  </div>}
   <AlertDialog open={confirmClose} onOpenChange={setConfirmClose}>
     <AlertDialogContent className="sm:max-w-xl">
       <AlertDialogHeader>
         <AlertDialogTitle>Quitter sans enregistrer ?</AlertDialogTitle>
-        <AlertDialogDescription>{pendingCount} changement{pendingCount > 1 ? "s" : ""} de « {model.title} » {pendingCount > 1 ? "ne sont pas enregistrés" : "n’est pas enregistré"} : en quittant, {pendingCount > 1 ? "ils seront perdus" : "il sera perdu"}. « Réduire » (en haut de la fenêtre) les garde de côté pendant que tu regardes l’index.</AlertDialogDescription>
+        <AlertDialogDescription>{pendingCount} changement{pendingCount > 1 ? "s" : ""} de « {model.title} » {pendingCount > 1 ? "ne sont pas enregistrés" : "n’est pas enregistré"} : en quittant, {pendingCount > 1 ? "ils seront perdus" : "il sera perdu"}.</AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter className="flex-wrap gap-2 sm:justify-between">
-        <AlertDialogAction variant="destructive" onClick={() => { setConfirmClose(false); setMinimized(false); onClose() }}>Quitter sans enregistrer</AlertDialogAction>
+        <AlertDialogAction variant="destructive" onClick={() => { setConfirmClose(false); onClose() }}>Quitter sans enregistrer</AlertDialogAction>
         <span className="flex flex-col-reverse gap-2 sm:flex-row">
           <AlertDialogCancel>Continuer à modifier</AlertDialogCancel>
-          {canSave && <AlertDialogAction onClick={() => { setConfirmClose(false); setMinimized(false); void submit() }}><Save />{submitLabel}</AlertDialogAction>}
+          {canSave && <AlertDialogAction onClick={() => { setConfirmClose(false); void submit() }}><Save />{submitLabel}</AlertDialogAction>}
         </span>
       </AlertDialogFooter>
     </AlertDialogContent>
   </AlertDialog>
-  <Dialog open={open && !minimized} onOpenChange={(next) => { if (!next) requestClose() }}>
-    <DialogContent className="flex h-[94svh] max-h-[94svh] flex-col gap-3 sm:max-w-[min(96vw,1440px)]">
+  <Dialog open={open} onOpenChange={(next) => { if (!next) requestClose() }}>
+    {/* Un clic hors de la fenêtre (un onglet, le menu) ne la ferme pas : seuls « Annuler », la croix et Échap. */}
+    <DialogContent onInteractOutside={(event) => event.preventDefault()} className="flex h-[94svh] max-h-[94svh] flex-col gap-3 sm:max-w-[min(96vw,1440px)]">
       <DialogHeader className="shrink-0">
-        <div className="flex flex-wrap items-start justify-between gap-2 pr-28">
+        <div className="flex flex-wrap items-start justify-between gap-2 pr-8">
           <div>
             <DialogTitle className="font-display text-2xl">{title ?? `Modifier « ${model.title} »`}</DialogTitle>
             <DialogDescription>{intro ?? (readOnly ? model.readOnlyReason : "Onglets à gauche, colonnes au milieu, réglages de la colonne choisie à droite. Rien n’est écrit dans Google Sheets avant « Enregistrer » ; ce qui est supprimé part dans la corbeille.")}</DialogDescription>
@@ -1163,7 +1162,6 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             {(layoutsEnabled || cardsEnabled || presentationsEnabled) && <span className="inline-flex flex-wrap rounded-lg border bg-muted/30 p-0.5" role="tablist" aria-label="Que modifier">
               {([["columns", Columns3, "Colonnes"], ...(layoutsEnabled ? [["form", LayoutTemplate, "Formulaire"], ["hover", MessageSquareQuote, "Survol"]] as const : []), ...(cardsEnabled ? [["cards", LayoutGrid, "Cartes"]] as const : []), ...(presentationsEnabled ? presentationKinds.filter((kind) => kind.value === "list" || !LIST_FAMILY.includes(kind.value)).map((kind) => [`view:${kind.value}`, layoutIcons[kind.value], kind.label] as const) : []), ...(statsPanel && !readOnly ? [["stats", layoutIcons.stats, "Stats"] as const] : [])] as Array<readonly [EditorMode, LucideIcon, string]>).map(([key, Icon, label]) => <Button key={key} type="button" role="tab" aria-selected={mode === key || (key === "view:list" && listFamily)} size="sm" variant={mode === key || (key === "view:list" && listFamily) ? "default" : "ghost"} className="h-7" onClick={() => setMode(key)}><Icon />{label}</Button>)}
             </span>}
-            {!readOnly && <Button type="button" variant="ghost" size="sm" className="absolute top-3 right-11 h-7 text-muted-foreground" onClick={() => setMinimized(true)} title="Réduire : les modifications restent en attente pendant que tu regardes l’index (changer d’onglet, ouvrir une ligne…) ; « Reprendre » rouvre l’éditeur tel quel."><Minimize2 />Réduire</Button>}
           </span>
         </div>
       </DialogHeader>
@@ -1223,22 +1221,31 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             const label = kind === "form" ? "Formulaire" : "Survol"
             const select = (id: string) => setEditedLayout((state) => ({ ...state, [editKey]: id }))
             const setNamed = (list: NamedLayout[], main?: IndexLayout) => touchLayout(tab, { ...(kind === "form" ? { forms: list } : { hovers: list }), ...(main ? kind === "form" ? { form: main } : { hover: main } : {}) })
+            const mainMeta = mainMetaOf(tab, kind)
+            const mainName = mainMeta?.name ?? `${label} principal`
+            /** Les versions nommées, la version à l'étoile (`null` : celle d'Eraser ou l'automatique) et son nom (`null` : aucun). */
+            const setMain = (list: NamedLayout[], main: IndexLayout | null, meta: VersionMeta | null) => touchLayout(tab, kind === "form" ? { forms: list, form: main, formMain: meta } : { hovers: list, hover: main, hoverMain: meta })
             const add = (name: string, layout: IndexLayout) => { const id = layoutId(); setNamed([...named, { id, name, layout }]); select(id) }
             return <LayoutViewsPanel
               key={editKey}
               kind={kind}
               tabName={tab.name}
-              items={[{ id: DEFAULT_FORM_ID, name: `${label} principal` }, ...named.map((item) => ({ id: item.id, name: item.name }))]}
+              items={[{ id: DEFAULT_FORM_ID, name: mainName }, ...named.map((item) => ({ id: item.id, name: item.name }))]}
               selectedId={chosen?.id ?? DEFAULT_FORM_ID}
               onSelect={select}
               onStar={(id) => {
-                // L'étoile passe à cette version : elle devient celle qu'Eraser montre, l'ancienne garde une place nommée.
+                // L'étoile passe à cette version, avec son nom et son identifiant ; l'ancienne prend sa
+                // place dans la liste, avec les siens. Rien n'est renommé.
                 const target = named.find((item) => item.id === id)
                 if (!target) return
-                setNamed([...named.filter((item) => item.id !== id), { id: layoutId(), name: `Ancien ${label.toLocaleLowerCase("fr")} principal`, layout: layoutOf(tab, kind).layout }], target.layout)
+                const old = mainMeta ?? { id: layoutId(), name: mainName }
+                setMain(named.map((item) => item.id === id ? { id: old.id, name: old.name, layout: layoutOf(tab, kind).layout } : item), target.layout, { id: target.id, name: target.name })
                 select(DEFAULT_FORM_ID)
               }}
-              onRename={(id, name) => setNamed(named.map((item) => item.id === id ? { ...item, name } : item))}
+              onRename={(id, name) => id === DEFAULT_FORM_ID
+                // La version à l'étoile se renomme comme les autres (celle d'Eraser est alors gardée telle quelle, sous ce nom).
+                ? setMain(named, layoutOf(tab, kind).layout, { id: mainMeta?.id ?? layoutId(), name })
+                : setNamed(named.map((item) => item.id === id ? { ...item, name } : item))}
               onMove={(delta) => {
                 // Seules les versions nommées se déplacent : l'étoilée reste en tête.
                 if (!chosen) return
@@ -1251,7 +1258,15 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               }}
               onNew={() => add(`${label} ${named.length + 2}`, automaticLayoutFor(kind, layoutColumnsOf(tab, kind)))}
               onDuplicate={() => add(`${chosen ? chosen.name : `${label} principal`} (copie)`, current)}
-              onRemove={() => { if (!chosen) return; setNamed(named.filter((item) => item.id !== chosen.id)); select(DEFAULT_FORM_ID) }}
+              onRemove={() => {
+                if (chosen) { setNamed(named.filter((item) => item.id !== chosen.id)); return select(DEFAULT_FORM_ID) }
+                // Retirer la version à l'étoile : l'étoile passe à la suivante (avec son nom) ; seule, c'est le retour à l'affichage d'Eraser.
+                const [next, ...rest] = named
+                if (next) setMain(rest, next.layout, { id: next.id, name: next.name })
+                else setMain([], null, null)
+                select(DEFAULT_FORM_ID)
+              }}
+              mainRemovable={named.length > 0 || layoutOf(tab, kind).source === "saved" || Boolean(mainMeta)}
               full={named.length >= 11}
               layout={current}
               otherTabs={otherTabsOf(tab).map((other) => { const target = tabs.find((candidate) => candidate.id === other.id); return target && namedLayoutsOf(target, kind).length >= 11 ? { ...other, disabled: true, hint: "12 versions au plus" } : other })}

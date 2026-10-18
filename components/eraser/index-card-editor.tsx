@@ -973,7 +973,8 @@ export function CardsPanel({ tabName, columns, value, builtin, builtins, samples
     if (!card) return
     const at = value.cards.findIndex((entry) => entry.id === card.id)
     const target = at + delta
-    if (at < 0 || target < 0 || target >= value.cards.length) return
+    // La carte à l'étoile reste en tête : rien ne passe devant elle.
+    if (at < 0 || target < 0 || target >= value.cards.length || (value.cards[0]?.id === defaultId && (at === 0 || target === 0))) return
     const cards = [...value.cards]
     const [moved] = cards.splice(at, 1)
     cards.splice(target, 0, moved)
@@ -988,10 +989,12 @@ export function CardsPanel({ tabName, columns, value, builtin, builtins, samples
       selectedId={card?.id ?? ""}
       starredId={defaultId}
       onSelect={(id) => onSelect(id || null)}
-      onStar={(id) => onChange({ ...value, defaultId: id })}
+      // Comme les autres formes : la carte à l'étoile passe en tête, sans changer de nom.
+      onStar={(id) => { const starred = value.cards.find((entry) => entry.id === id); if (starred) onChange({ ...value, defaultId: id, cards: [starred, ...value.cards.filter((entry) => entry.id !== id)] }) }}
       starHint="la carte montrée d’abord"
       onRename={(id, name) => setCards(value.cards.map((entry) => entry.id === id ? { ...entry, name } : entry))}
       onMove={moveCard}
+      pinFirst={value.cards[0]?.id === defaultId}
       onNew={() => setDialog("new")}
       newHint="Nouvelle carte : une carte d’Eraser, une forme de départ ou un preset"
       onDuplicate={() => { if (card) addCard(duplicateCard(card, `${card.name} (copie)`)) }}

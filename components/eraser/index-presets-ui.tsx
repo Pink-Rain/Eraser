@@ -130,7 +130,7 @@ function ManagePresetsDialog({ tabName, columns, presets, onClose, onSave, onDel
  * celle qu'Eraser montre) et ses presets (appliquer, enregistrer, copier vers d'autres
  * onglets, gérer). Rien n'est écrit avant « Enregistrer » de la fenêtre, sauf les presets.
  */
-export function LayoutViewsPanel({ kind, tabName, items, selectedId, onSelect, onStar, onRename, onMove, onNew, onDuplicate, onRemove, full, layout, otherTabs, disabled, onApply, onCopyTo }: {
+export function LayoutViewsPanel({ kind, tabName, items, selectedId, onSelect, onStar, onRename, onMove, onNew, onDuplicate, onRemove, mainRemovable = false, full, layout, otherTabs, disabled, onApply, onCopyTo }: {
   kind: LayoutKind
   tabName: string
   /** Les versions : l'étoilée (`principal`) d'abord, puis les autres. */
@@ -144,6 +144,8 @@ export function LayoutViewsPanel({ kind, tabName, items, selectedId, onSelect, o
   onNew: () => void
   onDuplicate: () => void
   onRemove: () => void
+  /** La version à l'étoile peut-elle être retirée (l'étoile passe alors à la suivante) ? */
+  mainRemovable?: boolean
   full: boolean
   /** La mise en page de la version choisie. */
   layout: IndexLayout
@@ -171,14 +173,13 @@ export function LayoutViewsPanel({ kind, tabName, items, selectedId, onSelect, o
       onStar={onStar}
       starHint={form ? "le formulaire qu’ouvre le nom d’une ligne (et « Ajouter »)" : "le survol d’une ligne citée avec « { », le seul qui s’affiche : les autres versions attendent leur étoile"}
       onRename={onRename}
-      renameable={(id) => id !== DEFAULT_FORM_ID}
       onMove={onMove}
       pinFirst
       onNew={onNew}
       newHint={form ? "Nouveau formulaire, à partir de l’affichage automatique" : "Nouveau survol, à partir de l’affichage automatique"}
       onDuplicate={onDuplicate}
       onRemove={onRemove}
-      removable={(id) => id !== DEFAULT_FORM_ID}
+      removable={(id) => id !== DEFAULT_FORM_ID || mainRemovable}
       full={full}
       presets={presets.map((preset) => ({ id: preset.id, name: preset.name }))}
       onApplyPreset={(id) => { const preset = presets.find((candidate) => candidate.id === id); if (preset) onApply(preset.layout) }}
@@ -191,7 +192,7 @@ export function LayoutViewsPanel({ kind, tabName, items, selectedId, onSelect, o
     {dialog === "save" && <NamePresetDialog
       title="Enregistrer en preset"
       description={<>{form ? "Ce formulaire" : "Ce survol"} de « {tabName} », pour l’appliquer à d’autres onglets, dans n’importe quel index. Les colonnes absentes d’un onglet y sont simplement ignorées.</>}
-      initialName={items.find((item) => item.id === selectedId && item.id !== DEFAULT_FORM_ID)?.name ?? tabName}
+      initialName={items.find((item) => item.id === selectedId)?.name ?? tabName}
       existing={presets}
       onSave={(name, id) => saveLayoutPreset({ id, name, kind, layout })}
       onClose={() => setDialog(null)}

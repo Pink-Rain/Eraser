@@ -1308,7 +1308,7 @@ export const MAIN_PRESENTATION_ID = "principal"
 
 /** Les versions d'une vue d'un onglet : l'étoilée d'abord, puis les autres. */
 export function presentationVersionsOf(value: TabPresentations, kind: PresentationKind) {
-  return [{ id: MAIN_PRESENTATION_ID, name: "Vue principale", layout: value[kind] ?? { kind } }, ...namedPresentationsOf(value, kind)]
+  return [{ id: MAIN_PRESENTATION_ID, name: value.mains?.[kind]?.name ?? "Vue principale", layout: value[kind] ?? { kind } }, ...namedPresentationsOf(value, kind)]
 }
 
 /** La forme de la version choisie d'une vue (l'étoilée si elle n'existe plus). */
@@ -1355,7 +1355,7 @@ export function PresentationsPanel({ kind: viewKind, family, tabName, columns, v
   const all = kinds.flatMap((form) => presentationVersionsOf(value, form)
     // Le kanban et le maître-détail principaux n'apparaissent que réglés (ou choisis) : la liste principale, toujours.
     .filter((item) => !multi || item.id !== MAIN_PRESENTATION_ID || form === kinds[0] || Boolean(value[form]) || form === chosenKind)
-    .map((item) => ({ ...item, kind: form, key: keyOf(form, item.id), label: !multi ? item.name : item.id === MAIN_PRESENTATION_ID ? `${listFormLabels[form] ?? form} · principale` : `${item.name} · ${listFormLabels[form] ?? form}` })))
+    .map((item) => ({ ...item, kind: form, key: keyOf(form, item.id), label: !multi ? item.name : item.id === MAIN_PRESENTATION_ID && !value.mains?.[form] ? `${listFormLabels[form] ?? form} · principale` : `${item.name} · ${listFormLabels[form] ?? form}` })))
   const picked = all.find((item) => item.key === selectedId) ?? all[0]
   const kind = picked.kind
   const kindInfo = presentationKinds.find((entry) => entry.value === kind)
@@ -1370,6 +1370,21 @@ export function PresentationsPanel({ kind: viewKind, family, tabName, columns, v
     const next: TabPresentations = { ...value, named: [...others, ...list] }
     if (main === null) delete next[kind]
     else if (main) next[kind] = main
+    if (!next.named?.length) delete next.named
+    onChange(next)
+  }
+  const mainMeta = value.mains?.[kind]
+  const mainName = mainMeta?.name ?? (multi ? `${listFormLabels[kind] ?? kindLabel} principale` : "Vue principale")
+  /** Les versions nommées, la version à l'étoile (`null` : réglages d'office) et son nom (`null` : aucun). */
+  const setMain = (list: NamedPresentation[], main: Presentation | null, meta: { id: string; name: string } | null) => {
+    const next: TabPresentations = { ...value, named: [...others, ...list] }
+    if (main) next[kind] = { ...main, kind }
+    else delete next[kind]
+    const mains = { ...value.mains }
+    if (meta && main) mains[kind] = meta
+    else delete mains[kind]
+    if (Object.keys(mains).length) next.mains = mains
+    else delete next.mains
     if (!next.named?.length) delete next.named
     onChange(next)
   }
@@ -1394,16 +1409,22 @@ export function PresentationsPanel({ kind: viewKind, family, tabName, columns, v
       starredId={keyOf(kind, MAIN_PRESENTATION_ID)}
       onSelect={onSelect}
       onStar={(key) => {
-        // L'étoile passe à cette version : elle devient celle des pages (pour sa forme), l'ancienne garde une place nommée.
+        // L'étoile passe à cette version : elle devient celle des pages (pour sa forme), avec son nom et
+        // son identifiant ; l'ancienne prend sa place dans la liste, avec les siens. Rien n'est renommé.
         const id = multi ? key.split("|")[1] : key
         const target = named.find((item) => item.id === id)
         if (!target) return
-        setNamed([...named.filter((item) => item.id !== id), ...(value[kind] ? [{ id: viewId(), name: "Ancienne vue principale", layout: { ...value[kind]!, kind } }] : [])], target.layout)
+        const old = mainMeta ?? { id: viewId(), name: mainName }
+        setMain(named.map((item) => item.id === id ? { id: old.id, name: old.name, layout: { ...(value[kind] ?? { kind }), kind } } : item), target.layout, { id: target.id, name: target.name })
         select(kind, MAIN_PRESENTATION_ID)
       }}
       starHint={multi ? "celle que montrent les pages et le tableau de bord, pour sa forme (liste, kanban ou maître-détail) ; les autres se choisissent dans un bloc de page" : "celle que montrent les pages et le tableau de bord ; les autres se choisissent dans un bloc de page"}
-      onRename={(key, name) => { const id = multi ? key.split("|")[1] : key; setNamed(named.map((item) => item.id === id ? { ...item, name } : item)) }}
-      renameable={(key) => (multi ? key.split("|")[1] : key) !== MAIN_PRESENTATION_ID}
+      onRename={(key, name) => {
+        const id = multi ? key.split("|")[1] : key
+        // La version à l'étoile se renomme comme les autres : son nom est gardé à côté d'elle.
+        if (id === MAIN_PRESENTATION_ID) return setMain(named, value[kind] ?? { kind }, { id: mainMeta?.id ?? viewId(), name })
+        setNamed(named.map((item) => item.id === id ? { ...item, name } : item))
+      }}
       onMove={(delta) => {
         // Seules les versions nommées se déplacent : l'étoilée reste en tête.
         const at = named.findIndex((item) => item.id === selected.id)
@@ -1416,9 +1437,16 @@ export function PresentationsPanel({ kind: viewKind, family, tabName, columns, v
       pinFirst
       onNew={() => multi ? setDialog("new") : add(`${kindLabel} ${named.length + 2}`, { kind })}
       newHint={multi ? "Nouvelle version de la Liste : choisis sa forme de départ (liste, kanban, maître-détail)" : `Nouvelle version de la vue ${kindLabel}, avec ses réglages d’office`}
-      onDuplicate={() => add(`${selected.id === MAIN_PRESENTATION_ID ? (multi ? listFormLabels[kind] ?? kindLabel : kindLabel) : selected.name} (copie)`, layout)}
-      onRemove={() => { setNamed(named.filter((item) => item.id !== selected.id)); select(multi ? kinds[0] : kind, MAIN_PRESENTATION_ID) }}
-      removable={(key) => (multi ? key.split("|")[1] : key) !== MAIN_PRESENTATION_ID}
+      onDuplicate={() => add(`${selected.id === MAIN_PRESENTATION_ID ? (mainMeta?.name ?? (multi ? listFormLabels[kind] ?? kindLabel : kindLabel)) : selected.name} (copie)`, layout)}
+      onRemove={() => {
+        if (selected.id !== MAIN_PRESENTATION_ID) { setNamed(named.filter((item) => item.id !== selected.id)); return select(multi ? kinds[0] : kind, MAIN_PRESENTATION_ID) }
+        // Retirer la version à l'étoile : l'étoile passe à la suivante (avec son nom) ; seule, elle revient aux réglages d'office.
+        const [next, ...rest] = named
+        if (next) setMain(rest, next.layout, { id: next.id, name: next.name })
+        else setMain([], null, null)
+        select(kind, MAIN_PRESENTATION_ID)
+      }}
+      removable={(key) => (multi ? key.split("|")[1] : key) !== MAIN_PRESENTATION_ID || named.length > 0 || Boolean(value[kind]) || Boolean(mainMeta)}
       full={named.length >= 11}
       presets={available.map((preset) => ({ id: preset.id, name: preset.name, group: preset.builtin ? "Eraser" : "Les tiens" }))}
       onApplyPreset={(id) => {

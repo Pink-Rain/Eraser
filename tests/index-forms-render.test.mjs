@@ -111,3 +111,19 @@ test("une page : les largeurs réglées d'une section, l'allure d'une image, l'i
   assert.match(looked, /border-radius:0/);
   assert.doesNotMatch(looked, /shadow-\[/);
 });
+
+test("les versions d'une forme : l'étoile garde le nom et l'identifiant de la version, un bloc la retrouve", async () => {
+  const views = await vite.ssrLoadModule("/lib/index-presentations.ts");
+  const parsed = layouts.parseTabLayouts({ form: { aside: [], sections: [{ id: "s", rows: [{ id: "r", fields: [{ column: "Nom" }] }] }] }, formMain: { id: "fiche-combat", name: "Fiche de combat" }, forms: [{ id: "courte", name: "Fiche courte", layout: { aside: [], sections: [] } }] });
+  assert.deepEqual(parsed.formMain, { id: "fiche-combat", name: "Fiche de combat" });
+  assert.equal(layouts.tabFormsOf(parsed)[0].name, "Fiche de combat");
+  // Un bloc qui désignait « fiche-combat » (avant qu'elle passe à l'étoile) la retrouve.
+  assert.equal(layouts.formOf(parsed, "fiche-combat"), parsed.form);
+  // Sans formulaire à l'étoile, son nom ne se garde pas ; un identifiant déjà pris non plus.
+  assert.equal(layouts.parseTabLayouts({ forms: [{ id: "a", name: "A", layout: { aside: [], sections: [] } }], formMain: { id: "x", name: "X" } }).formMain, undefined);
+  assert.equal(layouts.parseTabLayouts({ form: { aside: [], sections: [{ id: "s", rows: [{ id: "r", fields: [{ column: "Nom" }] }] }] }, forms: [{ id: "a", name: "A", layout: { aside: [], sections: [] } }], formMain: { id: "a", name: "X" } }).formMain, undefined);
+  const presentations = views.parseTabPresentations({ list: { kind: "list" }, mains: { list: { id: "grille", name: "Grille des sorts" }, calendar: { id: "c", name: "C" } }, named: [{ id: "old", name: "Liste simple", layout: { kind: "list" } }] });
+  assert.deepEqual(presentations.mains, { list: { id: "grille", name: "Grille des sorts" } });
+  assert.equal(views.presentationVariant({ Sorts: presentations }, "Sorts", "grille").kind, "list");
+  assert.equal(views.presentationVariant({ Sorts: presentations }, "Sorts", "old").kind, "list");
+});

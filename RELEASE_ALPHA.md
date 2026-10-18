@@ -1,45 +1,40 @@
-# Eraser 0.1.1-alpha.229 — Les pages qui se règlent pour de bon, l'éditeur qui ne se ferme plus
+# Eraser 0.1.1-alpha.230 — « Modifier » qui reste ouvert, les colonnes des pages, les mêmes règles pour toutes les formes
 
 Cette version arrive **sans réinstallation** (même enveloppe que l'alpha 227) : Eraser la
 télécharge, redémarre son serveur et recharge la page tout seul. Rien n'est effacé dans Google
-Sheets, ni dans les réglages, ni dans les pages : les vues gardent leurs clés.
+Sheets, ni dans les réglages, ni dans les pages : aucune clé enregistrée ne change.
 
-## Les boutons des cartes, sur une page
+## « Modifier » d'un index reste ouvert
 
-- Un bouton réglé sur **« Ouvrir un de ses formulaires »** (ou « Ouvrir sa fiche ») **ouvre la
-  fenêtre ici, sur la page** : il n'emmène plus dans l'index. Qui peut écrire y modifie la ligne
-  directement ; un joueur la lit.
-- Les intitulés disent ce qu'ils font : « Ouvrir sa fiche », « Ouvrir un de ses formulaires »,
-  avec, dessous, « dans une fenêtre, là où l'on est : dans l'index, ou sur la page ».
-
-## Précédent / suivant
-
-- La liste **suit la ligne que l'on regarde** : elle défile jusqu'à elle, et change d'onglet de
-  groupe quand la ligne suivante est dans un autre.
-
-## « Modifier » reste ouvert
-
-- L'éditeur des vues d'un index (**« Modifier »**) ne se ferme plus quand on change de page : il
-  se réduit, garde ce qui n'est pas enregistré, et se reprend tel quel en revenant à l'index.
-
-## Le bloc Image des pages
-
-- **Une image du Drive s'affiche** : on colle son lien de partage (Partager › Copier le lien) ;
-  Eraser la lit avec son compte Google. Une image d'un autre Drive doit être partagée « Tous les
-  utilisateurs disposant du lien ».
-- **Son allure se règle** : sa largeur et sa place (à gauche, au centre, à droite), son cadre
-  (encadrée, fond seul, rien), ses coins arrondis, son point fort quand elle déborde du format, et
-  un **dégradé vers le transparent** : vers le bas, le haut, un côté, les deux côtés, en haut et
-  en bas, tout autour, avec son étendue.
+- La fenêtre **ne se ferme plus quand on change de page** (ni d'onglet), et elle est toujours là,
+  avec ses modifications, en revenant.
+- **Un clic à côté ne la ferme plus** : seuls « Annuler », la croix et Échap la ferment.
+- « Réduire » et sa pastille « Reprendre » sont retirés.
 
 ## Les colonnes des pages
 
-- **La largeur des colonnes d'une section se règle** : dans l'atelier, glisser la séparation entre
-  deux colonnes (par pas de 5 % ; Alt : au pour cent près ; aussi aux flèches du clavier). Un
-  double-clic, ou la croix de la pastille des largeurs, rend celles de la disposition.
+- **« − / + » sur chaque section** : ajouter ou retirer une colonne (jusqu'à 4). Une colonne retirée
+  rend ses blocs à la précédente.
+- **La règle des largeurs**, sous la barre de la section : la part de chaque colonne en %, à taper
+  (ou aux flèches ± 5 %), et les séparations à glisser. « Égaliser » remet tout égal.
+- Dans l'atelier, les colonnes restent côte à côte, à leurs vraies proportions, même sur un écran
+  de portable (elles s'empilaient avant 608 px de large).
 
-## L'accueil en modules
+## Un champ plusieurs fois dans un formulaire
 
-- **« Mes personnages »** et **« Mes campagnes »** de l'accueil d'origine sont des modules
-  d'Eraser : un bloc « Module d'Eraser » les pose sur n'importe quelle page, avec leur recherche,
-  leur tri et leur grille ou liste (mes personnages en vue joueur, mes campagnes en vue MJ).
+- Sous « Champs non placés », **« Placer un champ une fois de plus »** liste les champs déjà placés :
+  un clic en ajoute une copie à la fin, un glisser la pose dans une ligne. La copie montre et
+  modifie la même case.
+
+## Les mêmes règles pour toutes les formes
+
+Cartes, formulaires, survols, liste, chronologie, calendrier, galerie, tableau de bord,
+arborescence, codex, stats :
+
+- **Mettre l'étoile ne renomme plus rien** : chaque version garde son nom (il n'y a plus
+  d'« Ancien formulaire principal » ni d'« Ancienne vue principale »).
+- **La version à l'étoile se renomme et se supprime comme les autres** ; la supprimer passe l'étoile
+  à la suivante. La poubelle est toujours à la même place, grisée seulement quand il n'y a rien à
+  retirer (l'affichage d'origine d'Eraser).
+- La version à l'étoile passe en tête de la liste, pour toutes les formes (les cartes aussi).
+- Un bloc de page qui montre une version précise la retrouve même après qu'elle a reçu l'étoile.
