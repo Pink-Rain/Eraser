@@ -1155,7 +1155,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   }
   const canSave = !readOnly && !pending && !layoutSaving && canSubmit && pendingCount > 0 && problems.length === 0
   // Posé dans le dock de la coque : la fenêtre couvre la zone des pages seulement et ne bloque rien
-  // autour (onglets, navigation, en-tête restent cliquables, on peut changer de page).
+  // autour (onglets, navigation, en-tête restent cliquables, on peut changer de page). Sur une autre
+  // page que la sienne, elle se cache, avec ses modifications en attente, jusqu'au retour.
   const dock = useDockArea()
   const area = dock?.area
   const GAP = 8
@@ -1181,7 +1182,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   </AlertDialog>
   <Dialog open={open} modal={!dock} onOpenChange={(next) => { if (!next) requestClose() }}>
     {/* Un clic hors de la fenêtre (un onglet, le menu) ne la ferme pas : seuls « Annuler », la croix et Échap (tapé dans la fenêtre). */}
-    <DialogContent ref={windowRef} onInteractOutside={(event) => event.preventDefault()} onEscapeKeyDown={(event) => { if (dock && !(event.target instanceof Node && windowRef.current?.contains(event.target))) event.preventDefault() }} style={docked} className="flex h-[94svh] max-h-[94svh] flex-col gap-3 sm:max-w-[min(96vw,1440px)]">
+    <DialogContent ref={windowRef} onInteractOutside={(event) => event.preventDefault()} onEscapeKeyDown={(event) => { if (dock && !(event.target instanceof Node && windowRef.current?.contains(event.target))) event.preventDefault() }} style={dock?.hidden ? { display: "none" } : docked} className="flex h-[94svh] max-h-[94svh] flex-col gap-3 sm:max-w-[min(96vw,1440px)]">
       <DialogHeader className="shrink-0">
         <div className="flex flex-wrap items-start justify-between gap-2 pr-8">
           <div>

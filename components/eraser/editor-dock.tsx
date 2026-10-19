@@ -2,19 +2,22 @@
 
 /**
  * Le dock de l'éditeur « Modifier » : l'éditeur d'un index est dessiné ici, dans la coque de
- * l'application, et non dans la page de l'index. Changer de page le laisse donc ouvert, avec ses
- * modifications en attente ; revenir à l'index le retrouve tel quel.
+ * l'application, et non dans la page de l'index. Il reste attaché à la page qui l'a ouvert :
+ * changer de page (ou d'onglet d'Eraser) le cache sans le fermer, avec ses modifications en
+ * attente ; revenir sur cette page le retrouve tel quel. Il ne suit jamais sur une autre page.
  *
  * La page qui l'ouvre y pose son éditeur à chaque rendu (`show`), avec ce qu'il lui faut (son
  * modèle, à reprendre au retour) ; elle le retire en le fermant (`hide`). Quitter la page ne le
- * retire pas. Un seul éditeur à la fois : en ouvrir un autre remplace le premier.
+ * retire pas. Chaque page garde le sien (une clé par index).
  *
  * La fenêtre du dock ne couvre que la zone des pages (`area`) et ne bloque rien autour : les onglets,
  * la navigation et l'en-tête restent cliquables pendant qu'elle est ouverte.
  */
 import { createContext, Fragment, useContext, useEffect, useLayoutEffect, useMemo, useState, type ReactNode, type RefObject } from "react"
+import { usePathname } from "next/navigation"
 
-type Docked = { key: string; model: unknown; node: ReactNode }
+/** `path` : la page qui l'a ouvert, la seule où il se montre. */
+type Docked = { key: string; path: string; model: unknown; node: ReactNode }
 
 type Dock = {
   /** Le modèle de l'éditeur gardé pour cette clé (une page qui revient le reprend), sinon `undefined`. */
@@ -31,7 +34,8 @@ const DockContext = createContext<Dock | null>(null)
 /** La place de la zone des pages à l'écran, donnée au seul éditeur docké. */
 export type DockArea = { top: number; left: number; width: number; height: number }
 
-const AreaContext = createContext<{ area: DockArea | null } | null>(null)
+/** `hidden` : l'éditeur est sur une autre page que celle affichée (sa fenêtre, dessinée hors de la page, se cache elle-même). */
+const AreaContext = createContext<{ area: DockArea | null; hidden: boolean } | null>(null)
 
 /** La place de la zone des pages, suivie quand la fenêtre ou la navigation change de taille. */
 function useArea(ref: RefObject<HTMLElement | null> | undefined, active: boolean) {
@@ -53,25 +57,28 @@ function useArea(ref: RefObject<HTMLElement | null> | undefined, active: boolean
   return active ? area : null
 }
 
-export function EditorDockProvider({ children, areaRef }: { children: ReactNode; areaRef?: RefObject<HTMLElement | null> }) {
-  const [docked, setDocked] = useState<Docked | null>(null)
-  const area = useArea(areaRef, Boolean(docked))
+export function EditorDockProvider({ children, areaRef, hidden = false }: { children: ReactNode; areaRef?: RefObject<HTMLElement | null>; hidden?: boolean }) {
+  const [docked, setDocked] = useState<Docked[]>([])
+  const pathname = usePathname()
+  const here = hidden ? undefined : docked.find((entry) => entry.path === pathname)
+  const area = useArea(areaRef, Boolean(here))
   const dock = useMemo<Dock>(() => ({
     modelOf: (key) => kept.get(key)?.model,
     show: (key, model, node) => {
-      for (const other of kept.keys()) if (other !== key) kept.delete(other)
-      const entry = { key, model, node }
+      // La page qui le pose est celle affichée : il lui reste attaché (même rouvert ensuite ailleurs, il garde sa première page).
+      const entry = { key, path: kept.get(key)?.path ?? window.location.pathname, model, node }
       kept.set(key, entry)
-      setDocked(entry)
+      setDocked((current) => current.some((item) => item.key === key) ? current.map((item) => item.key === key ? entry : item) : [...current, entry])
     },
     hide: (key) => {
       kept.delete(key)
-      setDocked((current) => current?.key === key ? null : current)
+      setDocked((current) => current.filter((item) => item.key !== key))
     },
   }), [])
   return <DockContext.Provider value={dock}>
     {children}
-    {docked && <AreaContext.Provider value={{ area }}><Fragment key={docked.key}>{docked.node}</Fragment></AreaContext.Provider>}
+    {/* Ailleurs que sur sa page, l'éditeur reste monté (ses modifications en attente) mais caché. */}
+    {docked.map((entry) => <AreaContext.Provider key={entry.key} value={{ area: entry === here ? area : null, hidden: entry !== here }}><Fragment>{entry.node}</Fragment></AreaContext.Provider>)}
   </DockContext.Provider>
 }
 
@@ -80,7 +87,7 @@ export function useEditorDock() {
   return useContext(DockContext)
 }
 
-/** Pour l'éditeur posé dans le dock : la zone des pages (`area`, `null` le temps de la mesurer) ; `null` ailleurs (il garde sa fenêtre centrée et modale). */
+/** Pour l'éditeur posé dans le dock : la zone des pages (`area`, `null` le temps de la mesurer) et s'il doit se cacher (`hidden`, autre page) ; `null` ailleurs (il garde sa fenêtre centrée et modale). */
 export function useDockArea() {
   return useContext(AreaContext)
 }

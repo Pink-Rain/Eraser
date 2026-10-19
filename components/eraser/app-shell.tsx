@@ -856,8 +856,8 @@ export function AppShell({
             <PageEditContext.Provider value={setEditPageId}>
             {pendingPage && <PendingPage pending={pendingPage} />}
             {/* La page actuelle reste montée (cachée) pendant que la suivante arrive. */}
-            {/* « Modifier » d'un index reste ouvert en changeant de page : il vit ici, pas dans la page. */}
-            <EditorDockProvider areaRef={pageScrollerRef}>
+            {/* « Modifier » d’un index reste ouvert, attaché à sa page : il vit ici, caché sur les autres pages. */}
+            <EditorDockProvider areaRef={pageScrollerRef} hidden={Boolean(pendingPage)}>
             <div data-view-role={viewRole} className={pendingPage ? "hidden" : "contents"}>
               {children}
             </div>
