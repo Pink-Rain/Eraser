@@ -1342,6 +1342,11 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     const spec = owner ? specOf(owner.tabName, header) : null
     return spec?.multiple ? spec.listSeparator : undefined
   }, [specOf, tables])
+  // Les colonnes « Rareté et emplacements » : leurs raretés, leurs lieux, ou les deux, dans les statistiques.
+  const statRarityColumns = useMemo(() => statHeaders.filter((header) => {
+    const owner = tables.find((candidate) => candidate.headers.some((name) => foldName(name) === foldName(header)))
+    return owner ? specOf(owner.tabName, header).kind === "rarity-places" : false
+  }), [specOf, statHeaders, tables])
   // Les statistiques de l'index, et celles qu'un onglet stat de l'alpha 197 gardait encore.
   const indexStats = useMemo(() => {
     const seen = new Set<string>()
@@ -1554,7 +1559,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         valuesOf={(tabName, header) => { const table = tables.find((item) => item.tabName === tabName); const at = table ? table.headers.findIndex((item) => foldName(item) === foldName(header)) : -1; return table && at >= 0 ? [...new Set(table.rows.map((row) => row.values[at] ?? "").filter(Boolean))].slice(0, 2000) : [] }}
         optionsOf={(tabName, header) => (specOf(tabName, header).options ?? []).map((option) => ({ value: option.value, color: option.color }))}
         stats={indexStats}
-        statsPanel={<IndexStats stats={indexStats} groups={settings.statGroups} rows={statRowKeys} columns={statHeaders} tabs={statTabs} valueOf={statValueOf} tabOf={statTabOf} nameOf={layoutNameOf} optionsOf={statOptionsOf} separatorOf={statSeparatorOf} onOpen={(rowKey, list) => { setSheetError(""); setStatSheetRows(list ?? null); setDetails(rowKey) }} canEdit={!busy} onSave={saveStats} />}
+        statsPanel={<IndexStats stats={indexStats} groups={settings.statGroups} rows={statRowKeys} columns={statHeaders} tabs={statTabs} valueOf={statValueOf} tabOf={statTabOf} nameOf={layoutNameOf} optionsOf={statOptionsOf} separatorOf={statSeparatorOf} rarityColumns={statRarityColumns} onOpen={(rowKey, list) => { setSheetError(""); setStatSheetRows(list ?? null); setDetails(rowKey) }} canEdit={!busy} onSave={saveStats} />}
         initialMode={editorMode}
         initialTab={table?.tabName}
       /> : null
@@ -1644,6 +1649,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         stats={indexStats}
         groups={settings.statGroups}
         separatorOf={statSeparatorOf}
+        rarityColumns={statRarityColumns}
         pinnedOnly
         rows={statSearchRows}
         columns={statHeaders}

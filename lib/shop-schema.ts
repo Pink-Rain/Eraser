@@ -2,6 +2,8 @@ import { listObjectIndexTablesForDisplay, objectCombatFields, objectIndexPrice }
 import type { ObjectCombatFields } from "@/lib/inventory-schema"
 import { objectLocationColumns } from "@/lib/object-combat"
 import { shopObjectId } from "@/lib/object-item-id"
+import { columnOfKind, objectTableSpecs } from "@/lib/index-kinds-server"
+import { rarityPlacePairs } from "@/lib/rarity-places"
 
 export type ShopRarity = "very-common" | "common" | "rare" | "very-rare" | "ultimate"
 export type { ShopKey, VisualShopKey } from "@/lib/shop-keys"
@@ -27,7 +29,12 @@ export type ShopGeneratorItem = {
   icon: string
   /** L'index d'où vient la trouvaille (« creatures »…) ; absent : l'Index des items. */
   source?: string
-  locations: Array<{ place: string; rarity: string }>
+  /**
+   * Où on le trouve, et à quelle rareté. `exact` : lu dans la colonne « Rareté et emplacements »,
+   * le lieu est le nom d'un magasin ou d'un environnement de l'Index des lieux (sinon : les
+   * anciennes colonnes, reconnues par les « Emplacements » des magasins).
+   */
+  locations: Array<{ place: string; rarity: string; exact?: boolean }>
 } & ObjectCombatFields
 
 export type GeneratedShopItem = ShopGeneratorItem & { rarity: ShopRarity }
@@ -102,13 +109,20 @@ function cell(headers: string[], values: string[], aliases: string[]) {
 
 export async function loadShopGeneratorItems() {
   const tables = await listObjectIndexTablesForDisplay()
-  return tables.flatMap<ShopGeneratorItem>((table) => table.rows.flatMap((row) => {
+  return tables.flatMap<ShopGeneratorItem>((table) => {
+    // La colonne « Rareté et emplacements » de l'onglet, si elle y est : elle seule dit où se
+    // trouve un item ; sinon les anciennes colonnes (principal / secondaire).
+    const rarityHeader = columnOfKind(objectTableSpecs(table), "rarity-places")
+    const rarityColumn = rarityHeader ? table.headers.indexOf(rarityHeader) : -1
+    return table.rows.flatMap((row) => {
     const name = cell(table.headers, row.values, ["Nom", "Nom de l'objet", "Objet", "Arme", "Équipement", "Equipement", "Ressource", "Livre", "Titre"]).trim()
     if (!name) return []
     // Lus par le nom des colonnes, jamais par leur position : les onglets ne les rangent pas tous pareil.
-    const locations = objectLocationColumns(table.headers)
-      .map((columns) => ({ rarity: columns.rarity >= 0 ? row.values[columns.rarity] || "" : "", place: columns.place >= 0 ? row.values[columns.place] || "" : "" }))
-      .filter((location) => location.rarity.trim() && location.place.trim())
+    const locations = rarityColumn >= 0
+      ? rarityPlacePairs(row.values[rarityColumn] ?? "").filter((pair) => pair.rarity.trim()).map((pair) => ({ ...pair, exact: true }))
+      : objectLocationColumns(table.headers)
+        .map((columns) => ({ rarity: columns.rarity >= 0 ? row.values[columns.rarity] || "" : "", place: columns.place >= 0 ? row.values[columns.place] || "" : "" }))
+        .filter((location) => location.rarity.trim() && location.place.trim())
     if (!locations.length) return []
     return [{
       id: shopObjectId(cell(table.headers, row.values, ["ID", "Identifiant"]), table.fileId, table.sheetId, row.rowNumber),
@@ -125,5 +139,6 @@ export async function loadShopGeneratorItems() {
       locations,
       ...objectCombatFields(table, row),
     }]
-  }))
+    })
+  })
 }

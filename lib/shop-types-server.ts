@@ -5,7 +5,10 @@ import {
   shopTypeFromRow, shopTypeRowFields, type ShopTypeDefinition,
 } from "@/lib/shop-types"
 import { worldIndexDefinitions } from "@/lib/world-index-definitions"
-import { addWorldIndexRow, applyWorldSchemaOperations, getWorldIndex, knownWorldIndexKey } from "@/lib/world-indexes"
+import { addWorldIndexRow, applyWorldSchemaOperations, getWorldIndex, getWorldIndexQuick, knownWorldIndexKey } from "@/lib/world-indexes"
+import { indexesWithColumnKind, type IndexWithKind } from "@/lib/index-kinds-server"
+import { OBJECT_REFERENCE_INDEX } from "@/lib/index-references"
+import { rarityPlacePairs } from "@/lib/rarity-places"
 import type { WorldIndexTable } from "@/lib/world-indexes"
 import type { WorldIndexKey } from "@/lib/world-index-definitions"
 
@@ -70,17 +73,48 @@ export async function loadShopTypeCatalog(options: { refresh?: boolean } = {}): 
 }
 
 /**
- * Les trouvailles venues d'autres index que les items (« Créatures »…) : chaque ligne qui a un
- * emplacement et une rareté devient une trouvaille, avec son index d'origine (`source`).
+ * Les trouvailles des index qui ont une colonne « Rareté et emplacements » (créatures, index
+ * créés…) : lues d'office, sans rien régler dans Lieux › Magasin. Chaque ligne qui y a une rareté
+ * et un lieu devient une trouvaille, avec son index d'origine (`source`). L'Index des objets est
+ * lu à part (`loadShopGeneratorItems`).
  */
-export async function loadShopFinds(types: ShopTypeDefinition[]): Promise<ShopGeneratorItem[]> {
+export async function loadRarityPlaceFinds(indexes?: IndexWithKind[]): Promise<ShopGeneratorItem[]> {
+  const found = (indexes ?? await indexesWithColumnKind("rarity-places").catch(() => [] as IndexWithKind[])).filter((index) => index.key !== OBJECT_REFERENCE_INDEX)
+  const lists = await Promise.all(found.map(async (index) => {
+    try {
+      const data = await getWorldIndexQuick(index.key as WorldIndexKey)
+      return data.tables.flatMap((table) => {
+        const column = index.tabs.find((tab) => tab.tab === table.tabName)?.column
+        const at = column ? table.headers.indexOf(column) : -1
+        return at >= 0 ? findsOfTable(index.key, table, (values) => rarityPlacePairs(values[at] ?? "").filter((pair) => pair.rarity.trim()).map((pair) => ({ ...pair, exact: true }))) : []
+      })
+    } catch (error) {
+      console.error("SHOP_FINDS_READ_FAILED", index.key, error instanceof Error ? error.message : error)
+      return []
+    }
+  }))
+  return lists.flat()
+}
+
+/**
+ * Les trouvailles d'avant la colonne « Rareté et emplacements » : les index nommés dans les
+ * « Trouvailles » d'un type de magasin, lus par leurs anciennes colonnes (emplacement et rareté
+ * principaux, secondaires). Seulement les onglets qui n'ont pas encore la nouvelle colonne
+ * (`skip` : index › onglets déjà lus par `loadRarityPlaceFinds`).
+ */
+export async function loadShopFinds(types: ShopTypeDefinition[], skip: IndexWithKind[] = []): Promise<ShopGeneratorItem[]> {
   const keys = [...new Set(types.flatMap((type) => type.finds))].filter((key) => key !== "objects")
   const lists = await Promise.all(keys.map(async (key) => {
     const known = await knownWorldIndexKey(key)
     if (!known) return []
+    const done = new Set(skip.find((index) => index.key === known)?.tabs.map((tab) => tab.tab) ?? [])
     try {
       const data = await getWorldIndex(known as WorldIndexKey)
-      return data.tables.flatMap((table) => findsOfTable(known, table))
+      return data.tables.filter((table) => !done.has(table.tabName)).flatMap((table) => {
+        const locations = objectLocationColumns(table.headers)
+        if (!locations.some((entry) => entry.place >= 0 && entry.rarity >= 0)) return []
+        return findsOfTable(known, table, (values) => locations.map((entry) => ({ place: entry.place >= 0 ? plain(values[entry.place]) : "", rarity: entry.rarity >= 0 ? plain(values[entry.rarity]) : "" })).filter((entry) => entry.place && entry.rarity))
+      })
     } catch (error) {
       console.error("SHOP_FINDS_READ_FAILED", key, error instanceof Error ? error.message : error)
       return []
@@ -89,16 +123,15 @@ export async function loadShopFinds(types: ShopTypeDefinition[]): Promise<ShopGe
   return lists.flat()
 }
 
-function findsOfTable(key: string, table: WorldIndexTable): ShopGeneratorItem[] {
+function findsOfTable(key: string, table: WorldIndexTable, locationsOf: (values: string[]) => ShopGeneratorItem["locations"]): ShopGeneratorItem[] {
   const column = (...names: string[]) => table.headers.findIndex((header) => names.some((name) => foldText(header) === foldText(name)))
   const at = { name: column("Nom"), id: column("ID"), description: column("Description", "Note", "Histoire / Lore"), type: column("Type"), subtype: column("Sous-type"), price: column("Prix", "Valeur"), icon: column("Icône", "Portrait") }
-  const locations = objectLocationColumns(table.headers)
-  if (at.name < 0 || !locations.some((entry) => entry.place >= 0 && entry.rarity >= 0)) return []
+  if (at.name < 0) return []
   return table.rows.flatMap((row) => {
     const name = plain(row.values[at.name])
     const id = at.id >= 0 ? plain(row.values[at.id]) : ""
     if (!name || !id) return []
-    const found = locations.map((entry) => ({ place: entry.place >= 0 ? plain(row.values[entry.place]) : "", rarity: entry.rarity >= 0 ? plain(row.values[entry.rarity]) : "" })).filter((entry) => entry.place && entry.rarity)
+    const found = locationsOf(row.values)
     if (!found.length) return []
     const text = (index: number) => index >= 0 ? plain(row.values[index]) : ""
     const icon = text(at.icon)
@@ -192,9 +225,11 @@ export { cityChanceHeader, cityKeys, SHOP_TYPE_HEADERS }
  */
 export async function loadShopGeneratorData() {
   const { loadShopGeneratorItems } = await import("@/lib/shop-schema")
-  const [catalog, objects] = await Promise.all([loadShopTypeCatalog(), loadShopGeneratorItems().catch(() => null)])
-  const finds = objects ? await loadShopFinds(catalog.types) : []
-  return { catalog, items: objects ? [...objects, ...finds] : null }
+  const [catalog, objects, indexes] = await Promise.all([loadShopTypeCatalog(), loadShopGeneratorItems().catch(() => null), indexesWithColumnKind("rarity-places").catch(() => [] as IndexWithKind[])])
+  // Tout index qui a la colonne « Rareté et emplacements » est lu d'office ; les « Trouvailles »
+  // d'un magasin ne servent plus qu'aux onglets qui ne l'ont pas encore.
+  const [finds, legacy] = objects ? await Promise.all([loadRarityPlaceFinds(indexes), loadShopFinds(catalog.types, indexes)]) : [[], []]
+  return { catalog, items: objects ? [...objects, ...finds, ...legacy] : null, indexes: indexes.map((index) => ({ key: index.key, title: index.title })) }
 }
 
 /** L'état de l'onglet pour la page (le bouton « Préparer l'onglet » n'est montré qu'à un admin). */

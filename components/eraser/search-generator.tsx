@@ -27,6 +27,8 @@ import {
   type SearchResult,
 } from "@/lib/search-draws"
 import type { ShopGeneratorItem, ShopRarity } from "@/lib/shop-schema"
+import { itemSourceOf } from "@/lib/shop-types"
+import { samePlace } from "@/lib/rarity-places"
 
 const rarityClasses: Record<ShopRarity, string> = {
   "very-common": "border-stone-300 bg-stone-100 text-stone-700",
@@ -73,8 +75,10 @@ type Catalog = {
  * Le catalogue est rangé une fois pour toutes par lieu et par rareté : un tirage n'est
  * ensuite qu'une lecture, sans attendre le réseau.
  */
-function buildCatalog(items: ShopGeneratorItem[], places: readonly string[]): Catalog {
+function buildCatalog(items: ShopGeneratorItem[], places: readonly string[], sources: Record<string, string[]> = {}): Catalog {
   const placesIn = searchPlaceMatcher(places)
+  // Ce qui se fouille dans un lieu : les index de sa colonne « Fouille » (Lieux › Environnement), sinon les items.
+  const searchable = (item: ShopGeneratorItem, place: string) => (sources[place]?.length ? sources[place] : ["objects"]).includes(itemSourceOf(item))
   const byId = new Map<string, ShopGeneratorItem>()
   const byPlace = new Map<SearchPlace, Map<ShopRarity, ShopGeneratorItem[]>>()
   const byRarity = new Map<ShopRarity, ShopGeneratorItem[]>()
@@ -84,7 +88,9 @@ function buildCatalog(items: ShopGeneratorItem[], places: readonly string[]): Ca
     for (const location of item.locations) {
       const rarity = searchRarityFrom(location.rarity)
       if (!rarity) continue
-      for (const place of placesIn(location.place)) {
+      // La colonne « Rareté et emplacements » nomme l'environnement tel quel ; les anciennes colonnes, à la façon d'avant.
+      for (const place of location.exact ? places.filter((candidate) => samePlace(location.place, candidate)) : placesIn(location.place)) {
+        if (!searchable(item, place)) continue
         rarities.add(rarity)
         const forPlace = byPlace.get(place) ?? new Map<ShopRarity, ShopGeneratorItem[]>()
         const pool = forPlace.get(rarity) ?? []
@@ -138,6 +144,8 @@ function TransferPicker({ itemName, targets, loading, pending, onGive }: { itemN
 
 type DrawCardProps = {
   draw: SearchDraw
+  /** Le titre de chaque index, pour une trouvaille venue d'un autre index que les items. */
+  indexTitles?: Record<string, string>
   item: ShopGeneratorItem | undefined
   fresh: boolean
   targets: InventoryTransferTarget[] | null
@@ -151,7 +159,7 @@ type DrawCardProps = {
   onGive: (id: string, target: InventoryTransferTarget) => Promise<boolean>
 }
 
-const DrawCard = memo(function DrawCard({ draw, item, fresh, targets, targetsLoading, giving, onPin, onRemove, onReroll, onElsewhere, onOpenTargets, onGive }: DrawCardProps) {
+const DrawCard = memo(function DrawCard({ draw, indexTitles, item, fresh, targets, targetsLoading, giving, onPin, onRemove, onReroll, onElsewhere, onOpenTargets, onGive }: DrawCardProps) {
   const [moving, setMoving] = useState(false)
   const result = searchResults.find((candidate) => candidate.key === draw.result)
   const name = item?.name || draw.itemName
@@ -169,7 +177,7 @@ const DrawCard = memo(function DrawCard({ draw, item, fresh, targets, targetsLoa
         : <PackageOpen className="size-4" />}</div>
       <div className="min-w-0 flex-1">
         <p className="font-display text-lg font-semibold leading-tight">{item?.nameHtml?.trim() ? <span className={richText} dangerouslySetInnerHTML={{ __html: sanitizeRichText(item.nameHtml) }} /> : name}</p>
-        {item && <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{[item.type, item.subtype].filter(Boolean).join(" · ")}{item.price ? ` · ${item.price}` : ""}</p>}
+        {item && <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{[item.source ? indexTitles?.[item.source] ?? item.source : "", item.type, item.subtype].filter(Boolean).join(" · ")}{item.price ? ` · ${item.price}` : ""}</p>}
         {item && (item.descriptionHtml?.trim() || item.description) && <ObjectText as="div" html={item.descriptionHtml} text={item.description} item={item} className={`mt-1.5 text-xs leading-5 text-muted-foreground ${richText}`} />}
         {item && (item.effectHtml?.trim() || item.effect) && <p className="mt-1 text-xs leading-5"><span className="font-semibold">Effet :</span> <ObjectText html={item.effectHtml} text={item.effect} item={item} className={richText} /></p>}
         {item && <ObjectTraits item={item} className="mt-1.5" />}
@@ -184,7 +192,7 @@ const DrawCard = memo(function DrawCard({ draw, item, fresh, targets, targetsLoa
     <div className="mt-3 flex items-center justify-end gap-1 border-t pt-2">
       <Button type="button" variant={draw.pinned ? "secondary" : "ghost"} size="icon-sm" onClick={() => onPin(draw.id)} aria-pressed={draw.pinned} aria-label={draw.pinned ? "Ne plus garder ce tirage" : "Garder ce tirage"} title={draw.pinned ? "Épinglé : ce tirage reste dans la liste" : "Épingler : ce tirage ne s’effacera pas"}><Pin className={draw.pinned ? "fill-current text-primary" : ""} /></Button>
       {draw.itemId && <Button type="button" variant="ghost" size="icon-sm" onClick={() => onReroll(draw.id)} aria-label="Relancer l’item" title="Un autre item de même rareté, au même lieu"><RefreshCw /></Button>}
-      {draw.itemId && <Popover open={moving} onOpenChange={(open) => { setMoving(open); if (open) onOpenTargets() }}>
+      {draw.itemId && !item?.source && <Popover open={moving} onOpenChange={(open) => { setMoving(open); if (open) onOpenTargets() }}>
         <PopoverTrigger asChild><Button type="button" variant="ghost" size="icon-sm" disabled={giving} aria-label={`Transférer ${name}`} title="Transférer">{giving ? <LoaderCircle className="animate-spin" /> : <MoveRight />}</Button></PopoverTrigger>
         <PopoverContent align="end" side="bottom" className="w-80 p-3"><TransferPicker itemName={name} targets={targets} loading={targetsLoading} pending={giving} onGive={(target) => void onGive(draw.id, target).then((done) => { if (done) setMoving(false) })} /></PopoverContent>
       </Popover>}
@@ -198,8 +206,20 @@ const DrawCard = memo(function DrawCard({ draw, item, fresh, targets, targetsLoa
  * l'objet sont tirés sur place, sans attendre le réseau ; les 20 derniers tirages (et
  * ceux qu'on épingle) sont enregistrés en arrière-plan.
  */
-export function SearchGenerator({ campaignId, items, places = searchPlaces, initialDraws, drawsUnavailable = false, loadError }: { campaignId: string; items: ShopGeneratorItem[]; /** Les lieux de Lieux › Environnement. */ places?: readonly string[]; initialDraws: SearchDraw[] | null; drawsUnavailable?: boolean; loadError: string }) {
-  const catalog = useMemo(() => buildCatalog(items, places), [items, places])
+export function SearchGenerator({ campaignId, items, places = searchPlaces, searchSources, indexTitles, initialDraws, drawsUnavailable = false, loadError }: {
+  campaignId: string
+  items: ShopGeneratorItem[]
+  /** Les lieux de Lieux › Environnement. */
+  places?: readonly string[]
+  /** Par lieu, les index qu'on y fouille (sa colonne « Fouille ») ; un lieu absent : les items. */
+  searchSources?: Record<string, string[]>
+  /** Le titre de chaque index (« Créatures »), pour montrer d'où vient une trouvaille. */
+  indexTitles?: Record<string, string>
+  initialDraws: SearchDraw[] | null
+  drawsUnavailable?: boolean
+  loadError: string
+}) {
+  const catalog = useMemo(() => buildCatalog(items, places, searchSources), [items, places, searchSources])
   const shared = initialDraws !== null
   const localKey = `eraser:fouilles:${campaignId}`
   const [storedPlace, setPlace] = usePersistentState<SearchPlace>(`eraser:fouilles:place:${campaignId}`, places[0] ?? "Forêt", isPlace)
@@ -360,7 +380,7 @@ export function SearchGenerator({ campaignId, items, places = searchPlaces, init
         <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">{!shared ? <><CloudOff className="size-3" />Gardés dans ce navigateur</> : drawsUnavailable ? <span className="text-destructive">Non enregistrés</span> : saveState === "saving" ? <><LoaderCircle className="size-3 animate-spin" />Enregistrement…</> : saveState === "error" ? <span className="text-destructive">Non enregistré</span> : saveState === "saved" ? <><Check className="size-3" />Enregistré</> : null}</span>
       </div>
       {draws.length
-        ? <div className="grid items-start gap-3 lg:grid-cols-2 2xl:grid-cols-3">{draws.map((draw) => <DrawCard key={draw.id} draw={draw} item={draw.itemId ? catalog.byId.get(draw.itemId) : undefined} fresh={draw.id === freshId} targets={targets} targetsLoading={targetsLoading} giving={giving === draw.id} onPin={onPin} onRemove={onRemove} onReroll={onReroll} onElsewhere={onElsewhere} onOpenTargets={onOpenTargets} onGive={onGive} />)}</div>
+        ? <div className="grid items-start gap-3 lg:grid-cols-2 2xl:grid-cols-3">{draws.map((draw) => <DrawCard key={draw.id} draw={draw} indexTitles={indexTitles} item={draw.itemId ? catalog.byId.get(draw.itemId) : undefined} fresh={draw.id === freshId} targets={targets} targetsLoading={targetsLoading} giving={giving === draw.id} onPin={onPin} onRemove={onRemove} onReroll={onReroll} onElsewhere={onElsewhere} onOpenTargets={onOpenTargets} onGive={onGive} />)}</div>
         : <div className="grid min-h-40 place-items-center rounded-2xl border border-dashed bg-card/35 p-8 text-center"><div><Dices className="mx-auto size-8 text-primary/45" /><p className="mt-3 font-display text-xl font-semibold">Aucun tirage</p><p className="mt-1 text-sm text-muted-foreground">Choisis le lieu, puis le résultat du test : le d100 et l’item sont tirés aussitôt.</p></div></div>}
     </section>
   </div>

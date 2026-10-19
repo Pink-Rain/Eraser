@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { colorColumn, colorModeOf, FormIcon, hueOf, mini, prepareFor, rampOf, StatResult, SWATCHES, unitWord, type PickRows, type StatData } from "@/components/eraser/index-stats-charts"
 import { splitListValue } from "@/lib/index-columns"
+import { isRarityPairGroupId, parseRarityFacet, rarityFacetColumns, rarityFacetValue, rarityPairGroups, rarityPlacePairs } from "@/lib/rarity-places"
 import {
   autoStatTitle, cellParts, cellText, cleanColumnGroups, cleanStat, cleanStats, columnFamilies, COMPARE_FORMS, defaultGroupName, fitForm, formProblem, GROUP_LIMITS, groupOf,
   groupRef, groupStatRows, isGroupRef, memberLabels, movePinned, newStatId, numericColumns, percentChoices, pinnedFirst, pinnedWidth, RANK_COLUMN, RANK_LABEL, STAT_LIMITS, statColumnBlocks,
@@ -51,6 +52,11 @@ export type IndexStatsProps = {
   optionsOf: (column: string) => Array<{ value: string; color?: string }>
   /** Liste à choix multiple : le séparateur écrit dans la feuille (« - » pour « Forêt - Ville »). */
   separatorOf?: (column: string) => string | undefined
+  /**
+   * Les colonnes « Rareté et emplacements » : chacune se lit aussi par sa rareté seule, ses lieux
+   * seuls, les deux ensemble (« Rare · Forêt ») ou par paire (lib/rarity-places.ts).
+   */
+  rarityColumns?: string[]
   /** Ouvrir la fiche d'une ligne (`rows` : les lignes concernées, pour passer de l'une à l'autre) ; absent : elles se lisent seulement. */
   onOpen?: (rowKey: string, rows?: string[]) => void
   /** Modifier les statistiques (comme modifier l'onglet) ; sinon elles se lisent seulement. */
@@ -406,18 +412,32 @@ function PinnedStat({ stat, data, expanded, onToggle, tabs, tabOf, nameOf, onOpe
   </article>
 }
 
-export function IndexStats({ stats, groups: groupsProp, pinnedOnly = false, single = false, statIds, onManage, rows, columns, tabs, valueOf, tabOf, nameOf, optionsOf, separatorOf, onOpen, canEdit, onSave }: IndexStatsProps) {
+export function IndexStats({ stats, groups: groupsProp, pinnedOnly = false, single = false, statIds, onManage, rows, columns: baseColumns, tabs, valueOf, tabOf, nameOf, optionsOf: baseOptionsOf, separatorOf, rarityColumns, onOpen, canEdit, onSave }: IndexStatsProps) {
   // Un groupe créé ou modifié se voit tout de suite, avant même la réponse du serveur.
   const [pendingGroups, setPendingGroups] = useState<StatColumnGroup[] | null>(null)
-  const groups = useMemo(() => pendingGroups ?? groupsProp ?? [], [groupsProp, pendingGroups])
+  const storedGroups = useMemo(() => (pendingGroups ?? groupsProp ?? []).filter((group) => !isRarityPairGroupId(group.id)), [groupsProp, pendingGroups])
+  // « Rareté et emplacements » : rareté seule, lieux seuls, les deux ensemble, et les deux groupes
+  // « par paire » (autant de paires que la ligne qui en a le plus), refaits ici, jamais enregistrés.
+  const rarityBases = useMemo(() => (rarityColumns ?? []).filter((column) => baseColumns.includes(column)), [baseColumns, rarityColumns])
+  const pairGroups = useMemo(() => rarityBases.flatMap((base) => rarityPairGroups(base, Math.max(1, ...rows.map((row) => rarityPlacePairs(valueOf(row, base)).length)))), [rarityBases, rows, valueOf])
+  const columns = useMemo(() => [...baseColumns, ...rarityBases.flatMap(rarityFacetColumns)], [baseColumns, rarityBases])
+  const groups = useMemo(() => [...storedGroups, ...pairGroups], [pairGroups, storedGroups])
+  const optionsOf = useCallback((column: string) => {
+    const facet = parseRarityFacet(column, rarityBases)
+    // Les raretés gardent l'ordre et les couleurs de la colonne ; les lieux n'en ont pas.
+    if (facet) return facet.part === "rarity" || facet.part === "pair-rarity" ? baseOptionsOf(facet.base) : []
+    return baseOptionsOf(column)
+  }, [baseOptionsOf, rarityBases])
   const ordered = useMemo(() => pinnedFirst(stats), [stats])
   // « Forêt - Ville » (listes séparées par un tiret) se lit comme « Forêt, Ville ».
-  const dashed = useMemo(() => new Map(columns.filter((column) => separatorOf?.(column)?.trim() === "-").map((column) => [column, optionsOf(column)])), [columns, optionsOf, separatorOf])
+  const dashed = useMemo(() => new Map(baseColumns.filter((column) => separatorOf?.(column)?.trim() === "-").map((column) => [column, optionsOf(column)])), [baseColumns, optionsOf, separatorOf])
   const readValue = useCallback((rowKey: string, column: string) => {
+    const facet = parseRarityFacet(column, rarityBases)
+    if (facet) return rarityFacetValue(valueOf(rowKey, facet.base), facet)
     const raw = valueOf(rowKey, column)
     const options = dashed.get(column)
     return options && raw ? splitListValue(cellText(raw), options, "-").join(", ") : raw
-  }, [dashed, valueOf])
+  }, [dashed, rarityBases, valueOf])
   const numeric = useMemo(() => numericColumns(columns, rows, readValue), [columns, readValue, rows])
   const orderOf = useCallback((column: string) => column === TAB_PSEUDO && tabs.length > 1 && !optionsOf(column).length ? tabs : optionsOf(column).map((option) => option.value), [optionsOf, tabs])
   const labelOf = useCallback((column: string) => statColumnLabel(groups, column), [groups])
@@ -490,7 +510,8 @@ export function IndexStats({ stats, groups: groupsProp, pinnedOnly = false, sing
   }
 
   function saveGroups(next: StatColumnGroup[], message: string, undo?: StatColumnGroup[]) {
-    const clean = cleanColumnGroups(next)
+    // Les groupes « par paire » d'une colonne « Rareté et emplacements » ne s'enregistrent pas.
+    const clean = cleanColumnGroups(next.filter((group) => !isRarityPairGroupId(group.id)))
     setPendingGroups(clean)
     void persist(stats, message, { groups: clean, undo: undo ? () => saveGroups(undo, "Groupe rétabli.") : undefined }).finally(() => setPendingGroups(null))
   }
@@ -680,9 +701,9 @@ export function IndexStats({ stats, groups: groupsProp, pinnedOnly = false, sing
             merge={mergeable ? { label: `⇄ fusionner ${twinWords(mergeable)}`, run: mergeTwins } : null}
             split={!mergeable && splittable ? { label: `⇄ séparer ${twinWords(splittable.columns)}`, run: splitTwins } : null} />
           <div className="flex flex-wrap items-center gap-2">
-            <button type="button" aria-expanded={groupsOpen} onClick={() => setGroupsOpen((value) => !value)} className={`${mini} ${groupsOpen ? "border-solid border-[#3b5c8a] text-foreground" : ""}`}><Combine className="mr-1 size-3.5" aria-hidden="true" />Colonnes regroupées{groups.length ? ` (${groups.length})` : ""}{canEdit && !groups.length && suggestColumnGroups(columns, groups).length ? " · regrouper des colonnes…" : ""}</button>
+            <button type="button" aria-expanded={groupsOpen} onClick={() => setGroupsOpen((value) => !value)} className={`${mini} ${groupsOpen ? "border-solid border-[#3b5c8a] text-foreground" : ""}`}><Combine className="mr-1 size-3.5" aria-hidden="true" />Colonnes regroupées{storedGroups.length ? ` (${storedGroups.length})` : ""}{canEdit && !storedGroups.length && suggestColumnGroups(baseColumns, storedGroups).length ? " · regrouper des colonnes…" : ""}</button>
           </div>
-          {groupsOpen && <GroupsPanel groups={groups} columns={columns.filter((column) => column !== TAB_PSEUDO)} canEdit={canEdit} pending={pending} usage={usage} onSave={saveGroups} />}
+          {groupsOpen && <GroupsPanel groups={storedGroups} columns={baseColumns.filter((column) => column !== TAB_PSEUDO)} canEdit={canEdit} pending={pending} usage={usage} onSave={saveGroups} />}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3.5 pt-3 sm:px-4">
           <div className="-mx-3.5 flex w-[calc(100%+1.75rem)] flex-nowrap gap-1 overflow-x-auto px-3.5 pb-1 [scrollbar-width:none] sm:mx-0 sm:w-auto sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0" role="group" aria-label="Forme">

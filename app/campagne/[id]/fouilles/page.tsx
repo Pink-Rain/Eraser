@@ -8,20 +8,28 @@ import { getCampaignDashboard } from "@/lib/google-sheets"
 import { readSearchDraws } from "@/lib/search-draws-store"
 import { authorizedAccount } from "@/lib/server-auth"
 import { loadShopGeneratorItems } from "@/lib/shop-schema"
-import { loadSearchPlaces } from "@/lib/search-places-server"
+import { loadEnvironmentRules, loadSearchPlaces } from "@/lib/search-places-server"
+import { indexesWithColumnKind, type IndexWithKind } from "@/lib/index-kinds-server"
+import { loadRarityPlaceFinds } from "@/lib/shop-types-server"
 
 export const dynamic = "force-dynamic"
 
 async function CampaignSearchData({ campaignId }: { campaignId: string }) {
-  const [items, draws, places] = await Promise.all([
+  const [items, draws, places, indexes] = await Promise.all([
     loadShopGeneratorItems().catch(() => null),
     readSearchDraws(campaignId).catch(() => "error" as const),
     loadSearchPlaces(),
+    indexesWithColumnKind("rarity-places").catch(() => [] as IndexWithKind[]),
   ])
+  // Tous les index qui ont la colonne « Rareté et emplacements » ; chaque environnement dit
+  // lesquels se fouillent (sa colonne « Fouille » ; vide : les items).
+  const [finds, rules] = await Promise.all([loadRarityPlaceFinds(indexes), loadEnvironmentRules(indexes)])
   return <SearchGenerator
     campaignId={campaignId}
-    items={items ?? []}
+    items={items ? [...items, ...finds] : []}
     places={places}
+    searchSources={Object.fromEntries(rules.filter((rule) => rule.search.length).map((rule) => [rule.place, rule.search]))}
+    indexTitles={Object.fromEntries(indexes.map((index) => [index.key, index.title]))}
     initialDraws={draws === "error" ? [] : draws}
     drawsUnavailable={draws === "error"}
     loadError={items ? "" : "Les index d’items n’ont pas pu être chargés. Réessaie dans un instant."}

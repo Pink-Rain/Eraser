@@ -215,6 +215,15 @@ const legacyPlaceStems: Record<string, string[]> = {
   market: ["marche"], "black-market": ["marche noir"], bookshop: ["librair"], antique: ["antiqu"], armory: ["armur"], alchemist: ["alchimi"], tavern: ["tavern"],
 }
 
+/**
+ * Un lieu de la colonne « Rareté et emplacements » désigne-t-il ce type de magasin ? Son nom
+ * dans Lieux › Magasin (« Armurerie »), accents et pluriel ignorés, ou sa clé (« armory »).
+ */
+export function isShopTypePlace(place: string, type: Pick<ShopTypeDefinition, "name" | "key">) {
+  const folded = foldText(place)
+  return Boolean(folded) && (folded === foldText(type.name) || folded.replace(/\s+/g, "-") === type.key || foldText(place).replace(/s\b/g, "") === foldText(type.name).replace(/s\b/g, ""))
+}
+
 /** Le type et le sous-type d'un item sont-ils permis par ce type de magasin ? */
 export function shopTypeAllows(type: ShopTypeDefinition, item: Pick<ShopGeneratorItem, "type" | "subtype">) {
   const allowed = (list: string[], value: string) => !list.length || list.some((entry) => foldText(entry) === foldText(value))

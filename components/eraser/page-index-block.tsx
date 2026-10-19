@@ -356,6 +356,7 @@ export function PageStatBlock({ block, source }: { block: StatBlock; source: Blo
       nameOf={(rowKey) => byKey.get(rowKey)?.name ?? ""}
       optionsOf={optionsOf}
       separatorOf={separatorOf}
+      rarityColumns={data.rarityColumns}
       onOpen={data.rows.some((row) => row.href) ? (rowKey) => { const href = byKey.get(rowKey)?.href; if (href) router.push(href) } : undefined}
       canEdit={false}
       onSave={async () => undefined}

@@ -4,6 +4,7 @@ import { applyObjectSchemaOperations, objectEditorModel, objectSchemas } from "@
 import { authorizedAccount } from "@/lib/server-auth"
 import type { SchemaOperation } from "@/lib/index-schema-shared"
 import { applyWorldSchemaOperations, knownWorldIndexKey, worldEditorModel } from "@/lib/world-indexes"
+import { forgetIndexKinds } from "@/lib/index-kinds-server"
 
 async function authorized() {
   return authorizedAccount(["admin", "mj"])
@@ -44,11 +45,15 @@ export async function POST(request: Request) {
     if (!operations.length) throw new Error("INDEX_SCHEMA_INVALID:Aucun changement à écrire.")
     if (body.family === "objects") {
       const tables = await applyObjectSchemaOperations(body.key ?? "", operations)
+      // Une colonne ajoutée, retirée ou retypée : les « Listes d'index » se recomptent.
+      forgetIndexKinds()
       return NextResponse.json({ ok: true, tables, schemas: await objectSchemas(tables) })
     }
     const key = await knownWorldIndexKey(body.key)
     if (!key) throw new Error("INDEX_SCHEMA_INVALID:Index inconnu.")
-    return NextResponse.json({ ok: true, data: await applyWorldSchemaOperations(key, operations) })
+    const data = await applyWorldSchemaOperations(key, operations)
+    forgetIndexKinds()
+    return NextResponse.json({ ok: true, data })
   } catch (error) {
     console.error("INDEX_SCHEMA_APPLY_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
     return NextResponse.json({ error: errorMessage(error) }, { status: 400 })

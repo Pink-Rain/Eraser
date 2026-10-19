@@ -158,3 +158,69 @@ export function placeResolver(places: Array<{ name: string; aliases?: string[] }
 export function samePlace(place: string, name: string) {
   return Boolean(place.trim()) && choiceKey(place) === choiceKey(name)
 }
+
+/* ---------- Les statistiques ---------- */
+
+/**
+ * Une colonne « Rareté et emplacements » se lit de plusieurs façons dans les statistiques :
+ * - « … › Rareté » : seulement ses raretés ; « … › Emplacement » : seulement ses lieux ;
+ * - les deux à la fois, pas ensemble : répartir par l'une et l'autre (chaque rareté de la ligne
+ *   croise chacun de ses lieux) ;
+ * - les deux ensemble : « … › Rareté et emplacement » (« Rare · Forêt ») en une seule valeur, ou
+ *   les deux groupes « par paire », qui s'alignent : une rareté ne va qu'avec ses propres lieux.
+ */
+export type RarityFacet = { base: string; part: "rarity" | "place" | "both" } | { base: string; part: "pair-rarity" | "pair-place"; pair: number }
+
+const facetSuffix = { rarity: "Rareté", place: "Emplacement", both: "Rareté et emplacement" } as const
+
+/** Les colonnes proposées pour une colonne « Rareté et emplacements » (les groupes « par paire » à part). */
+export function rarityFacetColumns(base: string) {
+  return [`${base} › ${facetSuffix.rarity}`, `${base} › ${facetSuffix.place}`, `${base} › ${facetSuffix.both}`]
+}
+
+/** La colonne d'une paire (son rang à partir de 0) : sa rareté ou son lieu. */
+export function rarityPairColumn(base: string, pair: number, part: "rarity" | "place") {
+  return `${base} › paire ${pair + 1} › ${part === "rarity" ? "rareté" : "emplacement"}`
+}
+
+/** Une colonne de statistique tirée d'une colonne « Rareté et emplacements » (`bases`), ou `null`. */
+export function parseRarityFacet(column: string, bases: string[]): RarityFacet | null {
+  for (const base of bases) {
+    if (!column.startsWith(`${base} › `)) continue
+    const rest = column.slice(base.length + 3)
+    if (rest === facetSuffix.rarity) return { base, part: "rarity" }
+    if (rest === facetSuffix.place) return { base, part: "place" }
+    if (rest === facetSuffix.both) return { base, part: "both" }
+    const pair = rest.match(/^paire (\d{1,3}) › (rareté|emplacement)$/)
+    if (pair) return { base, part: pair[2] === "rareté" ? "pair-rarity" : "pair-place", pair: Number(pair[1]) - 1 }
+  }
+  return null
+}
+
+/** La valeur d'une case vue sous cette facette : plusieurs valeurs séparées par des virgules (comme une liste). */
+export function rarityFacetValue(raw: string, facet: RarityFacet) {
+  if (facet.part === "rarity") return raritiesOf(raw).join(", ")
+  if (facet.part === "place") return placesIn(raw).join(", ")
+  const pairs = rarityPlacePairs(raw)
+  if (facet.part === "both") return [...new Set(pairs.map((pair) => `${pair.rarity} · ${pair.place}`))].join(", ")
+  if (facet.part !== "pair-rarity" && facet.part !== "pair-place") return ""
+  const pair = pairs[facet.pair]
+  return pair ? facet.part === "pair-rarity" ? pair.rarity : pair.place : ""
+}
+
+/** L'identifiant (stable) des groupes « par paire » d'une colonne. */
+function pairGroupId(base: string, part: "r" | "l") {
+  return `rp-${foldName(base).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 16) || "x"}-${part}`
+}
+
+/** Les groupes « par paire » d'une colonne (rareté, lieu), de `size` paires : ils s'alignent rang par rang. */
+export function rarityPairGroups(base: string, size: number) {
+  const count = Math.max(1, Math.min(40, size))
+  return [
+    { id: pairGroupId(base, "r"), name: `${base} › Rareté (avec ses lieux)`, columns: Array.from({ length: count }, (_, index) => rarityPairColumn(base, index, "rarity")) },
+    { id: pairGroupId(base, "l"), name: `${base} › Emplacement (avec sa rareté)`, columns: Array.from({ length: count }, (_, index) => rarityPairColumn(base, index, "place")) },
+  ]
+}
+
+/** Les groupes « par paire » ne s'enregistrent jamais : Eraser les refait d'après la colonne. */
+export const isRarityPairGroupId = (id: string) => /^rp-[a-z0-9-]+-[rl]$/.test(id)

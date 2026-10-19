@@ -8,6 +8,7 @@ import { listCampaignEvents } from "@/lib/campaign-events"
 import { getCampaignDashboard, listCampaignNpcs, listSavedShops } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
 import { loadShopGeneratorData } from "@/lib/shop-types-server"
+import { loadEnvironmentRules } from "@/lib/search-places-server"
 
 export const dynamic = "force-dynamic"
 
@@ -18,7 +19,9 @@ async function CampaignEventsData({ campaignId }: { campaignId: string }) {
     listCampaignNpcs(campaignId),
     loadShopGeneratorData(),
   ])
-  return <CampaignEventManager campaignId={campaignId} initialEvents={events.list} loadError={events.error} shops={shops} npcs={npcs} generatorItems={generator.items ?? []} shopTypes={generator.catalog.types} />
+  // Chaque environnement : les index de sa colonne « Événement » (Lieux › Environnement).
+  const rules = await loadEnvironmentRules(generator.indexes)
+  return <CampaignEventManager campaignId={campaignId} initialEvents={events.list} loadError={events.error} shops={shops} npcs={npcs} generatorItems={generator.items ?? []} shopTypes={generator.catalog.types} environments={rules.map((rule) => ({ place: rule.place, events: rule.events }))} indexTitles={Object.fromEntries(generator.indexes.map((index) => [index.key, index.title]))} />
 }
 
 export default async function CampaignEventsPage({ params }: { params: Promise<{ id: string }> }) {

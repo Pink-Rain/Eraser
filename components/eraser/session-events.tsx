@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { ArrowUpRight, Caravan, ChevronDown, CircleMinus, Dices, LoaderCircle, MapPinned, Pencil, PawPrint, Plus, Search, Send, Sparkles, Trash2, UsersRound } from "lucide-react"
 
 import {
@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Textarea } from "@/components/ui/textarea"
 import { ImageField } from "@/components/eraser/index-cells"
+import { IndexImage } from "@/components/eraser/index-image"
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { AddToSessionDialog, patchSession } from "@/components/eraser/session-picker"
 import { countChoices, eventShopTypes, generateEventShop, SavedShopCollection, shopSummary } from "@/components/eraser/shop-generator"
@@ -25,6 +26,7 @@ import type { CampaignSessionRecord, SessionEvent, SessionEventKind } from "@/li
 import { genericNpcIndexPage } from "@/lib/npc-pages"
 import type { CampaignNpcRecord, SavedShopRecord, ShopGeneratorItem } from "@/lib/shop-schema"
 import { builtinShopTypes, type ShopTypeDefinition } from "@/lib/shop-types"
+import { drawEncounter, encounterPool, encounterRarityLabels, type EncounterCandidate } from "@/lib/environment-draws"
 
 /*
  * Les événements d'une campagne. La page Événements (menu › Créateur de session) les crée,
@@ -197,6 +199,49 @@ function EventCard({ event, pending, actions, children }: { event: SessionEvent;
   </article>
 }
 
+/* ---------- une rencontre au hasard, dans un environnement ---------- */
+
+/** Ce que la page Événements sait de chaque environnement (Lieux › Environnement) : les index de sa colonne « Événement ». */
+export type EventEnvironment = { place: string; events: string[] }
+
+/**
+ * « Au hasard dans un environnement » : on choisit un environnement, Eraser tire une rareté
+ * (le commun plus souvent que l'ultime) puis une ligne de cette rareté parmi les index de sa
+ * colonne « Événement ». Le résultat se garde comme un événement (une créature reste liée à sa fiche).
+ */
+function EnvironmentEncounter({ items, environments, indexTitles, pending, onKeep }: { items: ShopGeneratorItem[]; environments: EventEnvironment[]; indexTitles: Record<string, string>; pending: boolean; onKeep: (candidate: EncounterCandidate) => void }) {
+  const places = useMemo(() => environments.map((environment) => environment.place), [environments])
+  const [chosen, setChosen] = useState("")
+  const place = places.includes(chosen) ? chosen : environments.find((environment) => environment.events.length)?.place ?? places[0] ?? ""
+  const rule = environments.find((environment) => environment.place === place)
+  const pool = useMemo(() => encounterPool(items, place, rule?.events ?? [], places), [items, place, places, rule])
+  const [result, setResult] = useState<EncounterCandidate | null>(null)
+  const [tried, setTried] = useState(false)
+  if (!places.length) return null
+  const sources = (rule?.events ?? []).map((key) => indexTitles[key] ?? key)
+  const draw = (exclude = "") => { setTried(true); setResult(drawEncounter(pool, Math.random, exclude)) }
+  const image = result && /^(https:\/\/|\/api\/)/.test(result.item.icon) ? result.item.icon : ""
+  return <section className="border-t pt-8">
+    <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Au hasard dans un environnement</p>
+    <div className="flex flex-col gap-2 rounded-2xl border bg-card/65 p-3 sm:flex-row sm:flex-wrap sm:items-center">
+      <NativeSelect value={place} onChange={(event) => { setChosen(event.target.value); setResult(null); setTried(false) }} aria-label="Environnement" className="w-full sm:w-auto">{places.map((name) => <NativeSelectOption key={name} value={name}>{name}</NativeSelectOption>)}</NativeSelect>
+      <Button type="button" disabled={pending || !pool.length} onClick={() => draw()}><Dices />Tirer une rencontre</Button>
+      <span className="text-xs text-muted-foreground">{sources.length ? `Parmi : ${sources.join(", ")} · ${pool.length} possibilité${pool.length > 1 ? "s" : ""}` : "Rien de réglé : remplis la colonne « Événement » de cet environnement (Index des lieux › Environnement)."}</span>
+    </div>
+    {result ? <article className="mt-3 flex flex-wrap items-center gap-3 rounded-2xl border bg-card/80 p-3">
+      {image ? <span className="size-12 shrink-0 overflow-hidden rounded-xl border bg-muted"><IndexImage value={image} alt="" className="size-full object-cover" /></span> : <span className="flex size-12 shrink-0 items-center justify-center rounded-xl border bg-muted/60 text-primary"><Sparkles className="size-5" /></span>}
+      <span className="grid min-w-0 flex-1 gap-0.5">
+        <b className="truncate font-display text-lg">{result.item.name}</b>
+        <span className="text-xs text-muted-foreground">{[indexTitles[result.item.source ?? "objects"] ?? (result.item.source ? result.item.source : "Items"), encounterRarityLabels[result.rarity], result.item.type].filter(Boolean).join(" · ")}</span>
+      </span>
+      <span className="flex flex-wrap gap-1.5">
+        <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => draw(result.item.id)}><Dices />Relancer</Button>
+        <Button type="button" size="sm" disabled={pending} onClick={() => onKeep(result)}><Plus />Garder comme événement</Button>
+      </span>
+    </article> : tried && <p className="mt-3 rounded-xl border border-dashed px-4 py-4 text-sm text-muted-foreground">Rien à croiser ici : aucune ligne de ces index n’a « {place} » dans sa colonne « Rareté et emplacements ».</p>}
+  </section>
+}
+
 /* ---------- la page Événements ---------- */
 
 /**
@@ -204,7 +249,7 @@ function EventCard({ event, pending, actions, children }: { event: SessionEvent;
  * nommés, avec leur image), et les marchés ambulants (des magasins). Chacun s'envoie dans
  * une session du Créateur de session.
  */
-export function CampaignEventManager({ campaignId, initialEvents, shops, npcs, generatorItems, shopTypes = builtinShopTypes, loadError = "" }: { campaignId: string; initialEvents: CampaignEvent[]; shops: SavedShopRecord[]; npcs: CampaignNpcRecord[]; generatorItems: ShopGeneratorItem[]; shopTypes?: ShopTypeDefinition[]; loadError?: string }) {
+export function CampaignEventManager({ campaignId, initialEvents, shops, npcs, generatorItems, shopTypes = builtinShopTypes, environments = [], indexTitles = {}, loadError = "" }: { campaignId: string; initialEvents: CampaignEvent[]; shops: SavedShopRecord[]; npcs: CampaignNpcRecord[]; generatorItems: ShopGeneratorItem[]; shopTypes?: ShopTypeDefinition[]; /** Lieux › Environnement : les index de chaque colonne « Événement ». */ environments?: EventEnvironment[]; indexTitles?: Record<string, string>; loadError?: string }) {
   const router = useRouter()
   const [events, setEvents] = useState<SessionEvent[]>(initialEvents)
   const [creating, setCreating] = useState<CreatableKind | null>(null)
@@ -278,6 +323,14 @@ export function CampaignEventManager({ campaignId, initialEvents, shops, npcs, g
         ]} />)}</div>
         : <p className="rounded-2xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">{events.length ? "Aucun événement ne correspond." : "Aucun événement : ajoute une créature, un PNJ générique ou un événement libre."}</p>}
     </section>
+
+    <EnvironmentEncounter items={generatorItems} environments={environments} indexTitles={indexTitles} pending={pending} onKeep={(candidate) => {
+      // Une créature reste liée à sa fiche (son identifiant) ; le reste devient un événement libre, à son nom.
+      const creature = candidate.item.source === "creatures"
+      const refId = creature ? candidate.item.id.replace(/^creatures:/, "") : ""
+      const image = /^(https:\/\/|\/api\/)/.test(candidate.item.icon) ? candidate.item.icon : ""
+      setEditing({ ...blankEvent(creature ? "creature" : "other", { refId, name: candidate.item.name, detail: candidate.item.type, image }), description: creature ? "" : candidate.item.description.slice(0, 500) })
+    }} />
 
     {eventType && <section className="border-t pt-8">
       <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">{eventTypes.length === 1 && eventType.key === "travelling-market" ? "Marchés ambulants" : eventTypes.length === 1 ? eventType.name : "Magasins d’événement"}</p>

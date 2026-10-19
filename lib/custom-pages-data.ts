@@ -69,6 +69,8 @@ export type StatBlockData = {
   rows: Array<BlockRow & { tab: string }>
   options: Record<string, Array<{ value: string; color?: string }>>
   separators: Record<string, string>
+  /** Les colonnes « Rareté et emplacements » (leurs raretés, leurs lieux, ou les deux). */
+  rarityColumns?: string[]
 }
 
 export type BlockDataOptions = {
@@ -267,14 +269,16 @@ export function statBlockData(source: IndexSource, record: { stats: StatDefiniti
     .map((row) => ({ ...row, tab: table.tabName, cells: pseudo ? [...row.cells, table.tabName] : row.cells })))
   const options_: StatBlockData["options"] = {}
   const separators: StatBlockData["separators"] = {}
+  const rarityColumns: string[] = []
   for (const column of columns) {
     const tab = owner.get(column)
     if (!tab) continue
     const spec = columnSpecIn(source, tab, column)
+    if (spec.kind === "rarity-places") rarityColumns.push(column)
     if (spec.options?.length) options_[column] = spec.options.map((option) => ({ value: option.value, ...(option.color ? { color: option.color } : {}) }))
     if (spec.multiple && spec.listSeparator) separators[column] = spec.listSeparator
   }
-  return { kind: "stat", index: source.key, title: source.title, stats, groups: record.groups, columns, tabs: source.tables.map((table) => table.tabName), rows, options: options_, separators }
+  return { kind: "stat", index: source.key, title: source.title, stats, groups: record.groups, columns, tabs: source.tables.map((table) => table.tabName), rows, options: options_, separators, ...(rarityColumns.length ? { rarityColumns } : {}) }
 }
 
 /** Les vues qu'un onglet propose à un bloc Vue : tableau, cartes, et celles réglées dans « Modifier › Vues ». */

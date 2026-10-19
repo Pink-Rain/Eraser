@@ -25,7 +25,7 @@ import { ObjectText, ObjectTraits } from "@/components/eraser/object-combat-deta
 import { fetchPersistedShops, persistShops } from "@/components/eraser/shop-persistence"
 import { newNpc, persistNpcs } from "@/components/eraser/npc-manager"
 import { visualShopKey } from "@/lib/shop-keys"
-import { builtinShopTypes, findLabels, itemSourceOf, shopPlaceMatcher, shopTypeAllows, shopTypeIcons, shopTypeOf, type ShopTypeDefinition } from "@/lib/shop-types"
+import { builtinShopTypes, findLabels, isShopTypePlace, itemSourceOf, shopPlaceMatcher, shopTypeAllows, shopTypeIcons, shopTypeOf, type ShopTypeDefinition } from "@/lib/shop-types"
 
 export type { ShopGeneratorItem } from "@/lib/shop-schema"
 
@@ -68,14 +68,23 @@ function rarityFrom(value: string): ShopRarity | null { const normalized = norma
 // Un correcteur d'emplacements par catalogue : le plus précis l'emporte (« Marché noir » plutôt que « Marché »).
 const matchers = new WeakMap<ShopTypeDefinition[], ReturnType<typeof shopPlaceMatcher>>()
 function matcherOf(types: ShopTypeDefinition[]) { let matcher = matchers.get(types); if (!matcher) { matcher = shopPlaceMatcher(types); matchers.set(types, matcher) } return matcher }
-/** Ce magasin vend-il cet item à cet emplacement ? Son index (Trouvailles), son emplacement, son type et sous-type. */
-function sellsAt(item: ShopGeneratorItem, place: string, type: ShopTypeDefinition, types: ShopTypeDefinition[]) { return type.finds.includes(itemSourceOf(item)) && shopTypeAllows(type, item) && matcherOf(types)(place, type.key) }
+/**
+ * Ce magasin vend-il cet item à cet emplacement ? Lu dans la colonne « Rareté et emplacements »
+ * (`exact`) : le lieu est le magasin lui-même (son nom dans Lieux › Magasin), de n'importe quel
+ * index. Sinon (anciennes colonnes) : son index (Trouvailles) et son emplacement (Emplacements).
+ * Dans les deux cas, le type et le sous-type permis par le magasin.
+ */
+function sellsAt(item: ShopGeneratorItem, location: ShopGeneratorItem["locations"][number], type: ShopTypeDefinition, types: ShopTypeDefinition[]) {
+  if (!shopTypeAllows(type, item)) return false
+  if (location.exact) return isShopTypePlace(location.place, type)
+  return type.finds.includes(itemSourceOf(item)) && matcherOf(types)(location.place, type.key)
+}
 function weightedChoice<T>(choices: Array<{ value: T; weight: number }>) { let roll = Math.random() * choices.reduce((sum, choice) => sum + choice.weight, 0); for (const choice of choices) { roll -= choice.weight; if (roll < 0) return choice.value } return choices[choices.length - 1].value }
 
 /** `forced` : relancer une ligne dans une rareté choisie (clic droit sur « Relancer »). */
 function drawItems(items: ShopGeneratorItem[], key: ShopKey, count: number, forced?: ShopRarity, types: ShopTypeDefinition[] = builtinShopTypes) {
   const type = shopTypeOf(types, key)
-  const available = items.flatMap((item) => item.locations.flatMap((location) => { const rarity = rarityFrom(location.rarity); return rarity && sellsAt(item, location.place, type, types) && (!forced || rarity === forced) ? [{ ...item, rarity }] : [] }))
+  const available = items.flatMap((item) => item.locations.flatMap((location) => { const rarity = rarityFrom(location.rarity); return rarity && sellsAt(item, location, type, types) && (!forced || rarity === forced) ? [{ ...item, rarity }] : [] }))
   const selected: GeneratedShopItem[] = []
   while (selected.length < count) { const remaining = available.filter((item) => !selected.some((chosen) => chosen.id === item.id)); const availableRarities = rarityWeights.filter(({ value }) => remaining.some((item) => item.rarity === value)); if (!remaining.length || !availableRarities.length) break; const rarity = weightedChoice(availableRarities); const pool = remaining.filter((item) => item.rarity === rarity); selected.push(pool[Math.floor(Math.random() * pool.length)]) }
   return selected
@@ -195,14 +204,14 @@ export function generateTravellingMarket(items: ShopGeneratorItem[], count: numb
 /** Un item choisi à la main (loupe) : la rareté de ce magasin s'il le vend, sinon la première connue. */
 export function pickedShopItem(item: ShopGeneratorItem, key: ShopKey, types: ShopTypeDefinition[] = builtinShopTypes): GeneratedShopItem {
   const type = shopTypeOf(types, key)
-  const rarities = item.locations.map((location) => ({ rarity: rarityFrom(location.rarity), here: sellsAt(item, location.place, type, types) }))
+  const rarities = item.locations.map((location) => ({ rarity: rarityFrom(location.rarity), here: sellsAt(item, location, type, types) }))
   const rarity = rarities.find((entry) => entry.here && entry.rarity)?.rarity || rarities.find((entry) => entry.rarity)?.rarity || "common"
   return { ...item, rarity }
 }
 
 function soldIn(item: ShopGeneratorItem, key: ShopKey, types: ShopTypeDefinition[]) {
   const type = shopTypeOf(types, key)
-  return item.locations.some((location) => rarityFrom(location.rarity) && sellsAt(item, location.place, type, types))
+  return item.locations.some((location) => rarityFrom(location.rarity) && sellsAt(item, location, type, types))
 }
 
 /** Les types tirés avec une ville (« Apparaît dans » : Magasins ou Les deux). */

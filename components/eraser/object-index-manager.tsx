@@ -204,7 +204,12 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     setSheetError("")
     setDetails(String(found.row.rowNumber))
   }, [statLocate])
-  const statsProps = { stats: indexStats, groups: settings.statGroups, rows: statRowKeys, columns: statHeaders, tabs: statTabs, valueOf: statValueOf, tabOf: statTabOf, nameOf: statNameOf, optionsOf: statOptionsOf, separatorOf: statSeparatorOf, onOpen: openStatRow, onSave: settings.saveStats }
+  // Les colonnes « Rareté et emplacements » : leurs raretés, leurs lieux, ou les deux, dans les statistiques.
+  const statRarityColumns = useMemo(() => statHeaders.filter((header) => {
+    const table = tables.find((candidate) => objectHeaderIndex(candidate.headers, header) >= 0)
+    return table ? specIn(table, header, schemas).kind === "rarity-places" : false
+  }), [schemas, statHeaders, tables])
+  const statsProps = { stats: indexStats, groups: settings.statGroups, rows: statRowKeys, columns: statHeaders, tabs: statTabs, valueOf: statValueOf, tabOf: statTabOf, nameOf: statNameOf, optionsOf: statOptionsOf, separatorOf: statSeparatorOf, rarityColumns: statRarityColumns, onOpen: openStatRow, onSave: settings.saveStats }
   const selectedTableKey = statSheet?.table ?? selectedKey
   const selected = useMemo(() => tables.find((table) => tableKey(table) === selectedTableKey) ?? tables[0] ?? null, [selectedTableKey, tables])
   // « {Prix} » écrit dans une description : le menu « { » propose les colonnes de l'objet.
