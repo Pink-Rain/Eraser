@@ -744,7 +744,9 @@ export const NumberCell = memo(function NumberCell({ label, value, format, disab
     <button type="button" disabled={disabled} onClick={() => { setDraft(shown.trim()); setEditing(true) }} className="min-w-0 flex-1 whitespace-normal break-words rounded-md px-1 py-1 text-right tabular-nums hover:bg-muted [overflow-wrap:anywhere]" aria-label={`Modifier ${label}`} title="Une valeur par mode, séparées par « | »">{formatNumberParts(shown, format)}</button>
   </span>
 
-  const amountText = parsed && units.length ? text.replace(new RegExp(`\\s${parsed.unit ?? format.defaultUnit ?? ""}$`), "") : text
+  // Le montant sans son unité (affichée à côté) : « 12 PO » → « 12 ».
+  const suffix = parsed?.unit ?? format.defaultUnit ?? ""
+  const amountText = parsed && units.length && suffix && text.length > suffix.length && text.endsWith(suffix) && /\s/.test(text[text.length - suffix.length - 1]) ? text.slice(0, -suffix.length - 1) : text
   const unit = parsed?.unit ?? (parsed ? findUnit(family, format.defaultUnit ?? "")?.code : undefined)
   return <span className={`flex min-h-8 w-full flex-wrap items-center gap-1.5 px-1 ${compact ? "" : "h-9 rounded-md border bg-background/50"}`} title={conversions}>
     <button

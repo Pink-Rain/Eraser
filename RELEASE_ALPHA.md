@@ -30,6 +30,21 @@ Sheets.
 - **Tableau de bord de campagne** : cacher un personnage, titre et description.
 - Si Google refuse, la chose revient comme elle était et le message dit pourquoi.
 
+## Les gros index ne figent plus
+
+Mesuré sur un banc qui reproduit Eraser avec de vraies quantités (1 800 items, 200 PNJ,
+40 personnages…) et un processeur bridé comme un petit portable.
+
+- **Index des PNJ** : chaque case de sorts redemandait la liste des sorts au serveur, qui relisait
+  Google et recherchait les doublons à chaque fois — 240 demandes identiques à l'ouverture. Une
+  seule maintenant, servie depuis la mémoire.
+- **Cases à cocher** : la coche de chaque case relisait les styles de la page en apparaissant. Un
+  index à cases cochées les recalculait des milliers de fois ; la coche est désormais dessinée
+  sans ce détour.
+- **Nombres et prix** : mis en forme sans recréer leur format ni relire les unités à chaque case.
+- **Tableau ↔ Cartes** : le bouton change tout de suite, la nouvelle forme se prépare sans geler
+  l'écran.
+
 ## Un écran plus léger
 
 - **React Compiler** : chaque composant ne se redessine plus que si ce qu'il montre a changé.

@@ -57,8 +57,18 @@ export const unitFamilies: Record<Exclude<UnitFamily, "none">, { label: string; 
   },
 }
 
+// Un index affiche des milliers de nombres, souvent les mêmes (« 10 PO ») : les textes déjà
+// repliés, les unités de chaque famille et les formats de nombres sont gardés une fois pour toutes.
+const folded = new Map<string, string>()
+
 function fold(value: string) {
-  return value.normalize("NFD").replace(/\p{M}/gu, "").replace(/[’‘]/g, "'").toLocaleLowerCase("fr").replace(/\s+/g, " ").trim()
+  let result = folded.get(value)
+  if (result === undefined) {
+    result = value.normalize("NFD").replace(/\p{M}/gu, "").replace(/[’‘]/g, "'").toLocaleLowerCase("fr").replace(/\s+/g, " ").trim()
+    if (folded.size > 5_000) folded.clear()
+    folded.set(value, result)
+  }
+  return result
 }
 
 /** L'unité d'une famille qui correspond à un texte (« po », « pièces d'or », « PON »…). */
@@ -66,7 +76,22 @@ export function findUnit(family: UnitFamily | undefined, text: string) {
   if (!family || family === "none") return undefined
   const key = fold(text).replace(/\.$/, "")
   if (!key) return undefined
-  return unitFamilies[family].units.find((unit) => unit.aliases.some((alias) => fold(alias) === key) || fold(unit.code) === key)
+  return unitKeys(family).get(key)
+}
+
+const unitsByKey = new Map<UnitFamily, Map<string, UnitDefinition>>()
+
+/** Chaque nom d'unité d'une famille, replié, vers son unité (la première qui le porte l'emporte, comme avant). */
+function unitKeys(family: Exclude<UnitFamily, "none">) {
+  let keys = unitsByKey.get(family)
+  if (!keys) {
+    keys = new Map()
+    for (const unit of unitFamilies[family].units) {
+      for (const name of [...unit.aliases, unit.code]) { const key = fold(name); if (!keys.has(key)) keys.set(key, unit) }
+    }
+    unitsByKey.set(family, keys)
+  }
+  return keys
 }
 
 export function unitsOf(family: UnitFamily | undefined) {
@@ -93,6 +118,8 @@ function toNumber(text: string) {
 }
 
 const numberPattern = /-?\d[\d\s  ]*(?:[.,]\d+)?/
+const rangePattern = new RegExp(`^\\s*(${numberPattern.source})\\s*(?:–|—|-|à|a)\\s*(${numberPattern.source})\\s*(.*)$`, "i")
+const amountsPattern = new RegExp(`(${numberPattern.source})\\s*([^\\d\\s,;+-][^\\d,;+]*)?`, "g")
 
 /**
  * Lit une cellule : « 12 », « 1,5 PO », « 1 PO 50 PC », « 2–5 m », « 30 % ». Plusieurs
@@ -104,7 +131,7 @@ export function parseIndexNumber(value: string, format: NumberFormat = {}): Pars
   if (!text) return null
   const family = format.unit ?? "none"
   // Plage : deux nombres séparés par un tiret, « à » ou « - ».
-  const range = text.match(new RegExp(`^\\s*(${numberPattern.source})\\s*(?:–|—|-|à|a)\\s*(${numberPattern.source})\\s*(.*)$`, "i"))
+  const range = text.match(rangePattern)
   if (range && !/^-/.test(range[2])) {
     const low = toNumber(range[1])
     const high = toNumber(range[2])
@@ -114,7 +141,7 @@ export function parseIndexNumber(value: string, format: NumberFormat = {}): Pars
       return { base: Math.min(low, high) * factor, baseMax: Math.max(low, high) * factor, unit: unit?.code, unknown: Boolean(range[3].trim()) && !unit && family !== "none", corrected: isCorrected(range[3]) }
     }
   }
-  const parts = [...text.matchAll(new RegExp(`(${numberPattern.source})\\s*([^\\d\\s,;+-][^\\d,;+]*)?`, "g"))]
+  const parts = [...text.matchAll(amountsPattern)]
   if (!parts.length) return null
   let base = 0
   let firstUnit: string | undefined
@@ -138,9 +165,18 @@ function isCorrected(label: string) {
 }
 
 /** « 1 234,5 » : décimales automatiques (jusqu'à 2) sauf réglage contraire. */
+const amountFormats = new Map<string, Intl.NumberFormat>()
+
 export function formatAmount(value: number, decimals?: number) {
   const digits = decimals ?? (Number.isInteger(value) ? 0 : Math.abs(value) < 1 ? 2 : Math.abs(value * 10) % 1 === 0 ? 1 : 2)
-  return value.toLocaleString("fr-FR", { minimumFractionDigits: decimals ?? 0, maximumFractionDigits: digits }).replace(/ /g, " ")
+  const minimum = decimals ?? 0
+  const key = `${minimum}:${digits}`
+  let format = amountFormats.get(key)
+  if (!format) {
+    format = new Intl.NumberFormat("fr-FR", { minimumFractionDigits: minimum, maximumFractionDigits: digits })
+    amountFormats.set(key, format)
+  }
+  return format.format(value).replace(/ /g, " ")
 }
 
 /** La valeur dans une unité donnée (sans arrondi). */

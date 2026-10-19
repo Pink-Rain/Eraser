@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-import { deleteClassSpell, ignoreSpellPairs, invalidateClassContentCaches, linkClassSpell, listClassResources, mergeClassSpells, saveClassSpell, type ClassSpellDraft, type SpellIndexKind } from "@/lib/class-content"
+import { deleteClassSpell, ignoreSpellPairs, invalidateClassContentCaches, linkClassSpell, listClassResources, listClassSpells, mergeClassSpells, saveClassSpell, type ClassSpellDraft, type SpellIndexKind } from "@/lib/class-content"
 import { renameMergedSpells } from "@/lib/world-indexes"
 import { googleFailureMessage } from "@/lib/google-failures"
 import { authorizedAccount } from "@/lib/server-auth"
@@ -37,7 +37,14 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url)
     const refresh = url.searchParams.get("refresh") === "1"
-    return NextResponse.json({ data: await listClassResources(refresh, spellIndexKind(url.searchParams.get("index"))) })
+    const kind = spellIndexKind(url.searchParams.get("index"))
+    // Les sorts à choisir (cases de sorts d'un index, fiche d'un PNJ) : la liste seule, depuis
+    // la mémoire comme les autres lectures, sans la recherche des doublons. L'éditeur des sorts,
+    // qui écrit d'après sa lecture, garde la feuille relue et ses doublons.
+    if (url.searchParams.get("view") === "options" && !refresh) {
+      return NextResponse.json({ data: { spells: (await listClassSpells(false, kind)).spells } })
+    }
+    return NextResponse.json({ data: await listClassResources(refresh, kind) })
   } catch (error) {
     console.error("CLASS_RESOURCES_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
     return NextResponse.json({ error: "Les sorts n’ont pas pu être chargés depuis Google Sheets." }, { status: 400 })

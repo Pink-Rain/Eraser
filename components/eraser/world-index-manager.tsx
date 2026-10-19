@@ -301,6 +301,9 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   const settings = useIndexSettings(indexKey)
   // Tableau ou cartes, et la carte choisie : retenus pour cet index, sur ce poste.
   const [display, setDisplay] = usePersistentState<IndexDisplay>(`eraser:world-index:${storeKey}:display`, "table", isIndexDisplay)
+  // Passer de Tableau à Cartes (ou l'inverse) redessine des centaines de lignes : le bouton
+  // change tout de suite, et la nouvelle forme se prépare derrière sans figer l'écran.
+  const shownDisplay = useDeferredValue(display)
   const [cardChoice, setCardChoice] = usePersistentState<string>(`eraser:world-index:${storeKey}:card`, "", isCardChoice)
   // « Modifier » s'ouvre sur les colonnes, ou sur les cartes depuis la vue en cartes.
   const [editorMode, setEditorMode] = useState<EditorMode>(() => (dock?.modelOf(dockKey) as { mode?: EditorMode } | undefined)?.mode ?? "columns")
@@ -1827,7 +1830,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         renderForm={renderViewForm}
         rowRef={rowRefOf}
         empty={viewTables.some((owner) => owner.rows.length) ? "Aucune ligne ne remplit les conditions de cette vue." : `Cet onglet est vide. Ajoute ${tabDefinition.itemLabel} pour commencer.`}
-      /> : table && (display === "cards" || viewLayout?.kind === "cards") ? (shownCard
+      /> : table && (shownDisplay === "cards" || viewLayout?.kind === "cards") ? (shownCard
         ? viewLayout?.groupBy
           // Cartes rangées en sections : une grille par valeur de la colonne choisie.
           ? <div className="space-y-6">{(cardGroups ?? []).map((group) => <section key={group.name || "*"} className="space-y-2">

@@ -109,9 +109,12 @@ export type SheetGridRowCommands = {
 
 type SheetGridLayout = { columnWidths: Record<string, number>; rowHeights: Record<string, number> }
 
-/** Lignes montrées d'emblée, puis ajoutées à chaque moment de repos. */
-const FIRST_ROWS = 120
-const MORE_ROWS = 240
+/**
+ * Lignes montrées d'emblée (un écran et demi), puis ajoutées par tranches, en arrière-plan,
+ * à mesure que le bas approche : chaque ajout reste court, l'écran ne fige pas.
+ */
+const FIRST_ROWS = 40
+const MORE_ROWS = 80
 
 /** Largeur de la poignée de ligne. Fixe : la colonne n'est pas redimensionnable. */
 const HANDLE_WIDTH = 30

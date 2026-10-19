@@ -22,6 +22,28 @@ const sourceLabels: Record<SpellIndexKind, string> = { classes: "Classe", creatu
 // Les sorts déjà lus, par liste d'index : une fiche rouverte affiche aussitôt ses sorts
 // choisis, relus derrière.
 const knownSpellOptions = new Map<string, SpellOption[]>()
+// Une seule lecture à la fois par liste, et pas de relecture dans la minute : un index de
+// PNJ montre une case de sorts par ligne, et chacune relançait la même requête (240 d'un coup).
+const spellReads = new Map<string, { promise: Promise<SpellOption[]>; at: number }>()
+const SPELLS_REUSED_MS = 60_000
+
+function readSpellOptions(key: string, kinds: SpellIndexKind[], url: (kind: SpellIndexKind) => string) {
+  const running = spellReads.get(key)
+  if (running && Date.now() - running.at < SPELLS_REUSED_MS) return running.promise
+  const promise = Promise.all(kinds.map((kind) => fetch(url(kind))
+    .then((response) => response.json() as Promise<{ data?: { spells?: Omit<SpellOption, "source">[] } }>)
+    .then((payload) => (payload.data?.spells ?? []).filter((spell) => spell.name).map((spell) => ({ ...spell, source: kind })))
+    .catch(() => [] as SpellOption[])))
+    .then((lists) => {
+      const options = lists.flat().sort((left, right) => left.name.localeCompare(right.name, "fr"))
+      if (options.length) knownSpellOptions.set(key, options)
+      // Rien de lu (serveur injoignable) : la prochaine case réessaiera.
+      else if (spellReads.get(key)?.promise === promise) spellReads.delete(key)
+      return options
+    })
+  spellReads.set(key, { promise, at: Date.now() })
+  return promise
+}
 
 /**
  * `endpoint` : où lire les sorts d'un index (par défaut, la route des MJ). La fiche d'un
@@ -37,16 +59,8 @@ export function useSpellOptions(sources: SpellIndexKind[], endpoint?: (kind: Spe
   useEffect(() => {
     let alive = true
     const kinds = key.split("@")[0].split(",").filter(Boolean) as SpellIndexKind[]
-    const url = (kind: SpellIndexKind) => endpoint ? endpoint(kind) : `/api/resources/class-index?index=${kind}`
-    Promise.all(kinds.map((kind) => fetch(url(kind))
-      .then((response) => response.json() as Promise<{ data?: { spells?: Omit<SpellOption, "source">[] } }>)
-      .then((payload) => (payload.data?.spells ?? []).filter((spell) => spell.name).map((spell) => ({ ...spell, source: kind })))
-      .catch(() => [] as SpellOption[])))
-      .then((lists) => {
-        const options = lists.flat().sort((left, right) => left.name.localeCompare(right.name, "fr"))
-        if (options.length) knownSpellOptions.set(key, options)
-        if (alive) setState({ key, options, fresh: true })
-      })
+    const url = (kind: SpellIndexKind) => endpoint ? endpoint(kind) : `/api/resources/class-index?index=${kind}&view=options`
+    void readSpellOptions(key, kinds, url).then((options) => { if (alive) setState({ key, options, fresh: true }) })
     return () => { alive = false }
   // `endpoint` change à chaque rendu ; `key` porte sa valeur.
   // eslint-disable-next-line react-hooks/exhaustive-deps
