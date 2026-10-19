@@ -13,7 +13,7 @@ import { ColumnDescriptionButton, ColumnLockButton, ColumnTypeMenu } from "@/com
 import { IndexPresentationsEditor, LIST_FAMILY, MAIN_PRESENTATION_ID, PresentationsPanel } from "@/components/eraser/index-presentations-editor"
 import { columnStyleCss, pillStyle, stylePalette } from "@/components/eraser/index-style"
 import { creatableKinds } from "@/lib/index-schema-shared"
-import { defaultRarityOptions, placeSourcesOf } from "@/lib/rarity-places"
+import { defaultRarityOptions, placeSourcesOf, RARITY_PLACES_HEADER } from "@/lib/rarity-places"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -1129,7 +1129,9 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
     const base = defaultSpec(kind, model.relationTargets, relations)
     // Passer de Nom à Nom formulaire garde tout le reste ; sinon, seul l'affichage suit.
     const keep = { hidden: column.spec.hidden, readOnly: column.spec.readOnly, description: column.spec.description, placement: column.spec.placement, style: ["name", "name-form"].includes(kind) && ["name", "name-form"].includes(column.spec.kind) ? column.spec.style : column.spec.style ?? base.style }
-    updateColumn({ ...column, spec: { ...base, ...keep, kind } })
+    // Une colonne « Rareté et emplacements » toute neuve prend son nom d'office (sauf s'il est déjà pris).
+    const named = kind === "rarity-places" && !column.original && !headerProblem(RARITY_PLACES_HEADER, siblings.filter((item) => !item.removed).map((item) => item.header))
+    updateColumn({ ...column, header: named ? RARITY_PLACES_HEADER : column.header, spec: { ...base, ...keep, kind } })
   }
 
   /** Les autres onglets (pas à la corbeille), pour « Copier vers… ». */
