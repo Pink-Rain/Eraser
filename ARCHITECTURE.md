@@ -124,6 +124,31 @@ noms et ne se renomment jamais : actions `save-view`, `delete-view`,
 `save-view-preset`, clés `views` et `viewPresets` de l’API des réglages, portées
 du Worker, colonnes de la feuille, préfixe de version `vue:`, élément `@vue`.
 
+## Rareté et emplacements, sections, listes d’index, index des pages
+
+- **« Rareté et emplacements »** (type `rarity-places`, `lib/rarity-places.ts`) :
+  une case, une ligne par rareté (`Commun : Armurerie - Marché noir`). Les lieux
+  viennent de Lieux › Environnement et Lieux › Magasin. Les magasins
+  (`lib/shop-schema.ts`, `loadRarityPlaceFinds`), les fouilles et les
+  événements lisent cette colonne dans **tout** index qui l’a
+  (`indexesWithColumnKind`, `lib/index-kinds-server.ts`) ; un lieu y désigne le
+  magasin par son nom (`exact`). Un onglet qui n’a pas encore la colonne garde
+  ses anciennes colonnes (rareté et emplacement principaux, secondaires) et les
+  « Trouvailles » de Lieux › Magasin ; ces colonnes ne sont jamais effacées.
+  Les statistiques la lisent par rareté, par lieu, ou par paire.
+- **« Sections »** (`sections`, `lib/index-sections.ts`) : des paragraphes
+  titrés, chaque titre sur une ligne `## Titre` (texte enrichi dans Sheets).
+- **« Liste d’index »** (`index-list`) : choisit parmi les index qui ont une
+  colonne d’un type donné (`GET /api/resources/index-kinds`). Lieux ›
+  Environnement s’en sert pour « Fouille » (vide : les items) et « Événement »
+  (`lib/environment-draws.ts`, page Événements).
+- **Index des pages** (`lib/pages-index.ts`, clé `pages`) : un index sans
+  feuille, construit pour chaque lecteur depuis les pages du Worker et le menu
+  d’Eraser. Cartes, survols et vues comme un autre index ; utilisable dans un
+  bloc Vue d’index.
+- **Versions brouillon d’une page** : portée Worker `custom-page-drafts`
+  (`listPageSnapshots`, `savePageSnapshot`), 20 par page, supprimées avec la page.
+
 ## Tabletop
 
 Le tabletop conserve ses pages, routes API, composants Leaflet, styles globaux
