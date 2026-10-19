@@ -5,6 +5,7 @@ import { getDb } from "@/db"
 import { googleDriveAuthorizations, googleOAuthFlows, googleOAuthSettings } from "@/db/schema"
 import { remoteAccountsConfig, remoteAccountsFetch } from "@/lib/accounts-remote"
 import { currentAuthToken } from "@/lib/server-auth"
+import { timedFetch } from "@/lib/timed-fetch"
 
 const AUTHORIZATION_ID = "primary"
 const SETTINGS_ID = "primary"
@@ -119,12 +120,11 @@ async function oauthConfig(redirectUri: string) {
 }
 
 async function tokenRequest(body: URLSearchParams) {
-  const response = await fetch(GOOGLE_TOKEN_URL, {
+  const response = await timedFetch(GOOGLE_TOKEN_URL, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body,
-    signal: AbortSignal.timeout(30_000),
-  })
+  }, 30_000, "GOOGLE_TOKEN")
   const payload = (await response.json()) as GoogleTokenResponse
   if (!response.ok || !payload.access_token) {
     throw new Error(payload.error_description || payload.error || "GOOGLE_TOKEN_EXCHANGE_FAILED")
@@ -532,8 +532,7 @@ export async function googleOAuthAuthorizedFetch(url: string, init: RequestInit 
   const headers = new Headers(init.headers)
   headers.set("authorization", `Bearer ${token}`)
   if (init.body && !headers.has("content-type")) headers.set("content-type", "application/json")
-  const timeout = AbortSignal.timeout(GOOGLE_REQUEST_TIMEOUT_MS)
-  return fetch(url, { ...init, headers, signal: init.signal ? AbortSignal.any([init.signal, timeout]) : timeout })
+  return timedFetch(url, { ...init, headers }, GOOGLE_REQUEST_TIMEOUT_MS, "GOOGLE")
 }
 
 export function randomOAuthState() {

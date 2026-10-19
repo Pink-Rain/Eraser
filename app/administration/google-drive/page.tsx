@@ -4,7 +4,8 @@ import { redirect } from "next/navigation"
 
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
-import { FluidityPanel } from "@/components/eraser/fluidity-panel"
+import { FoldSection } from "@/components/eraser/fold-section"
+import { openSectionsOf, OPEN_SECTIONS_PARAM } from "@/lib/open-sections"
 import { GoogleDriveManager } from "@/components/eraser/google-drive-manager"
 import { PerformancePanel } from "@/components/eraser/performance-panel"
 import { SheetDiagnosticsGrid } from "@/components/eraser/sheet-diagnostics-grid"
@@ -25,7 +26,7 @@ import { authorizedAccount, currentAuthToken } from "@/lib/server-auth"
 
 export const dynamic = "force-dynamic"
 
-async function GoogleDriveData({ origin, oauthStatus }: { origin: string; oauthStatus?: string }) {
+async function GoogleDriveData({ origin, oauthStatus, open }: { origin: string; oauthStatus?: string; open: Set<string> }) {
   const sessionToken = await currentAuthToken()
   const [configured, oauthSettings, authorization] = await Promise.all([
     googleOAuthConfigured(sessionToken),
@@ -36,9 +37,14 @@ async function GoogleDriveData({ origin, oauthStatus }: { origin: string; oauthS
   let files: Awaited<ReturnType<typeof listDriveFiles>> = []
   let duplicateGroups: Awaited<ReturnType<typeof listDriveSpreadsheetDuplicates>> = []
   let loadError: string | null = null
-  if (configured && authorization) {
+  // Le Drive n'est parcouru que pour les parties dépliées qui le montrent.
+  const openSections = { files: open.has("fichiers"), duplicates: open.has("doublons") }
+  if (configured && authorization && (openSections.files || openSections.duplicates)) {
     try {
-      ;[files, duplicateGroups] = await Promise.all([listDriveFiles(), listDriveSpreadsheetDuplicates()])
+      ;[files, duplicateGroups] = await Promise.all([
+        openSections.files ? listDriveFiles() : Promise.resolve([] as typeof files),
+        openSections.duplicates ? listDriveSpreadsheetDuplicates() : Promise.resolve([] as typeof duplicateGroups),
+      ])
     } catch {
       loadError = "Le compte est relié, mais son Drive n’a pas pu être chargé. Tu peux le reconnecter."
     }
@@ -54,6 +60,7 @@ async function GoogleDriveData({ origin, oauthStatus }: { origin: string; oauthS
       duplicateGroups={duplicateGroups}
       loadError={loadError}
       oauthStatus={oauthStatus}
+      openSections={openSections}
     />
   )
 }
@@ -63,9 +70,8 @@ async function SheetDiagnostics({ writeTest }: { writeTest: boolean }) {
   if (!diagnostics) return null
   const broken = diagnostics.filter((item) => item.status !== "ok")
   return (
-    <section className="mt-10 rounded-2xl border bg-card/70 p-5 sm:p-6">
-      <h2 className="font-display text-2xl font-semibold">Diagnostic des feuilles</h2>
-      <p className="mt-1 text-sm text-muted-foreground">
+    <>
+      <p className="text-sm text-muted-foreground">
         {broken.length
           ? `${broken.length} feuille${broken.length > 1 ? "s" : ""} en défaut. L’erreur brute de Google est indiquée telle quelle.`
           : writeTest
@@ -77,14 +83,14 @@ async function SheetDiagnostics({ writeTest }: { writeTest: boolean }) {
         <span className="ml-2 text-muted-foreground">Le test d’écriture ajoute une ligne témoin dans chaque feuille puis l’efface.</span>
       </p>
       <div className="mt-4"><SheetDiagnosticsGrid diagnostics={diagnostics} /></div>
-    </section>
+    </>
   )
 }
 
 export default async function GoogleDriveAdministrationPage({
   searchParams,
 }: {
-  searchParams: Promise<{ google?: string; test?: string }>
+  searchParams: Promise<{ google?: string; test?: string; [OPEN_SECTIONS_PARAM]?: string }>
 }) {
   const admin = await authorizedAccount(["admin"])
   if (!admin) redirect("/")
@@ -96,6 +102,10 @@ export default async function GoogleDriveAdministrationPage({
   const query = await searchParams
   const oauthStatus = query.google
   const writeTest = query.test === "ecriture"
+  // Les parties repliées ne sont pas calculées : la page s'ouvre sans lire tout le Drive ni
+  // diagnostiquer chaque feuille. Lancer le test d'écriture déplie le diagnostic.
+  const open = openSectionsOf(query[OPEN_SECTIONS_PARAM])
+  if (writeTest) open.add("diagnostic")
   return (
     <AuthenticatedShell pageLabel="Google Drive et Sheets" roles={["admin"]}>
       <div className="w-full flex-1 px-5 py-9 sm:px-8 md:py-14">
@@ -110,14 +120,19 @@ export default async function GoogleDriveAdministrationPage({
           tout ce Drive pour lire, importer, créer et modifier les fichiers nécessaires.
         </p>
         <Suspense fallback={<DeferredContentLoading label="Chargement du Drive…" />}>
-          <GoogleDriveData origin={origin} oauthStatus={oauthStatus} />
+          <GoogleDriveData origin={origin} oauthStatus={oauthStatus} open={open} />
         </Suspense>
-        {/* Sans clé : changer de test garde le tableau affiché jusqu'au nouveau résultat. */}
-        <Suspense fallback={<DeferredContentLoading label="Diagnostic des feuilles…" />}>
-          <SheetDiagnostics writeTest={writeTest} />
-        </Suspense>
-        <FluidityPanel />
-        <PerformancePanel />
+        <div className="mt-6 grid gap-6">
+          <FoldSection id="diagnostic" serverOpen={open.has("diagnostic")} eyebrow="Vérification" title="Diagnostic des feuilles" summary="Chaque feuille d’Eraser est lue (et, au choix, écrite) pour vérifier qu’elle répond.">
+            {/* Sans clé : changer de test garde le tableau affiché jusqu'au nouveau résultat. */}
+            <Suspense fallback={<DeferredContentLoading label="Diagnostic des feuilles…" className="mt-0" />}>
+              <SheetDiagnostics writeTest={writeTest} />
+            </Suspense>
+          </FoldSection>
+          <FoldSection id="lenteurs" eyebrow="Serveur local" title="Lenteurs" summary="Les appels à Google et au serveur partagé qui ont fait attendre les pages.">
+            <PerformancePanel embedded />
+          </FoldSection>
+        </div>
       </div>
     </AuthenticatedShell>
   )

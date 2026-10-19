@@ -23,6 +23,7 @@ import {
   PanelLeft,
   Star,
   FlaskConical,
+  Gauge,
   Home,
   LibraryBig,
   LoaderCircle,
@@ -93,6 +94,7 @@ import { PageSearch, ShellBreadcrumb, VolumeControl } from "@/components/eraser/
 
 const AdminTodoMenu = dynamic(() => import("@/components/eraser/admin-todo-menu").then((module) => module.AdminTodoMenu))
 const GlobalTableChat = dynamic(() => import("@/components/eraser/global-table-chat").then((module) => module.GlobalTableChat), { ssr: false })
+const FluidityDialog = dynamic(() => import("@/components/eraser/fluidity-panel").then((module) => module.FluidityDialog), { ssr: false })
 const ItemNotifications = dynamic(() => import("@/components/eraser/item-notifications").then((module) => module.ItemNotifications), { ssr: false })
 
 const PageLabelContext = createContext<(label: string | null) => void>(() => undefined)
@@ -312,6 +314,7 @@ export function AppShell({
     return indexDirectoryOrder(indexLayout).flatMap((key) => byKey.get(key) ?? [])
   }, [indexEntries, indexLayout])
   const [accountOpen, setAccountOpen] = useState(false)
+  const [fluidityOpen, setFluidityOpen] = useState(false)
   const openAccount = useCallback(() => setAccountOpen(true), [])
   const [avatarVersion, setAvatarVersion] = useState(0)
   const characterStorageKey = `eraser-character:${user.email}`
@@ -836,9 +839,10 @@ export function AppShell({
         <SidebarFooter className="border-t border-sidebar-border p-3">
           <SidebarMenu>
             <SidebarMenuItem>
-              {/* Un clic ouvre le profil (personnages, campagnes, succès) ; la roue, les
-                  réglages du compte : avatar, pseudo, e-mail, mot de passe, déconnexion. */}
-              <SidebarMenuButton asChild size="lg" tooltip="Mon profil" isActive={pathname === "/profil"} className="pr-9">
+              {/* Un clic ouvre le profil (personnages, campagnes, succès) ; la jauge, le relevé de
+                  fluidité de cet ordinateur ; la roue, les réglages du compte : avatar, pseudo,
+                  e-mail, mot de passe, déconnexion. */}
+              <SidebarMenuButton asChild size="lg" tooltip="Mon profil" isActive={pathname === "/profil"} className="pr-15">
                 <IntentLink href="/profil" data-tab-href="/profil" data-tab-label="Mon profil">
                   <AccountAvatar user={user} version={avatarVersion} className="size-8 shrink-0" />
                   <div className="min-w-0 flex-1 text-left">
@@ -849,11 +853,15 @@ export function AppShell({
                   </div>
                 </IntentLink>
               </SidebarMenuButton>
+              <SidebarMenuAction onClick={() => setFluidityOpen(true)} aria-haspopup="dialog" aria-label="Fluidité de cet ordinateur" title="Fluidité de cet ordinateur" className="right-7 text-sidebar-foreground/55">
+                <Gauge />
+              </SidebarMenuAction>
               <SidebarMenuAction onClick={() => setAccountOpen(true)} aria-haspopup="dialog" aria-label="Réglages du compte" title="Réglages du compte" className="text-sidebar-foreground/55">
                 <Settings2 />
               </SidebarMenuAction>
             </SidebarMenuItem>
           </SidebarMenu>
+          {fluidityOpen && <FluidityDialog open onOpenChange={setFluidityOpen} />}
           {accountOpen && <AccountDialog open onOpenChange={setAccountOpen} user={user} roleLabel={roleLabels[user.role]} avatarVersion={avatarVersion} onAvatarChange={() => setAvatarVersion(Date.now())} onSignOut={() => void signOut()} />}
         </SidebarFooter>
       </Sidebar>

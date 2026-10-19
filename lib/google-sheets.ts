@@ -34,6 +34,7 @@ import { isEntityWorldIndexKey, worldIndexDefinitions, type BuiltinWorldIndexKey
 import { foldName, isImageSource, type IndexColumnSpec } from "@/lib/index-columns"
 import { forgetJdrSheet, getJdrSheet, saveJdrSheet, type JdrSheetKey, type JdrSheetRecord } from "@/lib/jdr-sheets"
 import { forgetGoogleAccessToken, googleOAuthAuthorizedFetch, warmGoogleOAuthAccessToken } from "@/lib/google-oauth"
+import { discardResponse } from "@/lib/timed-fetch"
 import { acquireSheetsSlot, asBackgroundGoogleWork, googleQuotaUser, noteQuotaRefusal, noteQuotaSuccess, QUOTA_ERROR } from "@/lib/google-quota"
 import { sharedClassCatalog } from "@/lib/class-catalog-share"
 import { onForgetGoogleData } from "@/lib/data-refresh"
@@ -565,6 +566,7 @@ async function googleSheetsFetchDirect(path: string, init?: RequestInit) {
     if (response.status === 401 && !renewed) {
       renewed = true
       forgetGoogleAccessToken()
+      await discardResponse(response)
       continue
     }
     // 429 : Google a refusé sans rien faire. Une erreur 5xx, elle, peut arriver après coup :
@@ -572,18 +574,19 @@ async function googleSheetsFetchDirect(path: string, init?: RequestInit) {
     // supprimée, ligne ajoutée en double).
     if (response.status === 429) {
       noteQuotaRefusal(response.headers.get("retry-after"))
-      if (attempt < 8) continue
+      if (attempt < 8) { await discardResponse(response); continue }
       break
     }
     if (response.ok) noteQuotaSuccess()
-    if ([500, 502, 503, 504].includes(response.status) && repeatable && attempt < 2) { await wait(250 * (attempt + 1)); continue }
+    if ([500, 502, 503, 504].includes(response.status) && repeatable && attempt < 2) { await discardResponse(response); await wait(250 * (attempt + 1)); continue }
     break
   }
   if (!response?.ok) {
     const status = response?.status ?? 0
     let detail = ""
     try {
-      const payload = await response?.clone().json() as { error?: { message?: string } } | undefined
+      // Lue une fois pour toutes : une réponse laissée à moitié lue garde son minuteur en vie.
+      const payload = await response?.json() as { error?: { message?: string } } | undefined
       detail = payload?.error?.message?.trim() || ""
     } catch { /* réponse Google non JSON */ }
     throw new Error(`SHEETS_API_ERROR:${status}${detail ? `:${detail}` : ""}`)
@@ -2686,10 +2689,24 @@ export async function listClasses() {
         throw error
       }
     }
-    const current = rows
-    runInBackground(asBackgroundGoogleWork(() => refreshClassIndex(current)), "CLASS_INDEX_REFRESH_FAILED")
+    refreshClassIndexSoon(rows)
   }
   return classRecordsFromIndex(rows)
+}
+
+/**
+ * La relecture des classes en arrière-plan, pas avant une minute après un échec : chaque page
+ * qui lisait les classes en relançait une, et quand Google refusait (quota), chacune échouait
+ * aussitôt pour recommencer à la page suivante.
+ */
+let classRefreshRetryAt = 0
+
+function refreshClassIndexSoon(current: (typeof classIndex.$inferSelect)[]) {
+  if (Date.now() < classRefreshRetryAt) return
+  runInBackground(asBackgroundGoogleWork(() => refreshClassIndex(current)).then(
+    () => { classRefreshRetryAt = 0 },
+    (error) => { classRefreshRetryAt = Date.now() + 60_000; throw error },
+  ), "CLASS_INDEX_REFRESH_FAILED")
 }
 
 export async function listClassOptions() {

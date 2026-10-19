@@ -123,8 +123,10 @@
 - `vite.config.ts` retouche le routeur de vinext 0.0.50 (`eraserVinextRouter`) : à vérifier, et
   à refaire si besoin, à toute montée de version de vinext. Voir `ARCHITECTURE.md`.
 - Le React Compiler est actif : garder le code conforme aux règles `react-hooks/*` du lint.
-- Mesurer avant et après : Administration › « Fluidité de cet ordinateur »
-  (`lib/fluidity-journal.ts`).
+- Mesurer avant et après : la jauge « Fluidité de cet ordinateur » du pied de la barre latérale
+  (`lib/fluidity-journal.ts`), ouverte à chaque compte : demander leur relevé aux joueurs.
+- Un réglage lu sur le serveur partagé à chaque page passe par `lib/shared-snapshot.ts` : jamais
+  de lecture qui attend le Worker toutes les 30 s.
 
 ## Tabletop et Roll20
 

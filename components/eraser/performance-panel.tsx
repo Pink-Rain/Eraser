@@ -18,7 +18,7 @@ const kindLabels: Record<string, string> = { sheets: "Google Sheets", drive: "Go
  * Ce qui fait attendre les pages : les appels à Google et au serveur partagé depuis le
  * démarrage du serveur local, et les plus lents d'entre eux.
  */
-export function PerformancePanel() {
+export function PerformancePanel({ embedded = false }: { embedded?: boolean } = {}) {
   const [report, setReport] = useState<Report | null>(null)
   const [pending, setPending] = useState(false)
   const load = useCallback(async () => {
@@ -37,11 +37,12 @@ export function PerformancePanel() {
       .catch(() => { /* pas de relevé */ })
     return () => { active = false }
   }, [])
-  return <section className="mt-10 rounded-2xl border bg-card/70 p-5 sm:p-6">
+  // Dans une partie repliable (`embedded`) : son titre est celui de la partie.
+  return <section className={embedded ? "" : "mt-10 rounded-2xl border bg-card/70 p-5 sm:p-6"}>
     <div className="flex flex-wrap items-start gap-3">
       <div className="min-w-0 flex-1">
-        <h2 className="flex items-center gap-2 font-display text-2xl font-semibold"><Gauge className="size-5 text-primary" />Lenteurs</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Les appels qui ont fait attendre les pages depuis le démarrage d’Eraser{report ? ` (${new Date(report.startedAt).toLocaleString("fr-FR")})` : ""} : plus de {((report?.slowMs ?? 700) / 1000).toLocaleString("fr-FR")} s.</p>
+        {!embedded && <h2 className="flex items-center gap-2 font-display text-2xl font-semibold"><Gauge className="size-5 text-primary" />Lenteurs</h2>}
+        <p className={embedded ? "text-sm text-muted-foreground" : "mt-1 text-sm text-muted-foreground"}>Les appels qui ont fait attendre les pages depuis le démarrage d’Eraser{report ? ` (${new Date(report.startedAt).toLocaleString("fr-FR")})` : ""} : plus de {((report?.slowMs ?? 700) / 1000).toLocaleString("fr-FR")} s.</p>
       </div>
       <Button type="button" variant="outline" size="sm" onClick={() => void load()} disabled={pending}>{pending ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}Actualiser</Button>
     </div>

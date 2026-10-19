@@ -6,6 +6,7 @@
 // shared Worker instead of touching the local database. When they are not
 // configured (the historical Sites Cloudflare deployment), nothing changes.
 import { traced } from "@/lib/perf-trace"
+import { timedFetch } from "@/lib/timed-fetch"
 
 export type RemoteAccountsConfig = {
   baseUrl: string
@@ -36,12 +37,11 @@ export async function remoteAccountsFetch(
   // Le signal empêche aussi vinext de resservir la même réponse GET pendant tout le rendu
   // d'une page : lib/shared-reads.ts relit plusieurs fois le même enregistrement en attendant
   // la copie d'une autre installation, et ne la verrait jamais arriver.
-  const response = await traced("partagé", `${init.method} ${path}`, () => fetch(`${config.baseUrl}${path}`, {
+  const response = await traced("partagé", `${init.method} ${path}`, () => timedFetch(`${config.baseUrl}${path}`, {
     method: init.method,
     headers,
     body: requestBody,
-    signal: AbortSignal.timeout(15_000),
-  }), (reply) => String(reply.status))
+  }, 15_000, "SHARED_SERVER"), (reply) => String(reply.status))
   const payload = await response.json().catch(() => null)
   if (!response.ok) {
     const message =

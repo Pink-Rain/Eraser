@@ -11,6 +11,7 @@
 import { cleanSavedView, cleanStoredSavedView, mergeSavedViews, remapSavedViewSources, type SavedView, type StoredSavedView } from "@/lib/index-saved-views"
 import type { IndexWindow } from "@/lib/index-windows"
 import { deleteSharedRecord, listSharedRecords, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
+import { sharedSnapshot } from "@/lib/shared-snapshot"
 
 const SCOPE = "index-saved-views"
 const SEPARATOR = "::"
@@ -19,8 +20,6 @@ const MAX_VALUE = 20_000
 function recordKey(index: string, id: string) {
   return `${index.trim()}${SEPARATOR}${id}`
 }
-
-let cache: { expiresAt: number; promise: Promise<Map<string, StoredSavedView[]>> } | null = null
 
 async function readAll() {
   const result = new Map<string, StoredSavedView[]>()
@@ -39,12 +38,11 @@ async function readAll() {
   return result
 }
 
+// Servie tout de suite, relue derrière passé 30 s (lib/shared-snapshot.ts).
+const snapshot = sharedSnapshot(readAll)
+
 function all(fresh = false) {
-  if (!fresh && cache && cache.expiresAt > Date.now()) return cache.promise
-  const promise = readAll()
-  cache = { expiresAt: Date.now() + 30_000, promise }
-  promise.catch(() => { if (cache?.promise === promise) cache = null })
-  return promise
+  return snapshot.read(fresh)
 }
 
 /** Ce que le serveur partagé garde pour un index (vues et retraits). Rien sans serveur partagé. */
@@ -73,7 +71,7 @@ export async function saveIndexSavedView(input: unknown): Promise<SavedView> {
   const value = JSON.stringify(view)
   if (value.length > MAX_VALUE) throw new Error("INDEX_SAVED_VIEW_TOO_LARGE")
   await writeSharedRecord(SCOPE, recordKey(view.index, view.id), value)
-  cache = null
+  snapshot.forget()
   return view
 }
 
@@ -83,7 +81,7 @@ export async function removeIndexSavedView(index: string, id: string) {
   const clean = cleanStoredSavedView({ id, removed: true })
   if (!index.trim() || !clean) throw new Error("INDEX_SAVED_VIEW_INVALID")
   await writeSharedRecord(SCOPE, recordKey(index, clean.id), JSON.stringify(clean))
-  cache = null
+  snapshot.forget()
 }
 
 /**
@@ -93,7 +91,7 @@ export async function removeIndexSavedView(index: string, id: string) {
 export async function forgetIndexSavedViews(index: string) {
   if (!sharedStoreAvailable()) throw new Error("INDEX_SAVED_VIEWS_UNAVAILABLE")
   for (const entry of await listStoredSavedViews(index, true)) await deleteSharedRecord(SCOPE, recordKey(index, entry.id))
-  cache = null
+  snapshot.forget()
 }
 
 /** Les vues enregistrées d'un index qui suivent leurs tableaux (regroupement des index d'objets). */
@@ -102,6 +100,6 @@ export async function remapIndexSavedViewSources(index: string, mapping: Map<str
   const views = (await listStoredSavedViews(index, true)).filter((entry): entry is SavedView => !("removed" in entry))
   const moved = remapSavedViewSources(views, mapping)
   for (const view of moved) await writeSharedRecord(SCOPE, recordKey(index, view.id), JSON.stringify(view))
-  if (moved.length) cache = null
+  if (moved.length) snapshot.forget()
   return moved.length
 }

@@ -13,7 +13,8 @@ export function WriteTestLink({ writeTest }: { writeTest: boolean }) {
   const [pendingFor, setPendingFor] = useState<boolean | null>(null)
   // Le test demandé est affiché : le lien redevient normal.
   const pending = pendingFor !== null && pendingFor !== writeTest
-  const href = writeTest ? "/administration/google-drive" : "/administration/google-drive?test=ecriture"
+  // Le diagnostic reste déplié dans les deux sens (components/eraser/fold-section.tsx).
+  const href = writeTest ? "/administration/google-drive?ouvert=diagnostic" : "/administration/google-drive?test=ecriture&ouvert=diagnostic"
   return <a
     href={href}
     aria-busy={pending}

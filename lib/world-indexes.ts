@@ -42,7 +42,7 @@ import type { AccountRecord } from "@/lib/auth-types"
 import { sheetIndexSyncs } from "@/db/schema"
 import { htmlToRichText } from "@/lib/google-sheet-rich-text"
 import { sheetRangeStartRow } from "@/lib/google-sheet-values"
-import { asBackgroundGoogleWork, QUOTA_ERROR } from "@/lib/google-quota"
+import { asBackgroundGoogleWork, isBackgroundGoogleWork, QUOTA_ERROR } from "@/lib/google-quota"
 import { markChecked, recentlyChecked } from "@/lib/sheet-checks"
 import { mustReread } from "@/lib/request-freshness"
 import type { JdrSheetKey } from "@/lib/jdr-sheets"
@@ -227,6 +227,9 @@ async function schemaFor(key: WorldIndexKey, spreadsheetId: string, strict: bool
   try {
     return { all: await readSchema(spreadsheetId), degraded: false }
   } catch (error) {
+    // Une relecture d'arrière-plan refusée par Google (quota) échoue au lieu de remplacer
+    // l'index gardé par un index sans réglages : elle sera refaite, et la page garde le sien.
+    if (isBackgroundGoogleWork() && error instanceof Error && error.message.startsWith(QUOTA_ERROR)) throw error
     console.error("WORLD_INDEX_SCHEMA_READ_FAILED", key, error instanceof Error ? error.message : "UNKNOWN_ERROR")
     return { all: [] as SchemaEntry[], degraded: true }
   }
@@ -871,7 +874,7 @@ export async function getWorldIndex(key: WorldIndexKey, options: { refresh?: boo
       }, (error) => {
         cached.refreshing = false
         // Google saturé : l'index gardé reste servi, la relecture sera retentée plus tard.
-        if (!(error instanceof Error && error.message === QUOTA_ERROR)) cached.refreshFailed = true
+        if (!(error instanceof Error && error.message.startsWith(QUOTA_ERROR))) cached.refreshFailed = true
       })
     }
     return cached.promise

@@ -10,6 +10,7 @@
 import { cleanPresentationPreset, parseTabPresentations, type TabPresentations, type Presentation, type PresentationPreset } from "@/lib/index-presentations"
 import { cleanColumnGroups, cleanStats, cleanStatsRecord, type StatColumnGroup, type StatDefinition } from "@/lib/index-stats"
 import { deleteSharedRecord, listSharedRecords, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
+import { sharedSnapshot } from "@/lib/shared-snapshot"
 
 const SCOPE = "index-presentations"
 const SEPARATOR = "::"
@@ -18,8 +19,6 @@ const MAX_VALUE = 20_000
 function recordKey(index: string, tab: string) {
   return `${index.trim()}${SEPARATOR}${tab.replace(/\s+/g, " ").trim()}`
 }
-
-let cache: { expiresAt: number; promise: Promise<Map<string, Record<string, TabPresentations>>> } | null = null
 
 async function readAll() {
   const result = new Map<string, Record<string, TabPresentations>>()
@@ -38,12 +37,11 @@ async function readAll() {
   return result
 }
 
+// Servie tout de suite, relue derrière passé 30 s (lib/shared-snapshot.ts).
+const snapshot = sharedSnapshot(readAll)
+
 function all(fresh = false) {
-  if (!fresh && cache && cache.expiresAt > Date.now()) return cache.promise
-  const promise = readAll()
-  cache = { expiresAt: Date.now() + 30_000, promise }
-  promise.catch(() => { if (cache?.promise === promise) cache = null })
-  return promise
+  return snapshot.read(fresh)
 }
 
 /** Les présentations enregistrées d'un index, par onglet. Aucune sans serveur partagé. */
@@ -70,9 +68,11 @@ export async function saveIndexPresentations(index: string, changes: Array<{ tab
 
 const PRESET_SCOPE = "index-view-presets"
 
+const presetRecords = sharedSnapshot(() => listSharedRecords(PRESET_SCOPE))
+
 export async function listViewPresets(): Promise<PresentationPreset[]> {
   if (!sharedStoreAvailable()) return []
-  return (await listSharedRecords(PRESET_SCOPE))
+  return (await presetRecords.read())
     .flatMap((record) => {
       let parsed: unknown = null
       try { parsed = JSON.parse(record.value) } catch { return [] }
@@ -93,25 +93,28 @@ export async function saveViewPreset(input: { id?: string; name: string; layout:
   const value = JSON.stringify({ name: clean.name, layout: clean.layout })
   if (value.length > MAX_VALUE) throw new Error("INDEX_PRESENTATIONS_TOO_LARGE")
   await writeSharedRecord(PRESET_SCOPE, id, value)
+  presetRecords.forget()
   return id
 }
 
 export async function deleteViewPreset(id: string) {
   if (!sharedStoreAvailable()) throw new Error("INDEX_PRESENTATIONS_UNAVAILABLE")
   await deleteSharedRecord(PRESET_SCOPE, id)
+  presetRecords.forget()
 }
 
 // ---------- Statistiques d'un index (Modifier › Stats ; l'onglet stat montre les épinglées) ----------
 
 const STATS_SCOPE = "index-stats"
+const statsRecords = sharedSnapshot(() => listSharedRecords(STATS_SCOPE))
 
 /**
  * Les statistiques et les colonnes regroupées d'un index : une entrée `{ stats, groups }`
  * (les entrées d'avant les groupes n'ont que `stats` : elles se lisent telles quelles).
  */
-export async function listIndexStatsRecord(index: string): Promise<{ stats: StatDefinition[]; groups: StatColumnGroup[] }> {
+export async function listIndexStatsRecord(index: string, fresh = false): Promise<{ stats: StatDefinition[]; groups: StatColumnGroup[] }> {
   if (!sharedStoreAvailable() || !index.trim()) return { stats: [], groups: [] }
-  const record = (await listSharedRecords(STATS_SCOPE)).find((entry) => entry.key === index.trim())
+  const record = (await statsRecords.read(fresh)).find((entry) => entry.key === index.trim())
   if (!record) return { stats: [], groups: [] }
   try { return cleanStatsRecord(JSON.parse(record.value)) } catch { return { stats: [], groups: [] } }
 }
@@ -128,10 +131,12 @@ export async function saveIndexStats(index: string, stats: unknown, groups?: unk
   if (!index.trim()) throw new Error("INDEX_PRESENTATIONS_INVALID")
   if (!sharedStoreAvailable()) throw new Error("INDEX_PRESENTATIONS_UNAVAILABLE")
   const clean = cleanStats(stats)
-  const cleanGroups = groups === undefined ? (await listIndexStatsRecord(index)).groups : cleanColumnGroups(groups)
-  if (!clean.length && !cleanGroups.length) { await deleteSharedRecord(STATS_SCOPE, index.trim()); return { stats: [], groups: [] } }
+  // Les groupes gardés se lisent à l'instant : une copie d'avant les aurait écrasés.
+  const cleanGroups = groups === undefined ? (await listIndexStatsRecord(index, true)).groups : cleanColumnGroups(groups)
+  if (!clean.length && !cleanGroups.length) { await deleteSharedRecord(STATS_SCOPE, index.trim()); statsRecords.forget(); return { stats: [], groups: [] } }
   const value = JSON.stringify(cleanGroups.length ? { stats: clean, groups: cleanGroups } : { stats: clean })
   if (value.length > MAX_VALUE) throw new Error("INDEX_STATS_TOO_LARGE")
   await writeSharedRecord(STATS_SCOPE, index.trim(), value)
+  statsRecords.forget()
   return { stats: clean, groups: cleanGroups }
 }

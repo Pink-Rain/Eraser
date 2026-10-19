@@ -236,11 +236,28 @@ n'est pas compilé et garde son comportement.
 ### Données et mesures
 
 - `lib/warm-up.ts` : peu après le lancement par un MJ ou un admin, les index sont lus en
-  arrière-plan, une fois. Les caches de Google (plages, index, schémas, spécificités de
-  classe) rendent leur copie aussitôt et la relisent derrière pendant six heures.
-- Administration › Google Drive et Sheets › « Fluidité de cet ordinateur »
-  (`lib/fluidity-journal.ts`) : clics lents, gels de l'écran, temps de chaque page et
-  attentes du serveur, gardés dans le navigateur et copiables pour être envoyés.
+  arrière-plan, une fois, espacés de quelques secondes ; au premier refus de quota il
+  s'arrête et reprend où il en était cinq minutes plus tard. Les caches de Google (plages,
+  index, schémas, spécificités de classe) rendent leur copie aussitôt et la relisent derrière
+  pendant six heures. Une relecture d'arrière-plan refusée par Google garde l'index en mémoire
+  (jamais remplacé par un index sans réglages) et n'est pas une erreur du journal
+  (`lib/background-work.ts`).
+- Les réglages gardés sur le serveur partagé (mises en page, cartes, présentations, vues,
+  cadenas, presets, statistiques, rangement des index) passent par `lib/shared-snapshot.ts` :
+  copie servie tout de suite, relue derrière passé 30 s ; seules la première lecture, une
+  lecture `fresh` (après ou avant une écriture) et « Actualiser » attendent. La vérification
+  de session (`lib/site-auth.ts`) garde de même sa copie pendant la revérification, pour toutes
+  les requêtes d'une page.
+- `lib/timed-fetch.ts` : le délai des requêtes vers Google et le serveur partagé, arrêté dès
+  la réponse lue ; une réponse qu'on ne lit pas passe par `discardResponse`.
+- Pied de la barre latérale › jauge « Fluidité de cet ordinateur », pour chaque compte
+  (`lib/fluidity-journal.ts`, `components/eraser/fluidity-panel.tsx`) : clics lents, gels de
+  l'écran, temps de chaque page et attentes du serveur, gardés dans le navigateur. « Copier le
+  relevé » y joint le relevé du serveur local (`/api/fluidity` : Google, serveur partagé,
+  refus de quota).
+- `components/eraser/fold-section.tsx` : une partie de page repliable. Avec `serverOpen`, ses
+  parties dépliées sont dans l'adresse (`?ouvert=…`, `lib/open-sections.ts`) et le serveur ne
+  calcule que celles-là (page Google Drive et Sheets).
 
 ## Tabletop
 

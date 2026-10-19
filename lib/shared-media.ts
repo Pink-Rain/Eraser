@@ -9,6 +9,7 @@ import {
   trashDriveFile,
   uploadDriveFile,
 } from "@/lib/google-drive"
+import { discardResponse } from "@/lib/timed-fetch"
 
 // Portraits, bannières et fonds de carte vivaient dans le stockage local de
 // chaque installation : la personne qui envoyait une image était la seule à
@@ -169,6 +170,7 @@ export async function getSharedMedia(key: string) {
       }
       return { body: bytes, httpMetadata: { contentType } }
     }
+    await discardResponse(response)
   }
 
   // Images sent before visuals moved to Drive only exist on the machine that

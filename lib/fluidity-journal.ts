@@ -9,7 +9,7 @@
  *   complet (plus aucun squelette `aria-busy`), avec l'attente du serveur ;
  * - « appel » : une requête vers le serveur local de plus de CALL_MS.
  *
- * Gardé dans ce navigateur seulement (les dernières entrées), affiché par l'Administration,
+ * Gardé dans ce navigateur seulement (les dernières entrées), affiché depuis le pied de la barre latérale (chaque compte),
  * copiable pour être envoyé. Rien ne part ailleurs.
  */
 export type FluidityKind = "clic" | "gel" | "page" | "appel"

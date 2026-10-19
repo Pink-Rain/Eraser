@@ -160,7 +160,9 @@ const SESSION_CACHE_MS = 30_000
 // après une longue pause (fenêtre en arrière-plan) : une session refusée est oubliée dès
 // la réponse, et les changements de rôle vident ce cache directement.
 const SESSION_STALE_MS = 6 * 3_600_000
-const sessionAccountCache = new Map<string, { expiresAt: number; account: Promise<AccountRecord | null> }>()
+// `value` : le compte, une fois la vérification revenue ; il sert pendant la revérification suivante.
+type SessionEntry = { expiresAt: number; account: Promise<AccountRecord | null>; value?: AccountRecord | null }
+const sessionAccountCache = new Map<string, SessionEntry>()
 // La liste des comptes (MJ et administrateurs), gardée une minute par session.
 const ACCOUNTS_CACHE_MS = 60_000
 const accountsCache = new Map<string, { expiresAt: number; accounts: Promise<AccountRecord[]> }>()
@@ -175,28 +177,45 @@ export function forgetSessionAccount(token: string) {
   sessionAccountCache.delete(token)
 }
 
+function sharedServerUnreachable(error: unknown) {
+  if (!(error instanceof Error)) return false
+  return error instanceof TypeError || error.name === "TimeoutError" || error.name === "AbortError" || /^REMOTE_ACCOUNTS_ERROR_5\d\d$/.test(error.message)
+}
+
 export async function accountFromSession(token: string) {
   const remote = remoteAccountsConfig(env)
   if (remote) {
     const cached = sessionAccountCache.get(token)
     if (cached && cached.expiresAt > Date.now()) return cached.account
-    const account = remoteAccountsFetch(remote, "/session", { method: "GET", token })
-      .then((response) => (response as { account: AccountRecord } | null)?.account ?? null)
-      .catch(() => {
-        sessionAccountCache.delete(token)
-        return null
-      })
     if (sessionAccountCache.size >= 200) forgetCachedSessions()
-    sessionAccountCache.set(token, { expiresAt: Date.now() + SESSION_CACHE_MS, account })
-    // Une session déjà vérifiée sert la page tout de suite pendant la revérification :
-    // la page n'attend plus le serveur partagé toutes les 30 s.
-    if (cached && cached.expiresAt + SESSION_STALE_MS > Date.now()) {
-      const previous = await cached.account.catch(() => null)
-      if (previous) {
-        void account.then((fresh) => { if (!fresh) sessionAccountCache.delete(token) })
-        return previous
-      }
+    const fresh = remoteAccountsFetch(remote, "/session", { method: "GET", token })
+      .then((response) => (response as { account: AccountRecord } | null)?.account ?? null)
+    // Une session déjà vérifiée sert la page tout de suite pendant la revérification : la page
+    // n'attend plus le serveur partagé toutes les 30 s. La copie reste en place pendant ce
+    // temps, pour les autres requêtes de la même page aussi (une page en lance plusieurs, qui
+    // attendaient la revérification). Une session refusée est oubliée dès la réponse ; serveur
+    // partagé injoignable, la copie sert encore et la revérification reprend 30 s plus tard.
+    if (cached?.value && cached.expiresAt + SESSION_STALE_MS > Date.now()) {
+      const entry: SessionEntry = { expiresAt: Date.now() + SESSION_CACHE_MS, account: cached.account, value: cached.value }
+      sessionAccountCache.set(token, entry)
+      fresh.then((account) => {
+        if (sessionAccountCache.get(token) !== entry) return
+        if (account) sessionAccountCache.set(token, { expiresAt: Date.now() + SESSION_CACHE_MS, account: Promise.resolve(account), value: account })
+        else sessionAccountCache.delete(token)
+      }, (error) => {
+        // Un refus du serveur partagé (session révoquée) l'oublie aussi ; seul un serveur
+        // injoignable (réseau, délai, panne) laisse la copie servir.
+        if (sessionAccountCache.get(token) === entry && !sharedServerUnreachable(error)) sessionAccountCache.delete(token)
+      })
+      return cached.account
     }
+    const account = fresh.catch(() => {
+      sessionAccountCache.delete(token)
+      return null
+    })
+    const entry: SessionEntry = { expiresAt: Date.now() + SESSION_CACHE_MS, account }
+    sessionAccountCache.set(token, entry)
+    void account.then((value) => { entry.value = value })
     return account
   }
 

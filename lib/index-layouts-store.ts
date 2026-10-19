@@ -10,6 +10,7 @@
 import { parseIndexLayout, parseTabLayouts, type IndexLayout, type LayoutPreset, type NamedLayout, type TabLayouts } from "@/lib/index-layouts"
 import type { VersionMeta } from "@/lib/index-versions"
 import { deleteSharedRecord, listSharedRecords, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
+import { sharedSnapshot } from "@/lib/shared-snapshot"
 
 const SCOPE = "index-layouts"
 const SEPARATOR = "::"
@@ -24,8 +25,6 @@ function recordKey(index: string, tab: string) {
  * Toutes les mises en page, gardées 30 secondes : le survol des références les lit à
  * chaque résolution. Un enregistrement d'ici les relit aussitôt.
  */
-let cache: { expiresAt: number; promise: Promise<Map<string, Record<string, TabLayouts>>> } | null = null
-
 async function readAll() {
   const result = new Map<string, Record<string, TabLayouts>>()
   if (!sharedStoreAvailable()) return result
@@ -43,12 +42,11 @@ async function readAll() {
   return result
 }
 
+// Servie tout de suite, relue derrière passé 30 s (lib/shared-snapshot.ts).
+const snapshot = sharedSnapshot(readAll)
+
 function all(fresh = false) {
-  if (!fresh && cache && cache.expiresAt > Date.now()) return cache.promise
-  const promise = readAll()
-  cache = { expiresAt: Date.now() + 30_000, promise }
-  promise.catch(() => { if (cache?.promise === promise) cache = null })
-  return promise
+  return snapshot.read(fresh)
 }
 
 /** Les mises en page d'un index, par onglet. Aucune sans serveur partagé. */
@@ -96,9 +94,11 @@ function presetOf(id: string, value: string, updatedAt: string): LayoutPreset | 
   return { id, name, kind: parsed.kind, layout, updatedAt }
 }
 
+const presetRecords = sharedSnapshot(() => listSharedRecords(PRESET_SCOPE))
+
 export async function listLayoutPresets(): Promise<LayoutPreset[]> {
   if (!sharedStoreAvailable()) return []
-  return (await listSharedRecords(PRESET_SCOPE))
+  return (await presetRecords.read())
     .flatMap((record) => { const preset = presetOf(record.key, record.value, record.updatedAt); return preset ? [preset] : [] })
     .sort((left, right) => left.name.localeCompare(right.name, "fr"))
 }
@@ -114,10 +114,12 @@ export async function saveLayoutPreset(input: { id?: string; name: string; kind:
   const value = JSON.stringify({ name, kind: input.kind, layout })
   if (value.length > MAX_VALUE) throw new Error("INDEX_LAYOUT_TOO_LARGE")
   await writeSharedRecord(PRESET_SCOPE, id, value)
+  presetRecords.forget()
   return id
 }
 
 export async function deleteLayoutPreset(id: string) {
   if (!sharedStoreAvailable()) throw new Error("INDEX_LAYOUTS_UNAVAILABLE")
   await deleteSharedRecord(PRESET_SCOPE, id)
+  presetRecords.forget()
 }

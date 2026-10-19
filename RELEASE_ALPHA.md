@@ -1,78 +1,54 @@
-# Eraser 0.1.1-alpha.241 — Des clics qui répondent tout de suite
+# Eraser 0.1.1-alpha.242 — Le relevé pour tous, et moins d'attente du serveur partagé
 
 Cette version arrive **sans réinstallation** (enveloppe 10, comme l'alpha 238) : Eraser la
 télécharge, redémarre son serveur et recharge la page tout seul. Rien n'est modifié dans Google
 Sheets.
 
-## Changer de page : tout de suite
+## Le relevé de fluidité, pour chaque joueur
 
-- **Chaque page n'a plus qu'une copie.** Le routeur rangeait une page visitée sous la page d'où
-  l'on venait : vue en venant de l'accueil, elle n'était jamais resservie en venant d'ailleurs.
-  Presque chaque clic repartait donc au serveur. Une page revue s'affiche maintenant aussitôt.
-- **Les copies durent 30 minutes** (au lieu de 5). Une copie d'avant une modification, ou de plus
-  d'une minute, s'affiche quand même tout de suite, puis la page se relit en arrière-plan et se
-  met à jour seule, sans squelette.
-- **Écrire n'oublie plus toutes les pages** : seule celle où l'on vient d'écrire est relue.
-- **Un lien visé se prépare** : dans la barre latérale, un lien survolé un instant précharge sa
-  page ; le clic, qui suit, la trouve prête. Mesuré processeur bridé comme un petit portable :
-  700 à 1 060 ms → 335 à 470 ms. Un clic pendant le préchargement reprend sa réponse au lieu
-  d'en redemander une.
+- Une **jauge** à côté de la roue des réglages du compte, en bas de la barre latérale, ouvre
+  « Fluidité de cet ordinateur » : clics lents, gels de l'écran, temps de chaque page. Chaque
+  compte la voit, joueurs compris ; « Copier le relevé » le met dans le presse-papiers pour
+  l'envoyer.
+- Le relevé copié contient maintenant aussi ce qu'a attendu le serveur local : Google, le serveur
+  partagé, et les refus de quota. On sait ainsi d'où vient chaque attente.
 
-## Des boutons qui ne font plus attendre
+## Google Drive et Sheets : une page qui se replie
 
-- **Inventaire** : +, − et « Retirer » s'affichent aussitôt ; plusieurs clics rapides partent en
-  une seule écriture, et les autres boutons restent cliquables.
-- **Journal** : cocher une quête, supprimer une note.
-- **Créateur de session** : ajouter ou retirer un joueur, un PNJ, un magasin, sans bloquer la
-  page.
-- **Relations** : niveau, note, suppression.
-- **PNJ** : entrer dans le groupe, en sortir, supprimer.
-- **Tableau de bord de campagne** : cacher un personnage, titre et description.
-- Si Google refuse, la chose revient comme elle était et le message dit pourquoi.
+- Chaque partie (configuration, compte Google, liaison des feuilles, doublons, création, fichiers,
+  diagnostic, lenteurs) se replie et se déplie d'un clic. Les parties fermées ne sont même pas
+  calculées : la page s'ouvre tout de suite au lieu d'une dizaine de secondes.
+- Les parties lourdes (fichiers du Drive, doublons, diagnostic) restent ouvertes après un
+  rechargement ; les autres se souviennent de leur pli sur cet ordinateur.
 
-## Les gros index ne figent plus
+## Moins d'attente du serveur partagé
 
-Mesuré sur un banc qui reproduit Eraser avec de vraies quantités (1 800 items, 200 PNJ,
-40 personnages…) et un processeur bridé comme un petit portable.
+Mesuré avec un serveur partagé à 400 ms d'aller-retour, comme Cloudflare vu de chez nous.
 
-- **Index des PNJ** : chaque case de sorts redemandait la liste des sorts au serveur, qui relisait
-  Google et recherchait les doublons à chaque fois — 240 demandes identiques à l'ouverture. Une
-  seule maintenant, servie depuis la mémoire.
-- **Cases à cocher** : la coche de chaque case relisait les styles de la page en apparaissant. Un
-  index à cases cochées les recalculait des milliers de fois ; la coche est désormais dessinée
-  sans ce détour.
-- **Nombres et prix** : mis en forme sans recréer leur format ni relire les unités à chaque case.
-- **Tableau ↔ Cartes** : le bouton change tout de suite, la nouvelle forme se prépare sans geler
-  l'écran.
-- **Tableaux** : 40 lignes d'emblée (un écran et demi), les suivantes par petites tranches en
-  arrière-plan, à mesure qu'on fait défiler.
-- **Onglet Inventaire** : chaque contenant triait tout le catalogue des items à l'ouverture, même
-  recherche fermée ; il ne le fait plus qu'en cherchant.
-- **Tris** : les tris alphabétiques des index, des formules et des statistiques ne recréent plus
-  leur règle de comparaison à chaque paire.
+- **Session** : passé 30 s, la première requête d'une page servait la session connue pendant sa
+  revérification, mais les suivantes de la même page attendaient le serveur partagé. Plus
+  aucune n'attend : 435 ms → 20 ms par requête.
+- **Réglages des index** (mises en page, cartes, vues, cadenas, presets, statistiques,
+  rangement de la page Index) : servis tout de suite et relus derrière, au lieu d'attendre le
+  serveur partagé toutes les 30 s. Les réglages d'un index : 880 ms → 20 ms. Ce que l'on
+  enregistre ici se voit aussitôt ; une modification faite sur un autre ordinateur arrive à la
+  page suivante.
 
-Sur ce banc : Fiche → Items 8,6 s → 2,3 s ; Items → PNJ 7,6 s → 2,0 s ; Tableau ↔ Cartes
-7,8 s → 0,3 s ; onglet Inventaire 2,0 s → 0,3 s ; ouverture complète de l'index des items
-15 s → 7 s, des PNJ 11,6 s → 3,3 s.
+## Le quota Google ménagé
 
-## Un écran plus léger
+- **Préchauffage des index** (alpha 241) : il lisait tous les index d'affilée et épuisait le
+  quota Google commun juste quand le MJ ouvrait ses pages (les `SHEETS_API_ERROR:429` du
+  journal). Il lit maintenant un index toutes les quelques secondes, s'arrête au premier refus,
+  et reprend cinq minutes plus tard où il en était.
+- **Classes** : chaque page qui les lisait relançait leur relecture, même juste après un refus ;
+  elle attend désormais une minute après un échec.
+- Une relecture d'arrière-plan refusée par Google garde l'index tel qu'il est en mémoire au lieu
+  de le remplacer par un index sans ses réglages, et ne remplit plus le journal des erreurs :
+  ce n'est pas une panne, elle sera refaite.
 
-- **React Compiler** : chaque composant ne se redessine plus que si ce qu'il montre a changé.
-- **Mode « Allégés » réparé** : une règle de l'alpha 238 rendait chaque calcul des styles un
-  tiers plus lent, justement sur les petits portables.
-- Les infobulles de la barre latérale ne se calculent plus quand elle est dépliée.
-- Les longues pages ne dessinent leurs sections du bas qu'en s'en approchant.
+## Journal des erreurs
 
-## Données prêtes
-
-- Peu après l'ouverture d'Eraser par un MJ ou un administrateur, les index se lisent en
-  arrière-plan : leur première ouverture est immédiate.
-- Une page revue au cours d'une longue séance (jusqu'à six heures) s'affiche tout de suite et se
-  relit derrière, au lieu d'attendre Google. Aucune lecture Google de plus. « Actualiser » (F5)
-  relit toujours tout de suite.
-
-## Mesurer chez soi
-
-- Administration › Google Drive et Sheets › **Fluidité de cet ordinateur** : les clics lents, les
-  gels de l'écran, le temps de chaque page et les attentes du serveur, gardés sur cet ordinateur.
-  « Copier le relevé » permet de l'envoyer pour viser la prochaine lenteur.
+- Les « Erreur non rattrapée : TimeoutError » anonymes : le délai d'une requête vers Google ou le
+  serveur partagé courait encore après la réponse, et se déclenchait parfois sur une réponse
+  jamais lue (un refus de Google rejoué). Il s'arrête maintenant dès la réponse lue, les
+  réponses écartées sont libérées, et un vrai délai dépassé dit quelle requête n'a pas répondu.

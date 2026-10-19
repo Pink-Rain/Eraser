@@ -9,6 +9,7 @@ import { cleanTabLocks, tabLocksOf, type TabLocks } from "@/lib/index-locks"
 // Règle pure, gardée ici pour les lecteurs du serveur ; la page l'importe de lib/index-locks.
 export { tabLocksOf }
 import { deleteSharedRecord, listSharedRecords, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
+import { sharedSnapshot } from "@/lib/shared-snapshot"
 
 const SCOPE = "index-locks"
 const SEPARATOR = "::"
@@ -17,8 +18,6 @@ const MAX_VALUE = 20_000
 function recordKey(index: string, tab: string) {
   return `${index.trim()}${SEPARATOR}${tab.replace(/\s+/g, " ").trim()}`
 }
-
-let cache: { expiresAt: number; promise: Promise<Map<string, Record<string, TabLocks>>> } | null = null
 
 async function readAll() {
   const result = new Map<string, Record<string, TabLocks>>()
@@ -37,12 +36,11 @@ async function readAll() {
   return result
 }
 
+// Servie tout de suite, relue derrière passé 30 s (lib/shared-snapshot.ts).
+const snapshot = sharedSnapshot(readAll)
+
 function all(fresh = false) {
-  if (!fresh && cache && cache.expiresAt > Date.now()) return cache.promise
-  const promise = readAll()
-  cache = { expiresAt: Date.now() + 30_000, promise }
-  promise.catch(() => { if (cache?.promise === promise) cache = null })
-  return promise
+  return snapshot.read(fresh)
 }
 
 /** Les cadenas réglés d'un index, par onglet. Aucun sans serveur partagé (ou s'il ne répond pas). */

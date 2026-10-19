@@ -23,6 +23,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
+import { FoldSection } from "@/components/eraser/fold-section"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { DriveFile } from "@/lib/google-drive"
@@ -60,7 +61,10 @@ export function GoogleDriveManager({
   duplicateGroups,
   loadError,
   oauthStatus,
+  openSections = { files: false, duplicates: false },
 }: {
+  /** Les parties dépliées dont le serveur a lu le contenu (les fichiers et les doublons du Drive). */
+  openSections?: { files: boolean; duplicates: boolean }
   configured: boolean
   callbackUrl: string
   defaultEmail: string
@@ -252,23 +256,15 @@ export function GoogleDriveManager({
         </Alert>
       )}
 
-      <details
-        open={!configured}
-        className="group rounded-2xl border bg-card/90 shadow-[0_10px_35px_rgb(67_50_31/0.06)]"
+      <FoldSection
+        id="configuration"
+        title="Configuration Google Cloud"
+        summary={configured ? "Identifiant OAuth enregistré" : "Étape nécessaire pour activer le bouton"}
+        icon={<KeyRound className="size-5" />}
+        badge={<Badge variant="outline">{configured ? "Prêt" : "À configurer"}</Badge>}
+        defaultOpen={!configured}
       >
-        <summary className="flex cursor-pointer list-none items-center gap-3 p-5 sm:p-6">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-            <KeyRound className="size-5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h2 className="font-display text-xl font-semibold">Configuration Google Cloud</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {configured ? "Identifiant OAuth enregistré" : "Étape nécessaire pour activer le bouton"}
-            </p>
-          </div>
-          <Badge variant="outline">{configured ? "Prêt" : "À configurer"}</Badge>
-        </summary>
-        <div className="border-t px-5 pb-5 pt-5 sm:px-6 sm:pb-6">
+        <div>
           <p className="text-sm leading-6 text-muted-foreground">
             Dans Google Cloud, crée un client OAuth de type « Application Web », puis
             colle ses informations ici. Le secret est chiffré avant d’être enregistré.
@@ -319,23 +315,17 @@ export function GoogleDriveManager({
             </div>
           </form>
         </div>
-      </details>
+      </FoldSection>
 
-      <section className="rounded-2xl border bg-card/90 p-5 shadow-[0_10px_35px_rgb(67_50_31/0.06)] sm:p-6">
-        <div className="flex items-start gap-3">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <ShieldCheck className="size-5" />
-          </div>
-          <div>
-            <h2 className="font-display text-2xl font-semibold">Compte Google dédié</h2>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              Saisis le compte créé uniquement pour Eraser. Cette autorisation donne à
-              l’application l’accès à l’ensemble de son Drive et de ses feuilles Google Sheets.
-            </p>
-          </div>
-        </div>
-
-        <form onSubmit={authorizeGoogle} className="mt-5">
+      <FoldSection
+        id="compte"
+        title="Compte Google dédié"
+        summary={authorization ? `Relié : ${authorization.googleEmail}` : "Saisis le compte créé uniquement pour Eraser. Cette autorisation donne à l’application l’accès à l’ensemble de son Drive et de ses feuilles Google Sheets."}
+        icon={<ShieldCheck className="size-5" />}
+        badge={authorization ? <Badge variant="outline">Connecté</Badge> : undefined}
+        defaultOpen={!authorization}
+      >
+        <form onSubmit={authorizeGoogle}>
           <label htmlFor="google-account" className="text-sm font-medium">
             Adresse du compte Google à configurer
           </label>
@@ -380,12 +370,10 @@ export function GoogleDriveManager({
             </Button>
           </div>
         )}
-      </section>
+      </FoldSection>
 
       {authorization && (
-        <section className="rounded-2xl border bg-card/90 p-5 shadow-[0_10px_35px_rgb(67_50_31/0.06)] sm:p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Migration sûre</p>
-          <h2 className="font-display mt-2 text-2xl font-semibold">Relier les feuilles Eraser existantes</h2>
+        <FoldSection id="relier" eyebrow="Migration sûre" title="Relier les feuilles Eraser existantes">
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             Eraser recherche les feuilles déjà présentes dans ce Drive par leur nom exact et les relie à l’application. Il ne supprime aucun fichier et n’en crée un nouveau que si une feuille indispensable manque réellement.
           </p>
@@ -394,13 +382,11 @@ export function GoogleDriveManager({
             Relier mes feuilles existantes
           </Button>
           {sheetLinkMessage && <p className="mt-3 text-sm text-muted-foreground">{sheetLinkMessage}</p>}
-        </section>
+        </FoldSection>
       )}
 
       {authorization && identityCandidates.length > 0 && (
-        <section className="rounded-2xl border bg-card/90 p-5 shadow-[0_10px_35px_rgb(67_50_31/0.06)] sm:p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Données Google Sheets</p>
-          <h2 className="font-display mt-2 text-2xl font-semibold">Associer mes données existantes</h2>
+        <FoldSection id="associer" eyebrow="Données Google Sheets" title="Associer mes données existantes">
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             Choisis le groupe qui contient tes campagnes ou tes personnages. L’application l’associe uniquement à ton compte local : elle ne contacte aucun site et ne modifie aucune cellule Google Sheets.
           </p>
@@ -434,13 +420,11 @@ export function GoogleDriveManager({
             ))}
           </div>
           {identityMessage && <p className="mt-3 text-sm text-muted-foreground">{identityMessage}</p>}
-        </section>
+        </FoldSection>
       )}
 
       {authorization && (
-        <section className="rounded-2xl border bg-card/90 p-5 shadow-[0_10px_35px_rgb(67_50_31/0.06)] sm:p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Entretien</p>
-          <h2 className="font-display mt-2 text-2xl font-semibold">Doublons Google Sheets</h2>
+        <FoldSection id="doublons" serverOpen={openSections.duplicates} eyebrow="Entretien" title="Doublons Google Sheets">
           <p className="mt-2 text-sm leading-6 text-muted-foreground">Eraser protège automatiquement la feuille enregistrée et propose uniquement les copies redondantes.</p>
           {cleanupMessage && <p className="mt-4 text-sm text-muted-foreground">{cleanupMessage}</p>}
           <div className="mt-5 space-y-4">
@@ -465,15 +449,11 @@ export function GoogleDriveManager({
               </div>
             )) : <div className="rounded-xl border border-dashed px-5 py-8 text-center text-sm text-muted-foreground">Aucun doublon de Google Sheets détecté.</div>}
           </div>
-        </section>
+        </FoldSection>
       )}
 
       {authorization && (
-        <section className="rounded-2xl border bg-card/90 p-5 shadow-[0_10px_35px_rgb(67_50_31/0.06)] sm:p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">
-            Action rapide
-          </p>
-          <h2 className="font-display mt-2 text-2xl font-semibold">Créer une feuille Google Sheets</h2>
+        <FoldSection id="creer" eyebrow="Action rapide" title="Créer une feuille Google Sheets">
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             La nouvelle feuille sera créée directement à la racine du Drive connecté.
           </p>
@@ -491,15 +471,11 @@ export function GoogleDriveManager({
             </Button>
           </form>
           {message && <p className="mt-3 text-sm text-muted-foreground">{message}</p>}
-        </section>
+        </FoldSection>
       )}
 
       {authorization && (
-        <section className="rounded-2xl border bg-card/90 p-5 shadow-[0_10px_35px_rgb(67_50_31/0.06)] sm:p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">
-            Contenu récent
-          </p>
-          <h2 className="font-display mt-2 text-2xl font-semibold">Fichiers du Drive</h2>
+        <FoldSection id="fichiers" serverOpen={openSections.files} eyebrow="Contenu récent" title="Fichiers du Drive">
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             Eraser peut lire, importer, créer et modifier les éléments de ce compte dédié.
           </p>
@@ -536,7 +512,7 @@ export function GoogleDriveManager({
               </div>
             )}
           </div>
-        </section>
+        </FoldSection>
       )}
     </div>
   )

@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from "react"
 import { Check, ClipboardCopy, MousePointerClick, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { clearFluidity, FLUIDITY_EVENT, fluidityEntries, fluiditySummary, type FluidityEntry, type FluidityKind } from "@/lib/fluidity-journal"
 import { effectsAreLight } from "@/lib/visual-effects"
+import { version as appVersion } from "@/package.json"
 
 const kindLabels: Record<FluidityKind, string> = { page: "Changements de page", clic: "Clics lents", gel: "Gels de l'écran", appel: "Attentes du serveur" }
 const kindHints: Record<FluidityKind, string> = {
@@ -24,7 +26,7 @@ function seconds(ms: number) {
  * serveur (lib/fluidity-journal.ts). « Copier » met le relevé dans le presse-papiers, pour
  * l'envoyer à qui cherche les lenteurs.
  */
-export function FluidityPanel() {
+export function FluidityPanel({ inDialog = false }: { inDialog?: boolean }) {
   const [entries, setEntries] = useState<FluidityEntry[]>([])
   const [kind, setKind] = useState<FluidityKind | "all">("all")
   const [order, setOrder] = useState<"recent" | "slow">("recent")
@@ -43,10 +45,14 @@ export function FluidityPanel() {
 
   async function copy() {
     const nav = navigator as Navigator & { deviceMemory?: number }
+    // Ce qu'a attendu le serveur local (Google, serveur partagé) : d'où vient chaque attente.
+    const server = await fetch("/api/fluidity", { cache: "no-store" }).then((response) => response.ok ? response.json() : null).catch(() => null) as unknown
     const report = {
       copiedAt: new Date().toISOString(),
+      version: appVersion,
       computer: { cores: nav.hardwareConcurrency, memoryGb: nav.deviceMemory, lightEffects: effectsAreLight(), screen: `${window.screen.width}×${window.screen.height}@${window.devicePixelRatio}`, userAgent: nav.userAgent },
       summary,
+      server,
       entries,
     }
     try {
@@ -56,11 +62,13 @@ export function FluidityPanel() {
     } catch { /* presse-papiers refusé */ }
   }
 
-  return <section className="mt-10 rounded-2xl border bg-card/70 p-5 sm:p-6">
-    <div className="flex flex-wrap items-start gap-3">
+  const Title = inDialog ? DialogTitle : "h2"
+  const Description = inDialog ? DialogDescription : "p"
+  return <section className={inDialog ? "" : "mt-10 rounded-2xl border bg-card/70 p-5 sm:p-6"}>
+    <div className={`flex flex-wrap items-start gap-3 ${inDialog ? "pr-8" : ""}`}>
       <div className="min-w-0 flex-1">
-        <h2 className="flex items-center gap-2 font-display text-2xl font-semibold"><MousePointerClick className="size-5 text-primary" />Fluidité de cet ordinateur</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Ce que l’on ressent dans cette fenêtre : les clics lents, les gels de l’écran et le temps de chaque page. Gardé sur cet ordinateur ({entries.length} mesure{entries.length > 1 ? "s" : ""}).</p>
+        <Title className="flex items-center gap-2 font-display text-2xl font-semibold"><MousePointerClick className="size-5 text-primary" />Fluidité de cet ordinateur</Title>
+        <Description className="mt-1 text-sm text-muted-foreground">Ce que l’on ressent dans cette fenêtre : les clics lents, les gels de l’écran et le temps de chaque page. Gardé sur cet ordinateur ({entries.length} mesure{entries.length > 1 ? "s" : ""}). « Copier le relevé » le met dans le presse-papiers, pour l’envoyer à qui cherche les lenteurs.</Description>
       </div>
       <Button type="button" variant="outline" size="sm" onClick={() => void copy()} disabled={!entries.length}>{copied ? <Check /> : <ClipboardCopy />}{copied ? "Copié" : "Copier le relevé"}</Button>
       <Button type="button" variant="ghost" size="sm" onClick={clearFluidity} disabled={!entries.length}><Trash2 />Vider</Button>
@@ -95,4 +103,13 @@ export function FluidityPanel() {
       </div>
     </>}
   </section>
+}
+
+/** Le relevé ouvert depuis le pied de la barre latérale, pour chaque compte (joueurs compris). */
+export function FluidityDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  return <Dialog open={open} onOpenChange={onOpenChange}>
+    <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-5xl">
+      <FluidityPanel inDialog />
+    </DialogContent>
+  </Dialog>
 }
