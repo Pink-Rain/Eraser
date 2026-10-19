@@ -4,6 +4,7 @@
 
 import { ObjectText, ObjectTraits } from "@/components/eraser/object-combat-details"
 import dynamic from "next/dynamic"
+import { useEffect } from "react"
 
 import { characteristicColor } from "@/lib/characteristics"
 import { ChevronDown, Heart, PackageOpen, Store, UserRound, X } from "lucide-react"
@@ -124,7 +125,18 @@ function NpcContent({ npc, entity }: { npc: TabletopNpcDetail | null; entity: Ta
   )
 }
 
+/** Combien de fenêtres de détail sont montées : <body> porte l'attribut tant qu'il en reste (app/globals.css). */
+let mountedWindows = 0
+
 export function TabletopDetailWindows({ windows, onClose, onToggle }: Props) {
+  useEffect(() => {
+    mountedWindows += 1
+    document.body.setAttribute("data-tabletop-windows", "")
+    return () => {
+      mountedWindows -= 1
+      if (!mountedWindows) document.body.removeAttribute("data-tabletop-windows")
+    }
+  }, [])
   const expanded = windows.filter((window) => !window.collapsed)
   const collapsed = windows.filter((window) => window.collapsed)
   return (

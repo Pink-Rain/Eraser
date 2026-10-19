@@ -41,6 +41,49 @@ const vinextRouterPatches: Array<{ file: RegExp; find: string; replace: string }
   },
 ]
 
+/**
+ * Les fenêtres et menus Radix rendaient la page inerte en mettant `pointer-events: none` sur
+ * <body> : tout le style de la page était recalculé à chaque ouverture et fermeture. Ils posent
+ * maintenant un calque sous la fenêtre (lib/modal-blocker.ts), sans toucher au style de la page.
+ */
+const radixLayerPatches: Array<{ file: RegExp; find: string; replace: string }> = [
+  {
+    file: /@radix-ui[\\/]react-dismissable-layer[\\/]dist[\\/]index\.mjs$/,
+    find: "var originalBodyPointerEvents;",
+    replace: "var originalBodyPointerEvents;\nvar eraserBlocker = null;",
+  },
+  {
+    file: /@radix-ui[\\/]react-dismissable-layer[\\/]dist[\\/]index\.mjs$/,
+    find: "          originalBodyPointerEvents = ownerDocument.body.style.pointerEvents;\n          ownerDocument.body.style.pointerEvents = \"none\";",
+    replace: "          eraserBlocker = globalThis.__ERASER_BLOCK_OUTSIDE__ ?? null;\n          if (eraserBlocker) eraserBlocker.show(ownerDocument, node);\n          else {\n          originalBodyPointerEvents = ownerDocument.body.style.pointerEvents;\n          ownerDocument.body.style.pointerEvents = \"none\";\n          }",
+  },
+  {
+    file: /@radix-ui[\\/]react-dismissable-layer[\\/]dist[\\/]index\.mjs$/,
+    find: "            ownerDocument.body.style.pointerEvents = originalBodyPointerEvents;",
+    replace: "            if (eraserBlocker) { eraserBlocker.hide(ownerDocument); eraserBlocker = null; }\n            else ownerDocument.body.style.pointerEvents = originalBodyPointerEvents;",
+  },
+]
+
+function eraserRadixLayers(): Plugin {
+  return {
+    name: "eraser-radix-layers",
+    transform(code, id) {
+      const path = id.split("?")[0]
+      const patches = radixLayerPatches.filter((patch) => patch.file.test(path))
+      if (!patches.length) return null
+      let next = code
+      for (const patch of patches) {
+        if (!next.includes(patch.find)) {
+          this.warn(`@radix-ui/react-dismissable-layer a changé (${patch.find.slice(0, 60)}…) : les fenêtres gardent pointer-events sur <body>.`)
+          return null
+        }
+        next = next.replace(patch.find, patch.replace)
+      }
+      return next
+    },
+  }
+}
+
 function eraserVinextRouter(): Plugin {
   return {
     name: "eraser-vinext-router",
@@ -66,14 +109,14 @@ export default defineConfig({
     host: "127.0.0.1",
   },
   resolve: {
-    alias: {
-      "cloudflare:workers": resolve(
-        process.cwd(),
-        "desktop/runtime/cloudflare-workers.ts",
-      ),
-    },
+    alias: [
+      { find: "cloudflare:workers", replacement: resolve(process.cwd(), "desktop/runtime/cloudflare-workers.ts") },
+      // <body> ne défile jamais chez Eraser : rien à retirer, et plus de recalcul de toute la page
+      // à chaque fenêtre (lib/vendor/remove-scroll-bar.ts).
+      { find: /^react-remove-scroll-bar$/, replacement: resolve(process.cwd(), "lib/vendor/remove-scroll-bar.ts") },
+    ],
   },
   // Le React Compiler mémorise chaque composant et chaque calcul de rendu : un clic ne
   // redessine plus que ce qui a vraiment changé, sans memo/useMemo écrits à la main.
-  plugins: [vinext(), babel({ presets: [reactCompilerPreset()] }), eraserVinextRouter()],
+  plugins: [vinext(), babel({ presets: [reactCompilerPreset()] }), eraserVinextRouter(), eraserRadixLayers()],
 });

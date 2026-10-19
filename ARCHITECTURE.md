@@ -258,6 +258,13 @@ n'est pas compilé et garde son comportement.
   l'en-tête `Document-Policy: js-profiling` de `next.config.ts`) : les fonctions qui tournaient,
   et dans le relevé copié quelques caractères de leur code pour les retrouver dans les sources.
   Le panneau ne se redessine pas à chaque mesure (il gelait l'écran, ce qui faisait une mesure).
+- Recalcul du style : changer le style de `<body>` ou un `:has()` large refait le style de toute
+  la page (des dizaines de millisecondes par recalcul sur l'index des items). Les fenêtres et
+  menus Radix posent un calque sous eux au lieu de `pointer-events: none` sur `<body>`
+  (`lib/modal-blocker.ts`, branché dans `@radix-ui/react-dismissable-layer` par
+  `vite.config.ts`) ; `react-remove-scroll-bar` est remplacé par `lib/vendor/remove-scroll-bar.ts`
+  (`<body>` ne défile jamais) ; plus de `body:has(…)` (attribut `data-tabletop-windows`), ni de
+  `:has()` sur la coque de la barre latérale.
 - `components/eraser/fold-section.tsx` : une partie de page repliable. Avec `serverOpen`, ses
   parties dépliées sont dans l'adresse (`?ouvert=…`, `lib/open-sections.ts`) et le serveur ne
   calcule que celles-là (page Google Drive et Sheets).

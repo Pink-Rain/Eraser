@@ -478,13 +478,17 @@ body {
 /*
  * Les fenêtres de détail du tabletop flottent très haut (z 1180). Tant qu'elles sont
  * là, les menus et fenêtres ouverts depuis leur contenu (sac à dos d'un PNJ) passent
- * au-dessus au lieu de s'ouvrir dessous.
+ * au-dessus au lieu de s'ouvrir dessous. L'attribut est posé par TabletopDetailWindows :
+ * un `body:has(…)` faisait revérifier toute la page à chaque élément ajouté ou retiré.
  */
-body:has(.tabletop-detail-windows) :is([data-slot="dialog-overlay"], [data-slot="dialog-content"], [data-slot="alert-dialog-overlay"], [data-slot="alert-dialog-content"]) {
+body[data-tabletop-windows] [data-slot="dialog-overlay"],
+body[data-tabletop-windows] [data-slot="dialog-content"],
+body[data-tabletop-windows] [data-slot="alert-dialog-overlay"],
+body[data-tabletop-windows] [data-slot="alert-dialog-content"] {
   z-index: 1300;
 }
 
-body:has(.tabletop-detail-windows) [data-radix-popper-content-wrapper] {
+body[data-tabletop-windows] [data-radix-popper-content-wrapper] {
   z-index: 1350 !important;
 }
 
@@ -778,5 +782,9 @@ a[href^="/reference/"]:not([data-slot]) {
  * Cartes « Même hauteur » (Modifier › Cartes) : la grille étire chaque case à la hauteur de sa
  * ligne ; la carte, et ce qui l'enveloppe (survol, numéro, case déplaçable), suivent jusqu'en bas.
  */
-.eraser-equal-cards :is(div, span):has(article) { height: 100%; }
-.eraser-equal-cards article { height: 100%; }
+/* « Dans une grille » est vérifié avant le `:has()` : écrite `.eraser-equal-cards :is(div, span):has(article)`,
+   la règle fouillait le contenu de chaque div et span de la page à chaque recalcul de style.
+   `block-size` (la hauteur, ici) empêche la compression de réunir les deux règles en un `:is()`
+   que le navigateur testerait lui aussi sur tous les éléments. */
+:is(div, span):is(.eraser-equal-cards *):has(article) { height: 100%; }
+.eraser-equal-cards article { block-size: 100%; }

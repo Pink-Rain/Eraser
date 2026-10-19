@@ -1,3 +1,6 @@
+// Les fenêtres et menus rendent la page inerte sans recalculer tout son style (lib/modal-blocker.ts).
+import "@/lib/modal-blocker"
+
 /**
  * Appelé par le routeur au moment exact où il part vers une autre adresse (lien, bouton,
  * précédent/suivant). L'application affiche alors tout de suite la page de destination,

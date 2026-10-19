@@ -628,7 +628,8 @@ export function AppShell({
     if (!item.href) return null
     const external = item.href.startsWith("http")
     return <SidebarMenuItem key={item.key}>
-      <SidebarMenuButton asChild tooltip={item.label} isActive={menuItemActive(item, pathname)} className="h-10">
+      {/* La place de l'action « + » (sidebar.tsx ne la devine plus avec un `:has()`, qui faisait recalculer toute la page). */}
+      <SidebarMenuButton asChild tooltip={item.label} isActive={menuItemActive(item, pathname)} className={item.action ? "h-10 pr-8" : "h-10"}>
         {external
           ? <a href={item.href} target="_blank" rel="noreferrer">{menuIcon(item)}<span>{item.label}</span></a>
           : <IntentLink href={item.href}>{menuIcon(item)}<span>{item.label}</span></IntentLink>}
@@ -696,7 +697,7 @@ export function AppShell({
                 <Button
                   variant="ghost"
                   className="size-12 shrink-0 overflow-hidden rounded-xl p-0 hover:bg-transparent group-data-[collapsible=icon]:size-8"
-                  aria-label="Ouvrir mes personnages"
+                  aria-label={viewRole === "admin" ? "Ouvrir mes to-do" : viewRole === "mj" ? "Ouvrir mes campagnes" : "Ouvrir mes personnages"}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src="/eraser-logo.png" alt="" className="size-full object-contain transition-transform hover:scale-105" />

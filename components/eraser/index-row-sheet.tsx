@@ -33,10 +33,15 @@ const SAVE_DELAY = 800
 
 type SaveStatus = "idle" | "saving" | "saved" | "error"
 
-/** Fait sortir le curseur du champ en cours : un texte enrichi enregistre alors ce qui vient d'être tapé. */
+/**
+ * Fait sortir le curseur du champ en cours : un texte enrichi enregistre alors ce qui vient
+ * d'être tapé. Seulement un champ : retirer le focus d'un bouton (« Suivante ») le laissait à la
+ * page, et la fenêtre le reprenait aussitôt en forçant le recalcul de toute la page — un quart à
+ * une demi-seconde par clic sur un gros index.
+ */
 function releaseFocus() {
   const active = document.activeElement
-  if (active instanceof HTMLElement) active.blur()
+  if (active instanceof HTMLElement && (active.isContentEditable || active.matches("input, textarea, select"))) active.blur()
 }
 
 /**
