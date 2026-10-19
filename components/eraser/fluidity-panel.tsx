@@ -1,11 +1,11 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Check, ClipboardCopy, MousePointerClick, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
-import { clearFluidity, FLUIDITY_EVENT, fluidityEntries, fluiditySummary, type FluidityEntry, type FluidityKind } from "@/lib/fluidity-journal"
+import { clearFluidity, FLUIDITY_EVENT, fluidityEntries, fluiditySummary, profiledCode, type FluidityEntry, type FluidityKind } from "@/lib/fluidity-journal"
 import { effectsAreLight } from "@/lib/visual-effects"
 import { version as appVersion } from "@/package.json"
 
@@ -27,15 +27,25 @@ function seconds(ms: number) {
  * l'envoyer à qui cherche les lenteurs.
  */
 export function FluidityPanel({ inDialog = false }: { inDialog?: boolean }) {
-  const [entries, setEntries] = useState<FluidityEntry[]>([])
+  // Monté seulement dans la fenêtre du navigateur (dialogue chargé sans rendu serveur).
+  const [entries, setEntries] = useState<FluidityEntry[]>(() => fluidityEntries())
   const [kind, setKind] = useState<FluidityKind | "all">("all")
   const [order, setOrder] = useState<"recent" | "slow">("recent")
   const [copied, setCopied] = useState(false)
+  // Les mesures arrivées pendant que le panneau est ouvert sont seulement comptées : redessiner
+  // le tableau à chacune gelait l'écran, ce gel devenait une mesure, qui le faisait redessiner…
+  const [waiting, setWaiting] = useState(0)
+  const shownUntil = useRef(entries.at(-1)?.at ?? "")
+  const refresh = () => {
+    const list = fluidityEntries()
+    shownUntil.current = list.at(-1)?.at ?? ""
+    setEntries(list)
+    setWaiting(0)
+  }
   useEffect(() => {
-    const sync = () => setEntries(fluidityEntries())
-    sync()
-    window.addEventListener(FLUIDITY_EVENT, sync)
-    return () => window.removeEventListener(FLUIDITY_EVENT, sync)
+    const count = () => setWaiting(fluidityEntries().filter((entry) => entry.at > shownUntil.current).length)
+    window.addEventListener(FLUIDITY_EVENT, count)
+    return () => window.removeEventListener(FLUIDITY_EVENT, count)
   }, [])
   const summary = useMemo(() => fluiditySummary(entries), [entries])
   const shown = useMemo(() => {
@@ -51,9 +61,12 @@ export function FluidityPanel({ inDialog = false }: { inDialog?: boolean }) {
       copiedAt: new Date().toISOString(),
       version: appVersion,
       computer: { cores: nav.hardwareConcurrency, memoryGb: nav.deviceMemory, lightEffects: effectsAreLight(), screen: `${window.screen.width}×${window.screen.height}@${window.devicePixelRatio}`, userAgent: nav.userAgent },
-      summary,
+      // Tout le relevé, y compris ce qui est arrivé depuis l'ouverture du panneau.
+      summary: fluiditySummary(fluidityEntries()),
       server,
-      entries,
+      // Quelques caractères du code de chaque fonction des gros gels, pour la retrouver.
+      code: await profiledCode(fluidityEntries()).catch(() => ({})),
+      entries: fluidityEntries(),
     }
     try {
       await navigator.clipboard.writeText(JSON.stringify(report, null, 1))
@@ -70,8 +83,8 @@ export function FluidityPanel({ inDialog = false }: { inDialog?: boolean }) {
         <Title className="flex items-center gap-2 font-display text-2xl font-semibold"><MousePointerClick className="size-5 text-primary" />Fluidité de cet ordinateur</Title>
         <Description className="mt-1 text-sm text-muted-foreground">Ce que l’on ressent dans cette fenêtre : les clics lents, les gels de l’écran et le temps de chaque page. Gardé sur cet ordinateur ({entries.length} mesure{entries.length > 1 ? "s" : ""}). « Copier le relevé » le met dans le presse-papiers, pour l’envoyer à qui cherche les lenteurs.</Description>
       </div>
-      <Button type="button" variant="outline" size="sm" onClick={() => void copy()} disabled={!entries.length}>{copied ? <Check /> : <ClipboardCopy />}{copied ? "Copié" : "Copier le relevé"}</Button>
-      <Button type="button" variant="ghost" size="sm" onClick={clearFluidity} disabled={!entries.length}><Trash2 />Vider</Button>
+      <Button type="button" variant="outline" size="sm" onClick={() => void copy()} disabled={!entries.length && !waiting}>{copied ? <Check /> : <ClipboardCopy />}{copied ? "Copié" : "Copier le relevé"}</Button>
+      <Button type="button" variant="ghost" size="sm" onClick={() => { clearFluidity(); refresh() }} disabled={!entries.length && !waiting}><Trash2 />Vider</Button>
     </div>
     <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
       {summary.map((total) => <button key={total.kind} type="button" onClick={() => setKind((current) => current === total.kind ? "all" : total.kind)} aria-pressed={kind === total.kind} className={`rounded-xl border px-4 py-3 text-left text-sm transition-colors ${kind === total.kind ? "border-primary/50 bg-primary/8" : "bg-background/50 hover:bg-muted/50"}`}>
@@ -82,6 +95,7 @@ export function FluidityPanel({ inDialog = false }: { inDialog?: boolean }) {
           : <p className="mt-1.5 text-muted-foreground">Rien de relevé.</p>}
       </button>)}
     </div>
+    {waiting > 0 && <Button type="button" variant="secondary" size="sm" className="mt-3" onClick={refresh}>{waiting} nouvelle{waiting > 1 ? "s" : ""} mesure{waiting > 1 ? "s" : ""} : afficher</Button>}
     {shown.length > 0 && <>
       <div className="mt-4 flex items-center gap-2 text-xs">
         <span className="text-muted-foreground">Trier :</span>
@@ -97,7 +111,7 @@ export function FluidityPanel({ inDialog = false }: { inDialog?: boolean }) {
             <td className="max-w-48 truncate px-3 py-1.5 font-mono text-[11px]" title={entry.path}>{entry.path}</td>
             <td className="max-w-72 break-words px-3 py-1.5 font-mono text-[11px]">{entry.label}</td>
             <td className={`whitespace-nowrap px-3 py-1.5 text-right font-semibold tabular-nums ${entry.ms > 1000 ? "text-destructive" : entry.ms > 300 ? "text-amber-700" : ""}`}>{seconds(entry.ms)}</td>
-            <td className="px-3 py-1.5 text-muted-foreground">{entry.detail}</td>
+            <td className="px-3 py-1.5 text-muted-foreground">{entry.detail}{entry.profile && <span className="block">profil : code {seconds(entry.profile.js)}, hors code {seconds(entry.profile.other)}{entry.profile.self[0] ? ` · surtout ${entry.profile.self[0][0].split(" · ")[0]}` : ""}</span>}</td>
           </tr>)}</tbody>
         </table>
       </div>

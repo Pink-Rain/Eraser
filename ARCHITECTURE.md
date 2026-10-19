@@ -254,7 +254,10 @@ n'est pas compilé et garde son comportement.
   (`lib/fluidity-journal.ts`, `components/eraser/fluidity-panel.tsx`) : clics lents, gels de
   l'écran, temps de chaque page et attentes du serveur, gardés dans le navigateur. « Copier le
   relevé » y joint le relevé du serveur local (`/api/fluidity` : Google, serveur partagé,
-  refus de quota).
+  refus de quota). Un gel de plus de 0,4 s garde son profil (JS Self-Profiling, autorisé par
+  l'en-tête `Document-Policy: js-profiling` de `next.config.ts`) : les fonctions qui tournaient,
+  et dans le relevé copié quelques caractères de leur code pour les retrouver dans les sources.
+  Le panneau ne se redessine pas à chaque mesure (il gelait l'écran, ce qui faisait une mesure).
 - `components/eraser/fold-section.tsx` : une partie de page repliable. Avec `serverOpen`, ses
   parties dépliées sont dans l'adresse (`?ouvert=…`, `lib/open-sections.ts`) et le serveur ne
   calcule que celles-là (page Google Drive et Sheets).

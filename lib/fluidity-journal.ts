@@ -23,6 +23,13 @@ export type FluidityEntry = {
   ms: number
   /** Le détail : traitement du clic, attente du serveur, contenu complet… */
   detail?: string
+  /**
+   * Un gros gel : ce qui tournait pendant ce temps (échantillons toutes les 10 ms). `js` /
+   * `other` : échantillons dans le code / hors du code (styles, mise en page, dessin) ;
+   * `self` : les fonctions en cours, `stack` : les fonctions d'Eraser qui les ont appelées, React
+   * mis à part (« nom · fichier:ligne:colonne »).
+   */
+  profile?: { js: number; other: number; self: Array<[string, number]>; stack: Array<[string, number]> }
 }
 
 const STORAGE_KEY = "eraser:fluidity"
@@ -171,8 +178,10 @@ export function installFluidityJournal() {
     if (entry.duration < FREEZE_MS) return
     const scripts = [...(entry.scripts ?? [])].sort((left, right) => (right.duration ?? 0) - (left.duration ?? 0)).slice(0, 2)
     const label = scripts.map((script) => [script.sourceFunctionName, shortSource(script.sourceURL), script.invoker].filter(Boolean).join(" · ")).join(" | ") || "rendu et mise en page"
-    record({ kind: "gel", label, ms: entry.duration, detail: `bloqué ${Math.round(entry.blockingDuration ?? 0)} ms${scripts.length ? ` · scripts ${scripts.map((script) => `${Math.round(script.duration ?? 0)} ms`).join(", ")}` : ""}` })
+    const recorded = record({ kind: "gel", label, ms: entry.duration, detail: `bloqué ${Math.round(entry.blockingDuration ?? 0)} ms${scripts.length ? ` · scripts ${scripts.map((script) => `${Math.round(script.duration ?? 0)} ms`).join(", ")}` : ""}` })
+    if (entry.duration >= PROFILE_FREEZE_MS) profiledFreezes.push({ start: entry.startTime, end: entry.startTime + entry.duration, entry: recorded })
   })
+  startSampling()
 
   window.addEventListener("eraser:navigation-start", (event) => {
     const to = pathOf((event as CustomEvent<{ url?: string }>).detail?.url ?? "")
@@ -201,6 +210,110 @@ export function installFluidityJournal() {
     } catch { /* adresse illisible : la réponse passe telle quelle */ }
     return response
   }
+}
+
+// ---------------------------------------------------------------------------
+// Profil des gros gels (JS Self-Profiling, autorisé par l'en-tête Document-Policy de
+// next.config.ts). Un échantillonneur tourne par fenêtres de quelques secondes ; une fenêtre
+// sans gros gel est jetée, sinon ses échantillons pendant le gel disent quelles fonctions
+// tournaient. Le relevé copié y joint quelques caractères du code de chacune
+// (`profiledCode`), pour la retrouver dans les sources malgré la compression.
+// ---------------------------------------------------------------------------
+
+const PROFILE_FREEZE_MS = 400
+const SAMPLE_MS = 10
+const WINDOW_MS = 8_000
+
+type ProfilerFrame = { name?: string; resourceId?: number; line?: number; column?: number }
+type ProfilerTrace = { resources: string[]; frames: ProfilerFrame[]; stacks: Array<{ frameId: number; parentId?: number }>; samples: Array<{ timestamp: number; stackId?: number }> }
+type SamplingProfiler = EventTarget & { stop(): Promise<ProfilerTrace> }
+type ProfilerConstructor = new (options: { sampleInterval: number; maxBufferSize: number }) => SamplingProfiler
+
+const profiledFreezes: Array<{ start: number; end: number; entry: FluidityEntry }> = []
+let sampler: SamplingProfiler | null = null
+
+function startSampling() {
+  const Sampler = (window as Window & { Profiler?: ProfilerConstructor }).Profiler
+  if (!Sampler || sampler) return
+  try {
+    sampler = new Sampler({ sampleInterval: SAMPLE_MS, maxBufferSize: Math.ceil(WINDOW_MS / SAMPLE_MS) + 200 })
+  } catch {
+    // Sans l'en-tête Document-Policy (ancienne page, autre navigateur) : pas de profil.
+    return
+  }
+  const current = sampler
+  window.setTimeout(() => {
+    if (sampler !== current) return
+    sampler = null
+    // La fenêtre suivante commence avant que celle-ci soit lue : aucun trou entre les deux.
+    startSampling()
+    void current.stop().then(readFreezes, () => undefined)
+  }, WINDOW_MS)
+}
+
+function frameLabel(trace: ProfilerTrace, frameId: number) {
+  const frame = trace.frames[frameId]
+  if (!frame) return "?"
+  // L'adresse entière du fichier (empreinte comprise) : le relevé copié y relit le code.
+  const file = frame.resourceId !== undefined ? (trace.resources[frame.resourceId] ?? "").replace(window.location.origin, "") : ""
+  return `${frame.name || "(anonyme)"} · ${file}:${frame.line ?? 0}:${frame.column ?? 0}`
+}
+
+function readFreezes(trace: ProfilerTrace) {
+  const first = trace.samples[0]?.timestamp ?? Number.POSITIVE_INFINITY
+  const last = trace.samples.at(-1)?.timestamp ?? 0
+  for (let index = profiledFreezes.length - 1; index >= 0; index -= 1) {
+    const freeze = profiledFreezes[index]
+    if (freeze.end < first - 50) { profiledFreezes.splice(index, 1); continue }
+    if (freeze.start > last) continue
+    const self = new Map<string, number>()
+    const stack = new Map<string, number>()
+    let js = 0
+    let other = 0
+    for (const sample of trace.samples) {
+      if (sample.timestamp < freeze.start || sample.timestamp > freeze.end) continue
+      if (sample.stackId === undefined) { other += 1; continue }
+      js += 1
+      const seen = new Set<string>()
+      for (let id: number | undefined = sample.stackId, depth = 0; id !== undefined && depth < 40; id = trace.stacks[id]?.parentId, depth += 1) {
+        const label = frameLabel(trace, trace.stacks[id]?.frameId ?? -1)
+        if (depth === 0) self.set(label, (self.get(label) ?? 0) + 1)
+        // React lui-même (le fichier « framework ») est partout dans la pile : ce sont les
+        // fonctions d'Eraser qui l'ont fait travailler qui disent quoi corriger.
+        if (!seen.has(label) && !label.includes("/framework-")) { seen.add(label); stack.set(label, (stack.get(label) ?? 0) + 1) }
+      }
+    }
+    const top = (map: Map<string, number>, count: number) => [...map].sort((left, right) => right[1] - left[1]).slice(0, count).map(([label, samples]): [string, number] => [label, samples * SAMPLE_MS])
+    if (js + other) freeze.entry.profile = { js: js * SAMPLE_MS, other: other * SAMPLE_MS, self: top(self, 10), stack: top(stack, 14) }
+    // Fini dans cette fenêtre : plus rien à lire pour lui.
+    if (freeze.end <= last) profiledFreezes.splice(index, 1)
+  }
+  if (!saveTimer) saveTimer = window.setTimeout(() => {
+    saveTimer = 0
+    try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(load())) } catch { /* stockage plein ou indisponible */ }
+  }, 1_000)
+}
+
+/**
+ * Pour le relevé copié : quelques caractères du code autour de chaque fonction des profils
+ * (le code servi est compressé, ses noms raccourcis ; ce morceau permet de la retrouver).
+ */
+export async function profiledCode(list: FluidityEntry[]) {
+  const wanted = new Set(list.flatMap((entry) => [...(entry.profile?.self ?? []), ...(entry.profile?.stack ?? [])].map(([label]) => label)).filter((label) => !label.includes("/framework-")))
+  const files = new Map<string, Promise<string[]>>()
+  const code: Record<string, string> = {}
+  for (const label of wanted) {
+    const match = /· (.+):(\d+):(\d+)$/.exec(label)
+    if (!match || !/\.m?js$/.test(match[1])) continue
+    const [, file, line, column] = match
+    if (!file.startsWith("/")) continue
+    if (!files.has(file)) files.set(file, fetch(file).then((response) => response.ok ? response.text() : "").then((text) => text.split("\n"), () => []))
+    const lines = await files.get(file)!
+    const text = lines[Number(line) - 1] ?? ""
+    const at = Math.max(0, Number(column) - 1)
+    if (text) code[label] = text.slice(at, at + 160)
+  }
+  return code
 }
 
 /** Les chiffres qui résument le relevé : médiane et 9e décile, par sorte. */

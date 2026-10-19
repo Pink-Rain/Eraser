@@ -508,11 +508,13 @@ export function ShopGenerator({ items, loadError = "", pageLinked = "bac-a-sable
   const eventTypes = eventShopTypes(types); const [eventKey, setEventKey] = useState(""); const eventType = eventTypes.find((type) => type.key === eventKey) ?? eventTypes[0]
 
   async function persistDraw(nextShops: GeneratedShop[]) {
-    if (pageLinked === "bac-a-sable") await persistShops("replace", pageLinked, nextShops)
-    else await persistShops("replace-latest", pageLinked, nextShops.map((shop) => ({ ...shop, id: `latest:${shop.id}` })))
+    // Le serveur relit toute la feuille après l'écriture et rend les magasins tels qu'il les y
+    // retrouve (lib/google-sheets.ts, saveGeneratedShops) : les relire encore ici ajoutait un
+    // aller-retour à Google à chaque relance.
     const stored = pageLinked === "bac-a-sable"
-      ? await fetchPersistedShops<GeneratedShop>(pageLinked)
-      : await fetchPersistedShops<GeneratedShop>(pageLinked, { latest: true })
+      ? await persistShops("replace", pageLinked, nextShops)
+      : (await persistShops("replace-latest", pageLinked, nextShops.map((shop) => ({ ...shop, id: `latest:${shop.id}` }))))
+        .map(({ id, key, name, size, cityKey, cityName, items }): GeneratedShop => ({ id: id.slice("latest:".length), key, name, size, cityKey, cityName, items }))
     requirePersistedShops(nextShops, stored, "Le tirage n’est pas revenu de Google Sheets après son enregistrement.")
     setShops(stored)
   }
@@ -536,8 +538,8 @@ export function ShopGenerator({ items, loadError = "", pageLinked = "bac-a-sable
     if (Object.keys(names).length) setShops((current) => current ? withNames(current, names) : current)
     try {
       const npcId = newNpcName ? await createVendor(pageLinked, newNpcName) : chosenNpcId
-      await persistShops(action, pageLinked, selected, npcId)
-      const stored = await fetchPersistedShops<SavedShopRecord>(pageLinked, { inCampaign: action === "add-to-campaign" })
+      // Les magasins tels que le serveur les a retrouvés en relisant la feuille après l'écriture.
+      const stored = await persistShops(action, pageLinked, selected, npcId)
       requirePersistedShops(selected, stored, "Les magasins ne sont pas retrouvés après leur enregistrement.", (candidate) => {
         const saved = candidate as SavedShopRecord
         if (action === "add-to-campaign" && !saved.inCampaign) return false
@@ -618,8 +620,7 @@ export function ShopGenerator({ items, loadError = "", pageLinked = "bac-a-sable
     setPending(true); setError(""); setNotice("")
     try {
       const copies = destinationShops.map((shop) => ({ ...shop, id: crypto.randomUUID() }))
-      await persistShops("save", destinationId, copies)
-      const stored = await fetchPersistedShops(destinationId)
+      const stored = await persistShops("save", destinationId, copies)
       requirePersistedShops(copies, stored, "Les magasins copiés ne sont pas retrouvés dans la campagne.")
       router.refresh()
       setNotice(`${copies.length} magasin${copies.length > 1 ? "s ont" : " a"} été copié${copies.length > 1 ? "s" : ""} dans la campagne.`)
@@ -662,17 +663,27 @@ export function SavedShopCollection({ initialShops, pageLinked, npcs = [], gener
   const cardsMode = mode === "view" ? "none" : mode === "session" ? "locations" : "saved"
   const canAddToSession = mode === "saved" && pageLinked !== "bac-a-sable"
 
-  async function reloadCollection(expected: GeneratedShop[] = []) {
+  async function reloadCollection() {
     const loaded = await fetchPersistedShops<SavedShopRecord>(pageLinked)
-    if (expected.length) requirePersistedShops(expected, loaded, "Le magasin n’est pas retrouvé dans Google Sheets après son enregistrement.")
     const focusedId = mode === "session" ? null : new URLSearchParams(window.location.search).get("shop")
     setShops(shopItemsWithCatalogRichText(focusedId ? loaded.filter((shop) => shop.id === focusedId) : loaded, generatorItems))
     return loaded
   }
 
+  /**
+   * Les magasins tels que le serveur les a retrouvés en relisant la feuille après l'écriture
+   * (saveGeneratedShops) remplacent ceux affichés : relire toute la liste ajoutait un aller-retour
+   * à Google. La page relue ensuite (router.refresh) reprend la liste complète.
+   */
+  function adoptSaved(saved: SavedShopRecord[]) {
+    const byId = new Map(shopItemsWithCatalogRichText(saved, generatorItems).map((shop) => [shop.id, shop]))
+    setShops((current) => [...current.map((shop) => byId.get(shop.id) ?? shop), ...[...byId.values()].filter((shop) => !current.some((candidate) => candidate.id === shop.id) && mode !== "view")])
+  }
+
   async function saveAndReload(updated: GeneratedShop, success: string) {
-    await persistShops("save", pageLinked, [updated])
-    await reloadCollection([updated])
+    const saved = await persistShops("save", pageLinked, [updated])
+    requirePersistedShops([updated], saved, "Le magasin n’est pas retrouvé dans Google Sheets après son enregistrement.")
+    adoptSaved(saved)
     router.refresh()
     setNotice(success)
   }
@@ -685,15 +696,15 @@ export function SavedShopCollection({ initialShops, pageLinked, npcs = [], gener
       // Un marché ambulant envoyé comme événement n'est pas un magasin de la campagne : il est
       // seulement enregistré (sinon le pont Roll20 l'exportait encore une fois retiré de la session).
       const persistAction = action === "add-to-campaign" && sessionList === "events" ? "save" : action
-      await persistShops(persistAction, pageLinked, selected, npcId)
-      const persisted = await fetchPersistedShops<SavedShopRecord>(pageLinked, { inCampaign: persistAction === "add-to-campaign" })
+      // Retrouvés par le serveur en relisant la feuille, avec leur état de campagne et leur PNJ.
+      const persisted = await persistShops(persistAction, pageLinked, selected, npcId)
       requirePersistedShops(selected, persisted, "Le magasin n’est pas retrouvé avec son état de campagne après l’enregistrement.", (candidate) => {
         const saved = candidate as SavedShopRecord
         if (persistAction === "add-to-campaign" && !saved.inCampaign) return false
         return !npcId || saved.npcId === npcId
       })
       if (action === "add-to-campaign" && sessionId) await patchSession(pageLinked, sessionId, sessionList === "events" ? { events: { add: selected.map((shop) => `shop:${shop.id}`) } } : { add: { shopIds: selected.map((shop) => shop.id) } })
-      await reloadCollection()
+      adoptSaved(persisted)
       router.refresh()
       setNotice(action === "add-to-campaign" ? "Ajouté à la session." : "Lien avec le PNJ enregistré.")
       setDialog(null)

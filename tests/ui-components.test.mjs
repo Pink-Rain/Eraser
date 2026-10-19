@@ -303,7 +303,12 @@ test("shop persistence bypasses stale caches and requires a real reread", async 
   assert.match(sheets, /values:batchGetByDataFilter/);
   assert.match(sheets, /dataFilters: \[\{ a1Range: range \}\]/);
   assert.match(route, /url\.searchParams\.get\("view"\) === "latest"/);
-  assert.match(generator, /fetchPersistedShops<GeneratedShop>/);
+  // La relecture qui fait foi est celle du serveur, juste après l'écriture (saveGeneratedShops,
+  // relue sans cache et par le même chemin que la liste) : la page vérifie ce qu'elle rend au
+  // lieu de relire la feuille une seconde fois.
+  assert.match(sheets, /export async function saveGeneratedShops[\s\S]{0,1400}clearSpreadsheetReadCache\(sheet\.spreadsheetId\)\s+const listed = await readShopSheet\(sheet\)/);
+  assert.match(generator, /const stored = pageLinked === "bac-a-sable"\s+\? await persistShops\("replace", pageLinked, nextShops\)/);
+  assert.match(generator, /requirePersistedShops\(nextShops, stored, "Le tirage n’est pas revenu de Google Sheets après son enregistrement\."\)/);
   assert.match(generator, /fetchPersistedShops<SavedShopRecord>/);
   assert.match(generator, /requirePersistedShops\(selected, persisted/);
   assert.match(generator, /router\.refresh\(\)/);
