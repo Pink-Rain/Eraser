@@ -17,6 +17,9 @@ import { parseCardTemplate, type CardTemplate } from "@/lib/index-cards"
 import { cleanViewRoles, isViewRole, type ViewRole } from "@/lib/view-roles"
 import { cleanVersionMeta, type VersionMeta } from "@/lib/index-versions"
 
+// Un comparateur créé une fois : « localeCompare » avec options en recréait un à chaque comparaison.
+const frenchNumericCaseOrder = new Intl.Collator("fr", { numeric: true })
+
 export { cellNumber }
 
 export type AllPresentationKind = "table" | "cards" | "list" | "kanban" | "master-detail" | "calendar" | "dashboard" | "gallery" | "timeline" | "tree" | "codex" | "stats"
@@ -885,7 +888,7 @@ export function groupRowsBy<T>(rows: T[], valueOf: (row: T) => string, order: st
     if (!left.name !== !right.name) return left.name ? -1 : 1
     const leftRank = rank.get(left.name.toLocaleLowerCase("fr")) ?? Number.MAX_SAFE_INTEGER
     const rightRank = rank.get(right.name.toLocaleLowerCase("fr")) ?? Number.MAX_SAFE_INTEGER
-    return leftRank - rightRank || left.name.localeCompare(right.name, "fr", { numeric: true })
+    return leftRank - rightRank || frenchNumericCaseOrder.compare(left.name, right.name)
   })
 }
 

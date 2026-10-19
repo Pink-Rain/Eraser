@@ -19,6 +19,9 @@ import { cellNumber, cellParts } from "@/lib/index-stats"
 import { cn } from "@/lib/utils"
 import { calendarScaleOf, calendarScales, PRESENTATION_ITEM_CARD, type PresentationClick, dashboardTileKinds, dashboardTileValue, DEFAULT_ITEM_CARD, depthPalette, formatPresentationNumber, groupFormulaValue, groupRowsBy, linkedTiles, rowTree, ruleFor, sortLayoutRows, textWithFormulas, toolbarRows, tileGaugeValue, timelineEntries, treeSize, allPresentationKinds, presentationPalette, type CalendarScale, type DashboardTile, type GroupTabs, type KanbanLane, type RowTreeNode, type TabPresentations, type Presentation, type PresentationLook } from "@/lib/index-presentations"
 
+// Un comparateur créé une fois : « localeCompare » avec options en recréait un à chaque comparaison.
+const frenchNumericCaseOrder = new Intl.Collator("fr", { numeric: true })
+
 /**
  * Les présentations d'un onglet-fenêtre autres que le tableau et les cartes : liste,
  * kanban, maître-détail, calendrier, tableau de bord, galerie, chronologie, arborescence,
@@ -1488,7 +1491,7 @@ function CodexLayout(props: PresentationProps) {
   const paper = style === "scroll" || style === "board" || style === "sketch"
   const accent = accentOf(look)
   // Le journal de bord : les fiches dans l'ordre de leur date (sinon l'ordre de la vue).
-  const ordered = useMemo(() => style === "board" && layout.dateColumn ? [...rows].sort((left, right) => { const a = plain(valueOf(left, layout.dateColumn!)), b = plain(valueOf(right, layout.dateColumn!)); const na = cellNumber(a), nb = cellNumber(b); return na !== null && nb !== null ? na - nb : a.localeCompare(b, "fr", { numeric: true }) }) : rows, [layout.dateColumn, rows, style, valueOf])
+  const ordered = useMemo(() => style === "board" && layout.dateColumn ? [...rows].sort((left, right) => { const a = plain(valueOf(left, layout.dateColumn!)), b = plain(valueOf(right, layout.dateColumn!)); const na = cellNumber(a), nb = cellNumber(b); return na !== null && nb !== null ? na - nb : frenchNumericCaseOrder.compare(a, b) }) : rows, [layout.dateColumn, rows, style, valueOf])
   const numberOf = new Map(ordered.map((row, index) => [row, index + 1]))
   const byName = useMemo(() => new Map(rows.map((row) => [fold(plain(nameOf(row))), row])), [nameOf, rows])
   const gaugeRatio = (row: string) => { const gauge = layout.gauge; if (!gauge) return null; const value = cellNumber(plain(valueOf(row, gauge.column))); if (value === null) return null; const max = gauge.maxColumn ? cellNumber(plain(valueOf(row, gauge.maxColumn))) : gauge.max ?? null; return Math.max(0, Math.min(1, max ? value / max : value / 100)) }

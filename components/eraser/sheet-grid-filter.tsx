@@ -8,6 +8,9 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 
+// Un comparateur créé une fois : « localeCompare » avec options en recréait un à chaque comparaison.
+const frenchNumericOrder = new Intl.Collator("fr", { sensitivity: "base", numeric: true })
+
 /**
  * Tri et filtres d'une colonne, comme le menu d'en-tête de Google Sheets — sans les
  * filtres par couleur. Un filtre combine une condition et une liste de valeurs
@@ -65,7 +68,7 @@ function compare(left: string, right: string) {
   const a = number(left)
   const b = number(right)
   if (a !== null && b !== null) return a - b
-  return left.localeCompare(right, "fr", { sensitivity: "base", numeric: true })
+  return frenchNumericOrder.compare(left, right)
 }
 
 export function passesFilter(filter: ColumnFilter | undefined, raw: string) {

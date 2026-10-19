@@ -278,13 +278,18 @@ function CurrencyLine({ slot, container, readOnly, mutate }: { slot: InventorySl
 
 type ContainerCardProps = { container: InventoryContainerRecord; inventory: CharacterInventoryRecord; pendingKey: string; searchOpen: boolean; catalogLoading: boolean; search: string; flat: boolean; readOnly: boolean; transferTargets: InventoryTransferTarget[]; targetsLoading: boolean; setSearch: (value: string) => void; setSearchOpen: (open: boolean) => void; onCreateItem: () => void; onEdit: () => void; ensureTargets: () => Promise<void>; mutate: Mutate }
 
+/** L'ordre alphabétique des items, sans tenir compte des accents ni des majuscules (un seul comparateur). */
+const itemNameOrder = new Intl.Collator("fr", { sensitivity: "base" })
+
 function ContainerCard({ container, inventory, pendingKey, searchOpen, catalogLoading, search, flat, readOnly, transferTargets, targetsLoading, setSearch, setSearchOpen, onCreateItem, onEdit, ensureTargets, mutate }: ContainerCardProps) {
   const presentation = categoryPresentation[container.category]
   const occupiedSlots = container.slots.filter((slot) => slot.item && slot.quantity > 0)
   const normalizedQuery = normalizedSearch(search)
   // Tri alphabétique et plafond large : avec 20 résultats seulement, la plupart du
   // catalogue restait hors d’atteinte tant qu’on ne tapait pas le nom exact.
-  const matchingItems = useMemo(() => inventory.items.filter((item) => flat || canItemGoInInventoryCategory(inventoryKindOf(item), container.category)).filter((item) => !normalizedQuery || normalizedSearch(`${item.name} ${item.type} ${item.subtype}`).includes(normalizedQuery)).sort((left, right) => left.name.localeCompare(right.name, "fr", { sensitivity: "base" })), [container.category, flat, inventory.items, normalizedQuery])
+  // Le catalogue entier (des centaines d'items), filtré et trié pour chaque contenant : seulement
+  // quand sa recherche est ouverte. Calculé d'office, il figeait l'ouverture de l'onglet Inventaire.
+  const matchingItems = useMemo(() => !searchOpen ? [] : inventory.items.filter((item) => flat || canItemGoInInventoryCategory(inventoryKindOf(item), container.category)).filter((item) => !normalizedQuery || normalizedSearch(`${item.name} ${item.type} ${item.subtype}`).includes(normalizedQuery)).sort((left, right) => itemNameOrder.compare(left.name, right.name)), [container.category, flat, inventory.items, normalizedQuery, searchOpen])
   const compatibleItems = matchingItems.slice(0, 80)
   const pending = pendingKey.startsWith(`container:${container.id}`) || container.slots.some((slot) => pendingKey.endsWith(slot.id))
   const purse = container.category === "Bourse" && !flat

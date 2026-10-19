@@ -1,6 +1,9 @@
 import { newIndexId } from "@/lib/index-columns"
 import { appendRows, deleteSheetRowWhere, ensureJdrSheet, ensureNamedColumns, namedAppendRange, namedRowWrites, readNamedSheet, resolveJdrSheet, updateRanges } from "@/lib/google-sheets"
 
+// Un comparateur créé une fois : « localeCompare » avec options en recréait un à chaque comparaison.
+const frenchNumericOrder = new Intl.Collator("fr", { sensitivity: "base", numeric: true })
+
 /**
  * Le glossaire des règles. La feuille « Vocabulaire » a trois colonnes : Nom (l'ancien
  * « Titre », toujours lu sous ce nom), Contenu et ID — c'est aussi l'Index du vocabulaire,
@@ -26,7 +29,7 @@ function normalizeInput(input: { title: string; content: string }) {
 }
 
 function sortVocabulary(entries: VocabularyEntry[]) {
-  return [...entries].sort((left, right) => left.title.localeCompare(right.title, "fr", { sensitivity: "base", numeric: true }))
+  return [...entries].sort((left, right) => frenchNumericOrder.compare(left.title, right.title))
 }
 
 async function vocabularySheet() {

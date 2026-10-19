@@ -15,6 +15,9 @@ import {
   type StatColorMode, type StatColumnGroup, type StatCondition, type StatDefinition, type StatForm, type StatLeaf, type StatOperator, type StatWidth,
 } from "@/lib/index-stats"
 
+// Un comparateur créé une fois : « localeCompare » avec options en recréait un à chaque comparaison.
+const frenchNumericCaseOrder = new Intl.Collator("fr", { numeric: true })
+
 export { FormIcon }
 
 /**
@@ -476,7 +479,7 @@ export function IndexStats({ stats, groups: groupsProp, pinnedOnly = false, sing
     const seen = new Map<string, string>()
     const members = groupOf(groups, column)?.columns ?? [column]
     for (const row of rows) for (const member of members) for (const value of cellParts(readValue(row, member))) if (!seen.has(value.toLocaleLowerCase("fr"))) seen.set(value.toLocaleLowerCase("fr"), value)
-    return [column, [...seen.values()].sort((left, right) => left.localeCompare(right, "fr", { numeric: true })).slice(0, 80)]
+    return [column, [...seen.values()].sort((left, right) => frenchNumericCaseOrder.compare(left, right)).slice(0, 80)]
   })), [conditionColumns, groups, readValue, rows])
   const valuesOf = (column: string) => conditionValues.get(column) ?? []
   const kindOf = (column: string): "number" | "list" | "text" => {

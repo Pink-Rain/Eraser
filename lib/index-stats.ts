@@ -12,6 +12,9 @@
  */
 import { describeCondition, isFilterOperator, matchesCondition, filterOperators, type FilterCondition, type FilterOperator } from "@/lib/index-windows"
 
+// Un comparateur créé une fois : « localeCompare » avec options en recréait un à chaque comparaison.
+const frenchNumericCaseOrder = new Intl.Collator("fr", { numeric: true })
+
 /* ---------- Les cases ---------- */
 
 /** Le texte d'une case, sans balises (une référence garde son libellé). */
@@ -723,7 +726,7 @@ export function frequentKeys<T>(rows: T[], valueOf: CellOf<T>, column: string, l
     counts.set(key, entry)
   }
   if (counts.size <= limit + 1) return null
-  const kept = [...counts.entries()].sort((left, right) => right[1].count - left[1].count || left[1].label.localeCompare(right[1].label, "fr", { numeric: true })).slice(0, limit)
+  const kept = [...counts.entries()].sort((left, right) => right[1].count - left[1].count || frenchNumericCaseOrder.compare(left[1].label, right[1].label)).slice(0, limit)
   return { keep: new Set(kept.map(([key]) => key)), hidden: counts.size - limit }
 }
 
@@ -752,7 +755,7 @@ export function groupStatRows<T>(rows: T[], valueOf: CellOf<T>, column: string, 
   const place = (group: StatGroup<T>) => group.key === "" ? 2 : group.key === STAT_OTHERS ? 1 : 0
   return [...groups.values()].sort((left, right) => place(left) - place(right)
     || (rank.get(left.key) ?? Number.MAX_SAFE_INTEGER) - (rank.get(right.key) ?? Number.MAX_SAFE_INTEGER)
-    || left.label.localeCompare(right.label, "fr", { numeric: true }))
+    || frenchNumericCaseOrder.compare(left.label, right.label))
 }
 
 /** Les lignes d'une valeur (clé) d'une colonne, « Autres » compris. */
@@ -774,7 +777,7 @@ export function statBreakdown<T>(stat: Pick<StatDefinition, "measure" | "field" 
     .map((group) => ({ ...group, value: aggregate(stat, group.rows, valueOf) }))
   if (options.byValue && !options.order?.length) {
     const place = (part: StatPart<T>) => part.key === "" ? 2 : part.key === STAT_OTHERS ? 1 : 0
-    parts.sort((left, right) => place(left) - place(right) || (right.value ?? -Infinity) - (left.value ?? -Infinity) || left.label.localeCompare(right.label, "fr", { numeric: true }))
+    parts.sort((left, right) => place(left) - place(right) || (right.value ?? -Infinity) - (left.value ?? -Infinity) || frenchNumericCaseOrder.compare(left.label, right.label))
   }
   return { parts, hidden: frequent?.hidden ?? 0, keep: options.expanded ? null : frequent?.keep ?? null, revealed: options.expanded && frequent ? (key: string) => key !== "" && key !== STAT_OTHERS && !frequent.keep.has(key) : () => false }
 }

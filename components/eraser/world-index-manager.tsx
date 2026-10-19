@@ -72,6 +72,9 @@ import {
 import type { WorldIndexData, WorldIndexRow, WorldIndexRowRef, WorldIndexTable } from "@/lib/world-indexes"
 import { ReferenceScopeProvider } from "@/components/eraser/reference-menu"
 
+// Un comparateur créé une fois : « localeCompare » avec options en recréait un à chaque comparaison.
+const frenchOrder = new Intl.Collator("fr", { sensitivity: "base" })
+
 // Les fenêtres (« Modifier », guide, fiche d'une créature) ne sont chargées qu'à leur ouverture : la page s'affiche plus vite.
 const IndexEditor = dynamic(() => import("@/components/eraser/index-editor").then((module) => module.IndexEditor), { ssr: false })
 const IndexGuide = dynamic(() => import("@/components/eraser/index-guide").then((module) => module.IndexGuide), { ssr: false })
@@ -396,7 +399,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       const values = column.spec.kind === "choice" && column.spec.allowCustom ? used.get(foldName(column.header)) : undefined
       if (!values?.size) continue
       const known = new Set((column.spec.options ?? []).map((option) => foldName(option.value)))
-      const extra = [...values].filter((value) => !known.has(foldName(value)) && Boolean(known.add(foldName(value)))).sort((left, right) => left.localeCompare(right, "fr", { sensitivity: "base" }))
+      const extra = [...values].filter((value) => !known.has(foldName(value)) && Boolean(known.add(foldName(value)))).sort((left, right) => frenchOrder.compare(left, right))
       if (extra.length) specs.set(`${tab}\u0000${foldName(column.header)}`, { ...column.spec, options: [...(column.spec.options ?? []), ...extra.map((value) => ({ value }))] })
     }
     return specs
@@ -1309,7 +1312,9 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   // La recherche suit la frappe sans la ralentir : le tableau se filtre juste après, et le
   // texte cherché de chaque ligne n'est préparé qu'une fois par lecture de l'index.
   const deferredQuery = useDeferredValue(query)
-  const haystacks = useMemo(() => new Map(viewTables.flatMap((owner) => owner.rows.map((row) => [row, row.values.map(foldName).join("\n")] as const))), [viewTables])
+  // Préparé à la première lettre tapée seulement : l'ouverture d'un gros index n'en paie rien.
+  const searching = deferredQuery.trim() !== ""
+  const haystacks = useMemo(() => searching ? new Map(viewTables.flatMap((owner) => owner.rows.map((row) => [row, row.values.map(foldName).join("\n")] as const))) : null, [searching, viewTables])
   // L'ordre des lignes : en tableau, le tri de chacun (en-têtes), sinon celui de la vue ; sous une
   // autre forme (cartes d'une vue, liste, kanban…), celui de la vue.
   const rowSort = useMemo((): SheetGridSort => {
@@ -1325,7 +1330,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       .filter((row) => !embed || embed.rowFilter((header) => { const column = columnIndexOf(owner, header); return column >= 0 ? row.values[column] ?? "" : "" }))
       // Un onglet de rangement : les lignes qui portent sa valeur (et celles du vrai onglet du même nom).
       .filter((row) => !activeSort || foldName(owner.tabName) === foldName(activeSort.value) || activeSort.columns.some((header) => { const column = columnIndexOf(owner, header); return column >= 0 && foldName((row.values[column] ?? "").replace(/<[^>]+>/g, "")) === foldName(activeSort.value) }))
-      .filter((row) => !folded || (haystacks.get(row) ?? "").includes(folded) || (extras && [OWNER_COLUMN, LINKS_COLUMN].some((key) => foldName(extraText(rowKeyOf(owner.tabName, row.rowNumber), key)).includes(folded))))
+      .filter((row) => !folded || (haystacks?.get(row) ?? "").includes(folded) || (extras && [OWNER_COLUMN, LINKS_COLUMN].some((key) => foldName(extraText(rowKeyOf(owner.tabName, row.rowNumber), key)).includes(folded))))
       .map((row) => ({ key: rowKeyOf(owner.tabName, row.rowNumber), rowNumber: row.rowNumber, tabName: owner.tabName })))
     if (!rowSort) return rows.map(({ key, rowNumber }) => ({ key, rowNumber }))
     // Le tri lit ce que montre la case (résultat d'une formule, choix bien écrit, nom actuel

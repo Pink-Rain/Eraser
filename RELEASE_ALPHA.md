@@ -44,6 +44,15 @@ Mesuré sur un banc qui reproduit Eraser avec de vraies quantités (1 800 items,
 - **Nombres et prix** : mis en forme sans recréer leur format ni relire les unités à chaque case.
 - **Tableau ↔ Cartes** : le bouton change tout de suite, la nouvelle forme se prépare sans geler
   l'écran.
+- **Tableaux** : 40 lignes d'emblée (un écran et demi), les suivantes par petites tranches en
+  arrière-plan, à mesure qu'on fait défiler.
+- **Onglet Inventaire** : chaque contenant triait tout le catalogue des items à l'ouverture, même
+  recherche fermée ; il ne le fait plus qu'en cherchant.
+- **Tris** : les tris alphabétiques des index, des formules et des statistiques ne recréent plus
+  leur règle de comparaison à chaque paire.
+
+Sur ce banc : Fiche → Items 8,6 s → 2,3 s ; Items → PNJ 7,6 s → 2,0 s ; Tableau ↔ Cartes
+7,8 s → 0,3 s ; ouverture complète de l'index des items 15 s → 6,4 s, des créatures 6,5 s → 0,9 s.
 
 ## Un écran plus léger
 

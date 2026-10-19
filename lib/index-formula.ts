@@ -23,6 +23,9 @@ import {
 import { findUnit, formatAmount, formatIndexNumber, parseIndexNumber, type NumberFormat } from "@/lib/index-numbers"
 import { rollDiceExpression } from "@/lib/math-expression"
 
+// Un comparateur créé une fois : « localeCompare » avec options en recréait un à chaque comparaison.
+const frenchNumericCaseOrder = new Intl.Collator("fr", { numeric: true })
+
 // ---------------------------------------------------------------------------
 // Valeurs
 // ---------------------------------------------------------------------------
@@ -184,7 +187,7 @@ function compare(left: FormulaValue, right: FormulaValue): number {
     return a === b ? 0 : a < b ? -1 : 1
   }
   const a = foldName(toText(left)), b = foldName(toText(right))
-  return a === b ? 0 : a.localeCompare(b, "fr", { numeric: true })
+  return a === b ? 0 : frenchNumericCaseOrder.compare(a, b)
 }
 
 function equals(left: FormulaValue, right: FormulaValue): boolean {
