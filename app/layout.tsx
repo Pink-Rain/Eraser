@@ -5,8 +5,7 @@ import { ReplacementView } from "@/components/eraser/custom-page-route";
 import { OpenInAppPrompt } from "@/components/eraser/open-in-app-prompt";
 import { UpdatePrompt } from "@/components/eraser/update-prompt";
 import { listCampaignsForMj, listCharactersForUser } from "@/lib/google-sheets";
-import { canManagePages } from "@/lib/custom-pages";
-import { replacementFor, shellMenu } from "@/lib/custom-pages-server";
+import { replacementFor, shellMenu, warmShellCopies } from "@/lib/custom-pages-server";
 import { currentRequestPath } from "@/lib/request-path";
 import { currentAccount, currentViewAccount } from "@/lib/server-auth";
 import "./globals.css";
@@ -43,13 +42,13 @@ export default async function RootLayout({
     // complète celle demandée viennent de la copie en mémoire du serveur partagé
     // (lib/app-menu-store.ts, lib/custom-pages-store.ts) : rien n'est attendu ici, ni du
     // serveur partagé ni de Google ; la copie se relit en arrière-plan.
-    const { pathname, searchParams } = currentRequestPath();
+    const { pathname } = currentRequestPath();
+    // Seule exception : le tout premier rendu après le démarrage attend ces copies (3 s au
+    // plus), sans quoi l'accueil et le menu d'origine s'affichaient jusqu'au rechargement.
+    await warmShellCopies();
     const { items: menu, campaignPages } = shellMenu(viewAccount);
     const replacement = pathname ? replacementFor(pathname, viewAccount) : null;
-    // « Voir la page d'origine » (admins et MJ) : la page d'Eraser telle quelle. Le paramètre
-    // ne décide que de ce qui s'affiche, jamais d'une redirection : le rendu « à blanc » ne le voit pas.
-    const original = searchParams.get("origine") === "1" && canManagePages(viewAccount.role);
-    const page = replacement && !original
+    const page = replacement
       ? <ReplacementView page={replacement.page} view={replacement.view} mode={replacement.mode} pathname={pathname} account={viewAccount}>{children}</ReplacementView>
       : children;
     // Les pages créées d'une campagne, sous son dossier (vue MJ) : seulement celles de ses

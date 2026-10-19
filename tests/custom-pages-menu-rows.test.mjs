@@ -243,3 +243,30 @@ test("Page de ligne : un bloc conditionnel n'est gardé que pour les lignes qui 
   const plain = pages.pageForViewer(pages.parseCustomPage({ id: "p-plain", title: "x", slug: "x", place: "hors-menu", status: "publiee", sections: [sections[0]].map((section) => ({ ...section, cols: [[section.cols[0][0]]] })) }), { role: "admin", uid: "a" });
   assert.equal(rows.blocksForRow(plain, valueOf), plain);
 });
+
+test("Démarrage : le premier rendu attend un peu les pages et le menu du serveur partagé, une seule fois", async () => {
+  const by = { uid: "admin-1", name: "Admin" };
+  const created = await pagesStore.createCustomPage({ title: "Accueil maison", place: "hors-menu" }, by);
+  await pagesStore.publishCustomPage(created.id, created.updatedAt, by);
+  await menuStore.saveMenuLayout([{ id: "lien:armes", label: "Armes - Modificateurs", href: "/ressources/armes-modificateurs", roles: ["mj", "admin"] }], "", "Admin");
+  // Eraser vient de démarrer : rien n'a encore été lu.
+  pagesStore.forgetCustomPages();
+  menuStore.forgetMenuLayout();
+  assert.equal(pagesStore.knownCustomPages(), null, "sans attendre, la copie est vide (l'ancien comportement)");
+  pagesStore.forgetCustomPages();
+  const pagesSoon = await pagesStore.knownCustomPagesSoon(500);
+  assert.equal(pagesSoon?.[0]?.id, created.id, "la page publiée est là dès le premier rendu");
+  const layout = await menuStore.knownMenuLayoutSoon(500);
+  assert.equal(layout?.items[0]?.label, "Armes - Modificateurs", "le menu réglé est là dès le premier rendu");
+  // Serveur partagé trop lent : on n'attend que le budget, et une seule fois.
+  pagesStore.forgetCustomPages();
+  menuStore.forgetMenuLayout();
+  shared.store.delayMs = 200;
+  const started = Date.now();
+  assert.equal(await pagesStore.knownCustomPagesSoon(30), null);
+  assert.ok(Date.now() - started < 150, "le budget borne l'attente");
+  await new Promise((resolve) => setTimeout(resolve, 260));
+  const again = Date.now();
+  await pagesStore.knownCustomPagesSoon(30);
+  assert.ok(Date.now() - again < 20, "la lecture terminée, plus rien n'est attendu");
+});

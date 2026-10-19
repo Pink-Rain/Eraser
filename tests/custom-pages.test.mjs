@@ -581,6 +581,7 @@ test("les pages d'Eraser dessinées par le moteur : un plan aux identifiants sta
   assert.equal(blueprints.enginePageOf("/"), "/");
 });
 
+<<<<<<< HEAD
 test("le bloc Image : un lien du Drive passe par Eraser, son allure se relit sans les défauts", () => {
   assert.equal(pages.pageImageUrl("https://drive.google.com/file/d/1VX_xEkd_3xheAbCdEf/view?usp=sharing"), "/api/pages/images/1VX_xEkd_3xheAbCdEf");
   assert.equal(pages.pageImageUrl("https://drive.google.com/open?id=1VX_xEkd_3xheAbCdEf"), "/api/pages/images/1VX_xEkd_3xheAbCdEf");
@@ -618,4 +619,25 @@ test("les modules de l'accueil d'origine : mes personnages, mes campagnes", asyn
   assert.ok(modules.eraserModuleKeys.includes("accueil-campagnes"));
   const block = pages.cleanBlock({ id: "m1", type: "module", module: "accueil-campagnes" });
   assert.equal(block.module, "accueil-campagnes");
+=======
+test("Versions brouillon : enregistrer, relire (la plus récente d'abord), supprimer ; elles partent avec la page", async () => {
+  const author = { uid: "admin-1", name: "Admin" };
+  const created = await store.createCustomPage({ title: "Guide", place: "regles", sections: [{ id: "s-1", layout: "1", cols: [[{ id: "b-1", type: "text", vis: "tous", html: "<p>Première version</p>" }]] }] }, author);
+  assert.deepEqual(await store.listPageSnapshots(created.id), []);
+  const first = await store.savePageSnapshot(created, "Avant la refonte", author);
+  assert.equal(first[0].name, "Avant la refonte");
+  assert.equal(pages.findBlock(first[0].content, "b-1").html, "<p>Première version</p>");
+  const saved = await store.saveCustomPage(created.id, { ...created, sections: [{ id: "s-1", layout: "1", cols: [[{ id: "b-1", type: "text", vis: "tous", html: "<p>Refonte</p>" }]] }] }, created.updatedAt, author);
+  const second = await store.savePageSnapshot(saved, "", author);
+  assert.match(second[0].name, /^Brouillon du \d\d\/\d\d à \d\d:\d\d$/, "un nom par défaut daté");
+  assert.deepEqual((await store.listPageSnapshots(created.id)).map((snapshot) => snapshot.name), [second[0].name, "Avant la refonte"]);
+  // La page elle-même ne change pas, et la liste des pages ne porte pas les versions.
+  assert.equal(pages.findBlock(await store.readCustomPage(created.id, { fresh: true }), "b-1").html, "<p>Refonte</p>");
+  const left = await store.deletePageSnapshot(created.id, second[0].id);
+  assert.deepEqual(left.map((snapshot) => snapshot.name), ["Avant la refonte"]);
+  await assert.rejects(store.deletePageSnapshot(created.id, "v-absente"), (error) => error.status === 404);
+  await store.trashCustomPage(created.id, author);
+  await store.deleteCustomPage(created.id);
+  assert.deepEqual(await store.listPageSnapshots(created.id), []);
+>>>>>>> a4980ae (Pages : l'accueil et le menu justes dès l'ouverture, versions brouillon dans l'atelier [skip ci])
 });

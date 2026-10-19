@@ -162,6 +162,14 @@ export type CustomPage = PageContent & {
   live: Record<string, LiveBlockState>
 }
 
+/**
+ * Une version brouillon enregistrée à la main dans l'atelier (« Enregistrer une version
+ * brouillon ») : le contenu de la page à cet instant, sous un nom. On y revient (le brouillon
+ * de la page reprend ce contenu, Ctrl+Z l'annule) ou on la supprime. Gardée à part de la
+ * page (lib/custom-pages-store.ts), elle n'alourdit pas la liste des pages.
+ */
+export type PageSnapshot = { id: string; name: string; content: PageContent; savedAt: string; savedBy: PageAuthor }
+
 /** Un modèle fait par l'utilisateur : le contenu d'une page, sans son adresse ni sa place. */
 export type PageTemplate = { id: string; name: string; content: PageContent; createdAt: string; createdBy: PageAuthor }
 
@@ -231,7 +239,7 @@ export const viewHeights: Array<{ value: ViewHeight; label: string; rem: number 
 
 /* ---------- Limites ---------- */
 
-export const PAGE_LIMITS = { title: 120, description: 400, slug: 60, sections: 40, blocks: 200, columns: 3, html: 20_000, text: 400, src: 2_000, templates: 60, templateName: 60, json: 400_000 } as const
+export const PAGE_LIMITS = { title: 120, description: 400, slug: 60, sections: 40, blocks: 200, columns: 3, html: 20_000, text: 400, src: 2_000, templates: 60, templateName: 60, json: 400_000, snapshots: 20 } as const
 
 /* ---------- Petits outils ---------- */
 
@@ -881,6 +889,30 @@ export function studioPage(page: CustomPage): StudioPage {
     id: page.id, status: page.status, updatedAt: page.updatedAt, updatedBy: page.updatedBy.name, publishedAt: page.publishedAt,
     published: Boolean(page.published), unpublished: hasUnpublishedChanges(page), trashedAt: page.trashedAt, live: page.live,
   }
+}
+
+/* ---------- Versions brouillon ---------- */
+
+/** Les versions brouillon d'une page, lues sur le serveur partagé (les illisibles sont écartées), la plus récente d'abord. */
+export function parseSnapshots(input: unknown): PageSnapshot[] {
+  let value = input
+  if (typeof value === "string") { try { value = JSON.parse(value) } catch { return [] } }
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item): PageSnapshot[] => {
+    if (!item || typeof item !== "object") return []
+    const raw = item as Record<string, unknown>
+    const name = text(raw.name, PAGE_LIMITS.templateName)
+    if (!isId(raw.id) || !name || !raw.content || typeof raw.content !== "object") return []
+    return [{ id: raw.id, name, content: cleanContent(raw.content), savedAt: text(raw.savedAt, 40), savedBy: author(raw.savedBy) }]
+  }).sort((left, right) => right.savedAt.localeCompare(left.savedAt)).slice(0, PAGE_LIMITS.snapshots)
+}
+
+/** Le nom d'une version brouillon : celui donné, sinon « Brouillon du 12/10 à 14:05 ». */
+export function snapshotName(value: unknown, at = new Date()) {
+  const given = text(value, PAGE_LIMITS.templateName)
+  if (given) return given
+  const pad = (number: number) => String(number).padStart(2, "0")
+  return `Brouillon du ${pad(at.getDate())}/${pad(at.getMonth() + 1)} à ${pad(at.getHours())}:${pad(at.getMinutes())}`
 }
 
 /* ---------- Modèles ---------- */

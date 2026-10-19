@@ -745,7 +745,7 @@ export function PageSettings({ page, pages, campaigns, isAdmin, linking, saveErr
         </select>
       </Field>
       {page.replaces && <RadioCards name="replace-mode" value={page.replaceMode ?? "after"} onChange={(replaceMode) => onChange({ replaceMode })} options={replaceModes.map((mode) => ({ value: mode.value, label: mode.label, hint: mode.hint }))} />}
-      {page.replaces && <Hint>Réversible : choisis « Aucune » pour rendre la page d’origine. Admins et MJ gardent « Voir la page d’origine ». La connexion, les comptes, la corbeille, Google, Roll20 et le créateur de pages ne se remplacent jamais.</Hint>}
+      {page.replaces && <Hint>Réversible : choisis « Aucune » pour rendre la page d’origine ; « Versions brouillon » garde l’état d’une page pour y revenir. La connexion, les comptes, la corbeille, Google, Roll20 et le créateur de pages ne se remplacent jamais.</Hint>}
       </>}
     </Group>
     <Group title="Page de chaque ligne d’un index" open={Boolean(page.rowOf?.index)} badge={page.rowOf?.index ? <span className="rounded-full border border-primary/35 bg-primary/8 px-1.5 text-[10.5px] font-semibold normal-case tracking-normal text-primary">modèle</span> : undefined}>

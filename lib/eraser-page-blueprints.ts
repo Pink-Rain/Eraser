@@ -125,8 +125,7 @@ export const redrawnPaths = Object.keys(blueprints)
  * Les pages d'Eraser dessinées par le moteur des pages sans rien enregistrer : tant qu'aucune
  * page du créateur ne les remplace, elles se rendent depuis leur plan de blocs — leurs vues,
  * leurs cartes et leurs formes sont celles réglées dans leur index. « Modifier la page » les
- * reprend dans l'atelier (une page de remplacement, en brouillon, du même plan) ; « Voir la
- * page d'origine » (admins et MJ) montre encore le rendu codé à part.
+ * reprend dans l'atelier (une page de remplacement, en brouillon, du même plan).
  */
 export const enginePages = ["/", "/regles/classes", "/regles/vocabulaire"]
 

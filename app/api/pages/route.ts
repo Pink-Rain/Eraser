@@ -20,9 +20,11 @@ import {
   adoptEraserPage,
   createCustomPage,
   deleteCustomPage,
+  deletePageSnapshot,
   deletePageTemplate,
   findCustomPage,
   listCustomPages,
+  listPageSnapshots,
   listPageTemplates,
   PageStoreError,
   pagesLinkingTo,
@@ -32,6 +34,7 @@ import {
   restoreCustomPage,
   revertCustomPage,
   saveCustomPage,
+  savePageSnapshot,
   savePageTemplate,
   trashCustomPage,
   unpublishCustomPage,
@@ -90,6 +93,15 @@ export async function GET(request: Request) {
       if (!canManagePages(account.role)) return denied()
       return NextResponse.json(await directory(account))
     }
+    // Les versions brouillon d'une page (atelier) : lues en GET, pour ne pas compter comme une écriture.
+    const draftsOf = parameters.get("drafts")
+    if (draftsOf) {
+      if (!canManagePages(account.role)) return denied()
+      const page = await readCustomPage(draftsOf, { fresh: true })
+      if (!page) return missing()
+      if (!canEditPage(page, await viewerFor(account, page))) return denied()
+      return NextResponse.json({ drafts: await listPageSnapshots(page.id) })
+    }
     const id = parameters.get("id")
     if (id) {
       if (!canManagePages(account.role)) return denied()
@@ -111,7 +123,7 @@ export async function GET(request: Request) {
   }
 }
 
-type Body = { action?: string; id?: string; page?: unknown; base?: string; blockId?: string; html?: unknown; name?: unknown; templateId?: string }
+type Body = { action?: string; id?: string; page?: unknown; base?: string; blockId?: string; html?: unknown; name?: unknown; templateId?: string; draftId?: string }
 
 export async function POST(request: Request) {
   const account = await authorizedAccount(["admin", "mj", "joueur"])
@@ -194,6 +206,9 @@ export async function POST(request: Request) {
     }
 
     if (!canEditPage(page, viewer)) return NextResponse.json({ error: "Ton rôle ne peut pas modifier cette page." }, { status: 403 })
+    // Les versions brouillon : la page elle-même ne change pas.
+    if (action === "save-draft") return NextResponse.json({ drafts: await savePageSnapshot(page, body.name, by) })
+    if (action === "delete-draft") return NextResponse.json({ drafts: await deletePageSnapshot(page.id, String(body.draftId ?? "")) })
     const base = typeof body.base === "string" ? body.base : ""
     let saved: CustomPage
     switch (action) {

@@ -4,15 +4,15 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react"
 import {
-  ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, CloudAlert, CloudCheck, CloudUpload, Copy, Ellipsis, Eye, EyeOff, Hammer, LibraryBig,
-  LoaderCircle, LockKeyhole, NotebookPen, Plus, Search, Settings2, SquareMousePointer, Trash2, Undo2, WandSparkles, X,
+  ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookmarkPlus, Check, CloudAlert, CloudCheck, CloudUpload, Copy, Ellipsis, Eye, EyeOff, Hammer, History, LibraryBig,
+  LoaderCircle, LockKeyhole, NotebookPen, Plus, RotateCcw, Search, Settings2, SquareMousePointer, Trash2, Undo2, WandSparkles, X,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { BlockView, CalloutFrame, ImageView, ModulePlaceholder, PageHeader, PageIcon, PageSections, SeparatorView, calloutTones, type BlockContext, type PageLinkTarget } from "@/components/eraser/custom-page-view"
+import { BlockView, CalloutFrame, ImageView, ModulePlaceholder, PageHeader, PageIcon, PageSections, SeparatorView, calloutTones, formatWhen, type BlockContext, type PageLinkTarget } from "@/components/eraser/custom-page-view"
 import { PageSearchBlock, PageSearchProvider, PageStatBlock, PageViewBlock } from "@/components/eraser/page-index-block"
 import { describeCondition } from "@/lib/index-windows"
 import { rowOfRoute } from "@/lib/page-replacements"
@@ -38,6 +38,7 @@ import {
   placeOpenTo,
   roleLabels,
   sectionLayouts,
+  snapshotName,
   viewBlockKinds,
   type BlockType,
   type CustomPage,
@@ -45,6 +46,7 @@ import {
   type PageDraft,
   type PageRole,
   type PageSectionBlock,
+  type PageSnapshot,
   type PageSummary,
   type SectionLayout,
   type StudioPage,
@@ -292,6 +294,12 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
   const [templateOpen, setTemplateOpen] = useState(false)
   const [templateName, setTemplateName] = useState("")
   const [trashOpen, setTrashOpen] = useState(false)
+  const [draftsOpen, setDraftsOpen] = useState(false)
+  const [drafts, setDrafts] = useState<PageSnapshot[] | null>(null)
+  const [draftName, setDraftName] = useState("")
+  const [draftBusy, setDraftBusy] = useState("")
+  const [draftError, setDraftError] = useState("")
+  const [draftConfirm, setDraftConfirm] = useState<string | null>(null)
   const [flash, setFlash] = useState<string | null>(null)
   const isAdmin = role === "admin"
   const pages = useMemo(() => initialPages.filter((page) => page.id !== doc.id && !page.trashedAt), [doc.id, initialPages])
@@ -594,6 +602,62 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
     notify(`Modèle « ${result.template?.name ?? templateName} » enregistré`)
   }, [flush, notify, templateName])
 
+  /* ----- Versions brouillon ----- */
+
+  const openDrafts = useCallback(async () => {
+    setDraftsOpen(true)
+    setDraftError("")
+    setDraftConfirm(null)
+    setDraftName("")
+    try {
+      const response = await fetch(`/api/pages?drafts=${encodeURIComponent(docRef.current.id)}`, { cache: "no-store" })
+      const payload = (await response.json().catch(() => ({}))) as { drafts?: PageSnapshot[]; error?: string }
+      if (!response.ok) { setDraftError(payload.error || "Les versions brouillon n’ont pas pu être lues."); setDrafts([]); return }
+      setDrafts(payload.drafts ?? [])
+    } catch {
+      setDraftError("Eraser ne répond pas : réessaie dans un instant.")
+      setDrafts([])
+    }
+  }, [])
+
+  const saveDraft = useCallback(async () => {
+    setDraftBusy("save")
+    setDraftError("")
+    // La version enregistrée est celle du serveur : le brouillon en cours part d'abord.
+    if (!(await flush())) { setDraftBusy(""); setDraftError("Enregistre d’abord la page : " + (saveRef.current.message ?? "un problème est survenu.")); return }
+    const result = await postPage({ action: "save-draft", id: docRef.current.id, name: draftName.trim() || snapshotName("") }) as Awaited<ReturnType<typeof postPage>> & { drafts?: PageSnapshot[] }
+    setDraftBusy("")
+    if (!result.ok || !result.drafts) { setDraftError(result.error || "La version brouillon n’a pas pu être enregistrée."); return }
+    setDrafts(result.drafts)
+    setDraftName("")
+    notify(`Version « ${result.drafts[0]?.name ?? "brouillon"} » enregistrée`)
+  }, [draftName, flush, notify])
+
+  const restoreDraft = useCallback((snapshot: PageSnapshot) => {
+    // Le brouillon reprend le contenu de la version (titre, en-tête, sections) ; Ctrl+Z l'annule.
+    change((draft) => {
+      const next = { ...draft, title: snapshot.content.title, icon: snapshot.content.icon, emoji: snapshot.content.emoji, description: snapshot.content.description, sections: snapshot.content.sections }
+      if (snapshot.content.hideHeader) next.hideHeader = true
+      else delete next.hideHeader
+      return next
+    })
+    setRev((value) => value + 1)
+    setSelected(null)
+    setDraftsOpen(false)
+    notify(`Revenu à « ${snapshot.name} »`, { label: "Annuler", run: undo })
+  }, [change, notify, undo])
+
+  const deleteDraft = useCallback(async (snapshot: PageSnapshot) => {
+    setDraftBusy(`delete:${snapshot.id}`)
+    setDraftError("")
+    const result = await postPage({ action: "delete-draft", id: docRef.current.id, draftId: snapshot.id }) as Awaited<ReturnType<typeof postPage>> & { drafts?: PageSnapshot[] }
+    setDraftBusy("")
+    setDraftConfirm(null)
+    if (!result.ok || !result.drafts) { setDraftError(result.error || "La version brouillon n’a pas pu être supprimée."); return }
+    setDrafts(result.drafts)
+    notify(`Version « ${snapshot.name} » supprimée`)
+  }, [notify])
+
   /* ----- Ce qu'on montre ----- */
 
   const selectedBlock = selected ? (() => { const at = locate(doc.sections, selected); return at ? doc.sections[at.si].cols[at.ci][at.bi] : null })() : null
@@ -633,6 +697,7 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
       </div>
       <div className="ml-auto flex items-center gap-1.5">
         <Button type="button" variant="ghost" size="icon-sm" onClick={undo} disabled={!historySize} title="Annuler la dernière modification (Ctrl+Z)" aria-label="Annuler"><Undo2 /></Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => void openDrafts()} title="Enregistrer le brouillon tel qu’il est sous un nom, y revenir plus tard ou le supprimer"><History /><span className="max-sm:hidden">Versions brouillon</span></Button>
         {statusPill}
         <button type="button" onClick={() => void flush()} title={save.message || "Les modifications s’enregistrent seules (Ctrl+S pour tout de suite)."} className={`hidden items-center gap-1 rounded-full px-2 py-0.5 text-xs sm:inline-flex ${save.kind === "error" || save.kind === "conflict" ? "text-destructive" : "text-muted-foreground"}`}>{saveIcon}{saveText}</button>
         <Button type="button" size="sm" variant={publishLabel === "Publiée" ? "outline" : "default"} disabled={busy || publishLabel === "Publiée" || save.kind === "conflict"} onClick={() => void action("publish", doc.published ? "Modifications publiées" : "Page publiée")}>{busy ? <LoaderCircle className="animate-spin" /> : publishLabel === "Publiée" ? <Check /> : <WandSparkles />}{publishLabel}</Button>
@@ -640,6 +705,7 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
           <DropdownMenuTrigger asChild><Button type="button" variant="outline" size="icon-sm" aria-label="Plus d’actions"><Ellipsis /></Button></DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-60">
             <DropdownMenuItem asChild><a href={href}><Eye />Ouvrir la page</a></DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void openDrafts()}><History />Versions brouillon…</DropdownMenuItem>
             <DropdownMenuItem disabled={!doc.published || !doc.unpublished} onSelect={() => void action("revert", "Brouillon remis comme la version publiée")}><Undo2 />Revenir à la version publiée</DropdownMenuItem>
             <DropdownMenuItem disabled={doc.status !== "publiee"} onSelect={() => void action("unpublish", "Page repassée en brouillon")}><EyeOff />Repasser en brouillon</DropdownMenuItem>
             <DropdownMenuSeparator />
@@ -802,6 +868,42 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
           <Button type="button" variant="ghost" onClick={() => setTemplateOpen(false)}>Annuler</Button>
           <Button type="button" disabled={busy || !templateName.trim()} onClick={() => void saveTemplate()}>{busy && <LoaderCircle className="animate-spin" />}Enregistrer le modèle</Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={draftsOpen} onOpenChange={(open) => { setDraftsOpen(open); if (!open) setDraftConfirm(null) }}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="font-display text-xl">Versions brouillon</DialogTitle>
+          <DialogDescription>Garde le brouillon tel qu’il est sous un nom, pour y revenir plus tard. Revenir à une version remplace le brouillon de la page (Ctrl+Z l’annule) ; la version publiée ne change qu’avec « Publier ».</DialogDescription>
+        </DialogHeader>
+        <div className="flex gap-2">
+          <input value={draftName} maxLength={60} onChange={(event) => setDraftName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !draftBusy) void saveDraft() }} placeholder={snapshotName("")} aria-label="Nom de la version" className="h-9 min-w-0 flex-1 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20" />
+          <Button type="button" disabled={Boolean(draftBusy) || save.kind === "conflict"} onClick={() => void saveDraft()}>{draftBusy === "save" ? <LoaderCircle className="animate-spin" /> : <BookmarkPlus />}Enregistrer</Button>
+        </div>
+        {draftError && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{draftError}</p>}
+        <div className="grid max-h-[50svh] gap-1.5 overflow-y-auto overscroll-contain">
+          {drafts === null
+            ? <p className="flex items-center gap-2 px-1 py-3 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Lecture des versions…</p>
+            : drafts.length
+              ? drafts.map((snapshot) => <div key={snapshot.id} className="flex flex-wrap items-center gap-2 rounded-xl border bg-card/70 px-3 py-2">
+                <span className="grid min-w-0 flex-1">
+                  <b className="truncate text-sm font-semibold">{snapshot.name}</b>
+                  <small className="text-[11.5px] text-muted-foreground">{formatWhen(snapshot.savedAt)}{snapshot.savedBy.name ? ` · ${snapshot.savedBy.name}` : ""} · {snapshot.content.sections.reduce((total, section) => total + section.cols.flat().length, 0)} blocs</small>
+                </span>
+                {draftConfirm === snapshot.id
+                  ? <span className="flex items-center gap-1.5">
+                    <span className="text-xs text-muted-foreground">Supprimer ?</span>
+                    <Button type="button" size="xs" variant="ghost" onClick={() => setDraftConfirm(null)}>Non</Button>
+                    <Button type="button" size="xs" variant="destructive" disabled={Boolean(draftBusy)} onClick={() => void deleteDraft(snapshot)}>{draftBusy === `delete:${snapshot.id}` ? <LoaderCircle className="animate-spin" /> : <Trash2 />}Supprimer</Button>
+                  </span>
+                  : <span className="flex items-center gap-1">
+                    <Button type="button" size="xs" variant="outline" disabled={Boolean(draftBusy) || save.kind === "conflict"} onClick={() => restoreDraft(snapshot)}><RotateCcw />Revenir à cette version</Button>
+                    <Button type="button" size="icon-xs" variant="ghost" className="hover:text-destructive" title="Supprimer cette version" aria-label={`Supprimer la version ${snapshot.name}`} disabled={Boolean(draftBusy)} onClick={() => setDraftConfirm(snapshot.id)}><Trash2 /></Button>
+                  </span>}
+              </div>)
+              : <p className="rounded-xl border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">Aucune version brouillon pour l’instant.</p>}
+        </div>
       </DialogContent>
     </Dialog>
 

@@ -5,11 +5,11 @@
  */
 import { getCampaignForMj, getCampaignForPlayer, listAllCampaignsForAdmin, listCampaignsForMj, listCampaignsForPlayer } from "@/lib/google-sheets"
 import { canEditPage, canManagePages, canReadPage, pageForViewer, pageHref, placeLabel, type CustomPage, type PageAuthor, type PagePlace, type PageView, type PageViewer } from "@/lib/custom-pages"
-import { knownCustomPages, listCustomPages } from "@/lib/custom-pages-store"
+import { knownCustomPages, knownCustomPagesSoon, listCustomPages } from "@/lib/custom-pages-store"
 import type { BlockDataOptions, IndexSource } from "@/lib/custom-pages-data"
 import { rowPageHref, templateForRow } from "@/lib/custom-pages-rows"
 import { resolveMenu, type MenuPageEntry, type ResolvedMenuItem } from "@/lib/app-menu"
-import { knownMenuLayout } from "@/lib/app-menu-store"
+import { knownMenuLayout, knownMenuLayoutSoon } from "@/lib/app-menu-store"
 import { listCustomIndexes } from "@/lib/custom-indexes"
 import { entityColumnHiddenForPlayers } from "@/lib/index-references-entities"
 import { isForbiddenReplacement, isReplaceablePath, matchesReplacement } from "@/lib/page-replacements"
@@ -149,6 +149,15 @@ export async function backlinkSources() {
 }
 
 /* ---------- Le menu ---------- */
+
+/**
+ * Au tout premier rendu d'Eraser (copies en mémoire encore jamais lues), attend un peu les
+ * pages et le menu du serveur partagé : sans cela, l'accueil montrait sa version d'origine et
+ * le menu ses entrées d'origine jusqu'au rechargement suivant. Ensuite : instantané.
+ */
+export async function warmShellCopies() {
+  await Promise.all([knownCustomPagesSoon(), knownMenuLayoutSoon()])
+}
 
 /**
  * Le menu tel que le voit ce compte (sa vue) : celui réglé dans l'éditeur, sinon celui

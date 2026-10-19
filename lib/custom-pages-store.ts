@@ -18,6 +18,7 @@
  * Les modèles : portée « custom-page-templates », même découpage.
  */
 import { withAsyncLock } from "@/lib/async-lock"
+import { withTimeBudget } from "@/lib/time-budget"
 import {
   cleanCustomPage,
   cleanTemplateName,
@@ -27,15 +28,18 @@ import {
   PAGE_LIMITS,
   pageHref,
   parseCustomPage,
+  parseSnapshots,
   parseTemplate,
   reIdContent,
   samePlace,
   slugProblem,
+  snapshotName,
   templateContent,
   type CustomPage,
   type LiveBlockState,
   type PageAuthor,
   type PageContent,
+  type PageSnapshot,
   type PageTemplate,
   type PageVisibility,
 } from "@/lib/custom-pages"
@@ -44,6 +48,8 @@ import { deleteSharedRecord, listSharedRecords, readSharedRecord, sharedStoreAva
 
 export const PAGES_SCOPE = "custom-pages"
 export const TEMPLATES_SCOPE = "custom-page-templates"
+/** Les versions brouillon : une entrée par page (son identifiant), la liste de ses versions. */
+export const SNAPSHOTS_SCOPE = "custom-page-drafts"
 /** Une valeur du serveur partagé : 20 000 caractères au plus ; on garde de la marge. */
 export const CHUNK_SIZE = 18_000
 const PART = "#"
@@ -188,10 +194,34 @@ export function knownCustomPages(): CustomPage[] | null {
   return known
 }
 
+/**
+ * La toute première lecture de cette installation (démarrage d'Eraser). Sans elle, la coque
+ * dessinait la page d'Eraser d'origine (l'accueil d'avant) et le menu sans les pages créées,
+ * puis la bonne version au rechargement suivant. Elle est attendue une seule fois, et peu.
+ */
+let firstRead: Promise<unknown> | null = null
+let firstReadDone = false
+
+/**
+ * Comme `knownCustomPages`, mais au tout premier rendu (copie encore jamais lue) attend la
+ * lecture du serveur partagé, au plus `budgetMs` : la page remplacée et le menu sont justes
+ * dès l'ouverture. Ensuite, plus rien n'est attendu (la copie se relit en arrière-plan).
+ */
+export async function knownCustomPagesSoon(budgetMs = 3_000): Promise<CustomPage[] | null> {
+  if (known || firstReadDone || !sharedStoreAvailable()) return knownCustomPages()
+  knownCustomPages() // lance la lecture si elle n'est pas déjà partie
+  firstRead ??= listCustomPages().catch(() => null).finally(() => { firstReadDone = true })
+  await withTimeBudget(firstRead, budgetMs, "CUSTOM_PAGES_SLOW").catch(() => null)
+  return knownCustomPages()
+}
+
 export function forgetCustomPages() {
   cache = null
   known = null
   refreshDueAt = 0
+  refreshing = null
+  firstRead = null
+  firstReadDone = false
 }
 
 export async function readCustomPage(id: string, options: { fresh?: boolean } = {}) {
@@ -357,6 +387,8 @@ export async function deleteCustomPage(id: string) {
     if (!current) throw notFound()
     if (!current.trashedAt) throw new PageStoreError("CUSTOM_PAGE_NOT_TRASHED", "Mets d’abord la page à la corbeille.")
     await deleteChunked(PAGES_SCOPE, id)
+    // Ses versions brouillon partent avec elle.
+    await deleteChunked(SNAPSHOTS_SCOPE, id).catch(() => undefined)
   })
   const list = await (cache?.promise.catch(() => null) ?? Promise.resolve(null))
   if (list) {
@@ -383,6 +415,42 @@ export function updateLiveBlock(id: string, blockId: string, change: (page: Cust
 /** L'adresse des pages qui mènent à `id` (blocs Lien), pour l'atelier. */
 export async function pagesLinkingTo(id: string) {
   return (await listCustomPages()).filter((page) => page.id !== id && !page.trashedAt && JSON.stringify(page.sections).includes(`"pageId":"${id}"`)).map((page) => ({ id: page.id, title: page.title, href: pageHref(page) }))
+}
+
+/* ---------- Les versions brouillon ---------- */
+
+/** Les versions brouillon d'une page, la plus récente d'abord. */
+export async function listPageSnapshots(pageId: string) {
+  if (!sharedStoreAvailable()) return []
+  return parseSnapshots(await readChunked(SNAPSHOTS_SCOPE, pageId))
+}
+
+/** « Enregistrer une version brouillon » : le brouillon de la page tel qu'il est, sous un nom. */
+export function savePageSnapshot(page: CustomPage, name: unknown, by: PageAuthor) {
+  if (!sharedStoreAvailable()) return Promise.reject(unavailable())
+  return withAsyncLock(`custom-page-drafts:${page.id}`, async () => {
+    const list = await listPageSnapshots(page.id)
+    if (list.length >= PAGE_LIMITS.snapshots) throw new PageStoreError("CUSTOM_PAGE_SNAPSHOT_LIMIT", `Cette page garde déjà ${PAGE_LIMITS.snapshots} versions brouillon : supprimes-en une d’abord.`)
+    const snapshot: PageSnapshot = { id: newId("v"), name: snapshotName(name), content: contentOf(page), savedAt: nextStamp(list[0]?.savedAt), savedBy: by }
+    const next = [snapshot, ...list]
+    const value = JSON.stringify(next)
+    if (value.length > PAGE_LIMITS.json * 4) throw new PageStoreError("CUSTOM_PAGE_SNAPSHOT_TOO_LARGE", "Les versions brouillon de cette page sont trop lourdes : supprimes-en une d’abord.", 413)
+    await writeChunked(SNAPSHOTS_SCOPE, page.id, value)
+    return next
+  })
+}
+
+/** Supprime une version brouillon (la page, elle, ne change pas). */
+export function deletePageSnapshot(pageId: string, snapshotId: string) {
+  if (!sharedStoreAvailable()) return Promise.reject(unavailable())
+  return withAsyncLock(`custom-page-drafts:${pageId}`, async () => {
+    const list = await listPageSnapshots(pageId)
+    const next = list.filter((snapshot) => snapshot.id !== snapshotId)
+    if (next.length === list.length) throw new PageStoreError("CUSTOM_PAGE_SNAPSHOT_NOT_FOUND", "Cette version brouillon n’existe plus (supprimée entre-temps ?).", 404)
+    if (next.length) await writeChunked(SNAPSHOTS_SCOPE, pageId, JSON.stringify(next))
+    else await deleteChunked(SNAPSHOTS_SCOPE, pageId)
+    return next
+  })
 }
 
 /* ---------- Les modèles ---------- */

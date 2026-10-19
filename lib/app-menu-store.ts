@@ -13,6 +13,7 @@ import { withAsyncLock } from "@/lib/async-lock"
 import { cleanMenuItems, keepAdminEntries, parseMenuLayout, type MenuLayout } from "@/lib/app-menu"
 import { deleteChunked, PageStoreError, readChunked, writeChunked } from "@/lib/custom-pages-store"
 import { sharedStoreAvailable } from "@/lib/shared-store"
+import { withTimeBudget } from "@/lib/time-budget"
 
 export const MENU_SCOPE = "app-menu"
 const KEY = "layout"
@@ -59,10 +60,33 @@ export function knownMenuLayout(): MenuLayout | null | undefined {
   return known
 }
 
+/** La toute première lecture (démarrage d'Eraser) : attendue une seule fois, et peu. */
+let firstRead: Promise<unknown> | null = null
+let firstReadDone = false
+
+/**
+ * Comme `knownMenuLayout`, mais au tout premier rendu (menu encore jamais lu) attend sa
+ * lecture, au plus `budgetMs` : le menu réglé (ses liens, ses pages) est là dès l'ouverture
+ * d'Eraser, au lieu du menu d'origine jusqu'au rechargement suivant.
+ */
+export async function knownMenuLayoutSoon(budgetMs = 3_000): Promise<MenuLayout | null | undefined> {
+  if (known !== undefined || firstReadDone || !sharedStoreAvailable()) return knownMenuLayout()
+  if (!refreshing) {
+    refreshDueAt = Date.now() + REFRESH_EVERY
+    refreshing = readMenuLayout().catch(() => null).finally(() => { refreshing = null })
+  }
+  firstRead ??= refreshing.finally(() => { firstReadDone = true })
+  await withTimeBudget(firstRead, budgetMs, "APP_MENU_SLOW").catch(() => null)
+  return knownMenuLayout()
+}
+
 /** Oublie la copie en mémoire (tests). */
 export function forgetMenuLayout() {
   known = undefined
   refreshDueAt = 0
+  refreshing = null
+  firstRead = null
+  firstReadDone = false
 }
 
 export async function hasPreviousMenu() {

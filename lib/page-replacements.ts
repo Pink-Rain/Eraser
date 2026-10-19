@@ -2,8 +2,8 @@
  * Remplacer ou compléter une page d'Eraser par une page du créateur de pages. Une page
  * réglée sur une adresse d'Eraser (`replaces`) prend sa place (« replace »), ou ajoute ses
  * blocs au-dessus (« before ») ou en dessous (« after ») de son contenu. Tout reste
- * réversible : retirer l'adresse rend la page d'origine, et les admins et MJ ont toujours
- * « Voir la page d'origine » (?origine=1).
+ * réversible : retirer l'adresse rend la page d'origine, et l'atelier garde des versions
+ * brouillon auxquelles on revient.
  *
  * Seules les adresses de `replaceableRoutes` peuvent l'être ; les routes techniques
  * (connexion, comptes, corbeille, Google, API, créateur de pages et éditeur du menu) jamais.
@@ -14,7 +14,7 @@ export type ReplaceMode = "replace" | "before" | "after"
 export const replaceModes: Array<{ value: ReplaceMode; label: string; hint: string }> = [
   { value: "before", label: "Au-dessus de la page", hint: "Les blocs s’ajoutent avant le contenu d’origine." },
   { value: "after", label: "En dessous de la page", hint: "Les blocs s’ajoutent après le contenu d’origine." },
-  { value: "replace", label: "À la place de la page", hint: "La page d’origine n’est plus montrée (lien « Voir la page d’origine » pour admins et MJ)." },
+  { value: "replace", label: "À la place de la page", hint: "La page d’origine n’est plus montrée (son contenu peut revenir dans un bloc « Contenu de la page d’origine »)." },
 ]
 
 /** Les pages d'Eraser qu'on peut remplacer ou compléter. `[id]` : n'importe quelle valeur de ce segment. */
