@@ -47,7 +47,7 @@ import {
 } from "lucide-react"
 
 import { CardButtonsEditor, CardHoverClick, type CardEditorExtras } from "@/components/eraser/card-buttons-editor"
-import { IndexCard, cardGridStyle, cardWidthRem, type CardRowSource } from "@/components/eraser/index-card"
+import { IndexCard, cardGridClass, cardGridStyle, cardWidthRem, type CardRowSource } from "@/components/eraser/index-card"
 import { ViewAsContext, ViewAsPicker } from "@/components/eraser/view-roles"
 import { Choice, IconPick, ImageBoxControls, SettingsRow, Tabs } from "@/components/eraser/editor-controls"
 import { useIndexSettings } from "@/components/eraser/index-windows"
@@ -693,7 +693,7 @@ function CardPage({ card, columns, onChange, disabled, extras }: { card: CardTem
           else set({ sizeLinked: true, ...(heightRem ? { ratio: Math.round(widthRem / heightRem * 100) / 100, minHeightPx: undefined } : {}) })
         }
         return <SettingsRow>
-          <Segmented ariaLabel="Place dans la grille" value={list ? "list" : "grid"} options={[{ value: "grid", label: "Grille", icon: <LayoutGrid className="size-3.5" /> }, { value: "list", label: "Une par ligne", icon: <ListTree className="size-3.5" /> }]} onChange={(value) => value === "list" ? set({ width: "full", widthRem: undefined, grid: undefined }) : set({ width: "md", widthRem: card.widthRem ?? 15 })} disabled={disabled} />
+          <Segmented ariaLabel="Place dans la grille" value={list ? "list" : "grid"} options={[{ value: "grid", label: "Grille", icon: <LayoutGrid className="size-3.5" /> }, { value: "list", label: "Une par ligne", icon: <ListTree className="size-3.5" /> }]} onChange={(value) => value === "list" ? set({ width: "full", widthRem: undefined, grid: card.grid?.equal ? { equal: true } : undefined }) : set({ width: "md", widthRem: card.widthRem ?? 15 })} disabled={disabled} />
           <button type="button" disabled={disabled} aria-pressed={linked} onClick={toggleLinked} title={linked ? "Liées : la hauteur suit la largeur (proportions fixes)" : "Déliées : la hauteur est une hauteur minimale, la largeur celle de la grille"} className={cn("grid size-8 shrink-0 place-items-center rounded-md border text-base", linked ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted")}>{linked ? "🔗" : "⛓️‍💥"}</button>
           {!list && <span className="min-w-32 flex-1"><Range text="Largeur" value={widthRem} min={6} max={48} step={0.5} format={(value) => `${fr(value, 1)} rem`} onChange={setWidth} disabled={disabled} title="La grille met autant de cartes de cette largeur que la place le permet ; elles s’élargissent pour remplir la ligne." /></span>}
           <span className="min-w-32 flex-1"><Range text="Hauteur" value={heightRem ?? HEIGHT_MAX + 1} min={4} max={HEIGHT_MAX + 1} step={0.5} format={(value) => value > HEIGHT_MAX ? "contenu" : `${fr(value, 1)} rem${linked ? "" : " au moins"}`} onChange={setHeight} disabled={disabled} title="Au bout du curseur : la hauteur du contenu. Liée : les proportions de la carte ; déliée : une hauteur minimale." /></span>
@@ -713,6 +713,10 @@ function CardPage({ card, columns, onChange, disabled, extras }: { card: CardTem
           <span className="min-w-28 flex-1"><Range text="Au plus, par ligne" value={card.grid?.max ?? 0} min={0} max={8} step={1} format={(value) => value ? `${value}` : "libre"} onChange={(value) => set({ grid: { ...card.grid, max: value || undefined } })} disabled={disabled} title="Sur un grand écran, les cartes ne se multiplient pas au-delà : elles s’élargissent." /></span>
           <Choice label="Téléphone" value={String(card.grid?.phone ?? 1)} options={[{ value: "1", label: "1 / ligne" }, { value: "2", label: "2 / ligne" }]} onChange={(value) => set({ grid: { ...card.grid, phone: value === "2" ? 2 : undefined } })} disabled={disabled} />
         </>}
+      </SettingsRow>
+      <SettingsRow>
+        <Toggle checked={Boolean(card.grid?.equal)} onChange={(equal) => set({ grid: { ...card.grid, equal: equal || undefined } })} disabled={disabled} title="Toutes les cartes d’une même ligne prennent la hauteur de la plus haute : la grille reste alignée, même quand les textes n’ont pas la même longueur.">Même hauteur</Toggle>
+        {!list && <Toggle checked={Boolean(card.grid?.fill)} onChange={(fill) => set({ grid: { ...card.grid, fill: fill || undefined } })} disabled={disabled} title="Les cartes s’élargissent pour prendre toute la largeur de la page, même quand il y en a peu (sinon, elles gardent leur largeur et laissent de la place vide).">Remplir la largeur</Toggle>}
       </SettingsRow>
       <div className="flex flex-wrap gap-3">
         <span className={label}>Contenu<Segmented ariaLabel="Alignement du contenu" value={card.align ?? "left"} options={[...alignOptions]} onChange={(align) => set({ align: align === "left" ? undefined : align })} disabled={disabled} /></span>
@@ -848,7 +852,7 @@ function CardPreview({ card, columns, samples, selectedBlock, onSelectBlock }: {
     {withButtons && <div className="grid gap-1 text-[11px] font-semibold text-muted-foreground">Voir comme<ViewAsPicker value={viewAs} onChange={setViewAs} /></div>}
     {grid && <Segmented ariaLabel="Largeur d’écran simulée" value={screen} options={[{ value: "phone", label: "", icon: <Smartphone className="size-3.5" />, title: "Téléphone" }, { value: "tablet", label: "", icon: <Tablet className="size-3.5" />, title: "Tablette" }, { value: "desktop", label: "", icon: <Monitor className="size-3.5" />, title: "Toute la largeur" }]} onChange={setScreen} />}
     <ViewAsContext.Provider value={viewAs}>{grid
-      ? <div className={cn("grid items-start gap-2", screen === "phone" && card.grid?.phone !== 2 && "!grid-cols-1", screen === "phone" && card.grid?.phone === 2 && "!grid-cols-2")} style={{ ...cardGridStyle(card), maxWidth: screens[screen] }}>
+      ? <div className={cn("grid items-start gap-2", cardGridClass(card), screen === "phone" && card.grid?.phone !== 2 && "!grid-cols-1", screen === "phone" && card.grid?.phone === 2 && "!grid-cols-2")} style={{ ...cardGridStyle(card), maxWidth: screens[screen] }}>
         {(rows.length > 1 ? rows : [rows[0], rows[0], rows[0]]).map((sample, position) => <IndexCard key={position} card={card} row={sampleSource(sample, columns)} />)}
       </div>
       : <div className="mx-auto w-full" style={card.width === "full" && !card.widthRem ? undefined : { maxWidth: `${rem + 2}rem` }}>
@@ -868,7 +872,7 @@ function CardsLivePreview({ card, columns, rows, onClose }: { card: CardTemplate
     tools={<Segmented ariaLabel="Largeur d’écran simulée" value={screen} options={[{ value: "phone", label: "", icon: <Smartphone className="size-3.5" />, title: "Téléphone" }, { value: "tablet", label: "", icon: <Tablet className="size-3.5" />, title: "Tablette" }, { value: "desktop", label: "", icon: <Monitor className="size-3.5" />, title: "Toute la largeur" }]} onChange={setScreen} />}
     onClose={onClose}
   >
-    <div className={cn("mx-auto grid items-start gap-3", screen === "phone" && card.grid?.phone !== 2 && "!grid-cols-1", screen === "phone" && card.grid?.phone === 2 && "!grid-cols-2")} style={{ ...cardGridStyle(card), maxWidth: screens[screen] }}>
+    <div className={cn("mx-auto grid items-start gap-3", cardGridClass(card), screen === "phone" && card.grid?.phone !== 2 && "!grid-cols-1", screen === "phone" && card.grid?.phone === 2 && "!grid-cols-2")} style={{ ...cardGridStyle(card), maxWidth: screens[screen] }}>
       {rows.map((sample, position) => <IndexCard key={position} card={card} row={sampleSource(sample, columns)} />)}
     </div>
   </PreviewDialog>

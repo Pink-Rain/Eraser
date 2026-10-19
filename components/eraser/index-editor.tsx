@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState, type DragEvent, type ReactNode } from "react"
 import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 
-import { useDockArea } from "@/components/eraser/editor-dock"
+import { useContainedWheel, useDockArea } from "@/components/eraser/editor-dock"
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexGuide, type GuideSection } from "@/components/eraser/index-guide"
 import { LayoutViewsPanel, PresetBar, useColumnPresets } from "@/components/eraser/index-presets-ui"
@@ -1139,21 +1139,22 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   const area = dock?.area
   const GAP = 8
   const windowRef = useRef<HTMLDivElement>(null)
+  // La fenêtre ne bloque pas la page : la molette n'y fait pourtant défiler que la fenêtre.
+  useContainedWheel(windowRef, open)
   const docked = area && area.width > 2 * GAP && area.height > 2 * GAP ? { left: area.left + GAP, top: area.top + GAP, width: area.width - 2 * GAP, height: area.height - 2 * GAP, maxWidth: "none", maxHeight: "none", translate: "none" } : undefined
 
   return <>
   <AlertDialog open={confirmClose} onOpenChange={setConfirmClose}>
-    <AlertDialogContent className="sm:max-w-xl">
+    <AlertDialogContent className="sm:max-w-2xl">
       <AlertDialogHeader>
         <AlertDialogTitle>Quitter sans enregistrer ?</AlertDialogTitle>
         <AlertDialogDescription>{pendingCount} changement{pendingCount > 1 ? "s" : ""} de « {model.title} » {pendingCount > 1 ? "ne sont pas enregistrés" : "n’est pas enregistré"} : en quittant, {pendingCount > 1 ? "ils seront perdus" : "il sera perdu"}.</AlertDialogDescription>
       </AlertDialogHeader>
-      <AlertDialogFooter className="flex-wrap gap-2 sm:justify-between">
-        <AlertDialogAction variant="destructive" onClick={() => { setConfirmClose(false); onClose() }}>Quitter sans enregistrer</AlertDialogAction>
-        <span className="flex flex-col-reverse gap-2 sm:flex-row">
-          <AlertDialogCancel>Continuer à modifier</AlertDialogCancel>
-          {canSave && <AlertDialogAction onClick={() => { setConfirmClose(false); void submit() }}><Save />{submitLabel}</AlertDialogAction>}
-        </span>
+      {/* Les trois choix sur une seule ligne (ils passent à la ligne seulement sur un écran trop étroit). */}
+      <AlertDialogFooter className="flex-row flex-wrap items-center gap-2 sm:flex-nowrap sm:justify-end">
+        <AlertDialogAction variant="destructive" className="sm:mr-auto" onClick={() => { setConfirmClose(false); onClose() }}>Quitter sans enregistrer</AlertDialogAction>
+        <AlertDialogCancel>Continuer à modifier</AlertDialogCancel>
+        {canSave && <AlertDialogAction onClick={() => { setConfirmClose(false); void submit() }}><Save />{submitLabel}</AlertDialogAction>}
       </AlertDialogFooter>
     </AlertDialogContent>
   </AlertDialog>
@@ -1568,7 +1569,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
         </span>
         <span className="flex gap-2">
         <Button type="button" variant="outline" size="icon" onClick={() => setGuide("types")} aria-label="Guide des colonnes" title="Guide : types de colonnes, formules, boutons, aléatoire"><BookOpen /></Button>
-        <Button type="button" variant="outline" onClick={requestClose} disabled={pending}>{readOnly ? "Fermer" : "Annuler"}</Button>
+        {/* « Annuler » est un choix clair : il ferme sans rien enregistrer, sans redemander. */}
+        <Button type="button" variant="outline" onClick={() => { if (!pending) onClose() }} disabled={pending}>{readOnly ? "Fermer" : "Annuler"}</Button>
         {!readOnly && <Button type="button" disabled={pending || layoutSaving || !canSubmit || !(operations.length || layoutChanges.length || cardChanges.length || presentationChanges.length || lockChanges.length) || problems.length > 0} onClick={() => void submit()}>{pending || layoutSaving ? <LoaderCircle className="animate-spin" /> : <Save />}{submitLabel}</Button>}
         </span>
       </DialogFooter>

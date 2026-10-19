@@ -215,8 +215,12 @@ export type CardTemplate = {
   ratio?: number
   /** Largeur et hauteur liées dans l'éditeur (bouger l'une bouge l'autre : `ratio` les tient). */
   sizeLinked?: boolean
-  /** La grille : au plus tant de cartes par ligne ; sur téléphone, une ou deux par ligne. */
-  grid?: { max?: number; phone?: 1 | 2 }
+  /**
+   * La grille : au plus tant de cartes par ligne ; sur téléphone, une ou deux par ligne ;
+   * `equal` : toutes les cartes d'une ligne ont la même hauteur (celle de la plus haute) ;
+   * `fill` : les cartes s'élargissent pour prendre toute la largeur de la page, même peu nombreuses.
+   */
+  grid?: { max?: number; phone?: 1 | 2; equal?: boolean; fill?: boolean }
 }
 
 /**
@@ -594,6 +598,8 @@ export function parseCardTemplate(input: unknown): CardTemplate | null {
     const clean: NonNullable<CardTemplate["grid"]> = {}
     if (typeof grid.max === "number" && Number.isFinite(grid.max) && grid.max >= 1) clean.max = Math.min(12, Math.round(grid.max))
     if (grid.phone === 1 || grid.phone === 2) clean.phone = grid.phone
+    if (grid.equal === true) clean.equal = true
+    if (grid.fill === true) clean.fill = true
     if (Object.keys(clean).length) card.grid = clean
   }
   return card

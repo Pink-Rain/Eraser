@@ -690,11 +690,19 @@ function blockPlaceholder(block: CardBlock) {
 /** Les colonnes de la grille pour une largeur de carte. */
 export function cardGridStyle(card: CardTemplate): CSSProperties {
   const width = card.width ?? "md"
-  if (width === "full" && !card.widthRem) return { gridTemplateColumns: "minmax(0, 1fr)" }
+  // « Même hauteur » : chaque case s'étire à la hauteur de la ligne (et la carte avec elle : `cardGridClass`).
+  const equal: CSSProperties = card.grid?.equal ? { alignItems: "stretch" } : {}
+  if (width === "full" && !card.widthRem) return { gridTemplateColumns: "minmax(0, 1fr)", ...equal }
   const rem = card.widthRem ?? cardWidths.find((entry) => entry.value === width)?.rem ?? 15
   // Au plus N cartes par ligne : chaque colonne fait au moins 1/N de la place.
   const minimum = card.grid?.max ? `max(min(100%, ${rem}rem), calc(${(100 / card.grid.max).toFixed(3)}% - 0.75rem))` : `min(100%, ${rem}rem)`
-  return { gridTemplateColumns: `repeat(auto-fill, minmax(${minimum}, 1fr))`, ...(card.grid?.phone === 2 ? { "--eraser-card-phone": "2" } as CSSProperties : {}) }
+  // « Remplir la largeur » : les places vides de la ligne disparaissent, les cartes s'élargissent d'autant.
+  return { gridTemplateColumns: `repeat(${card.grid?.fill ? "auto-fit" : "auto-fill"}, minmax(${minimum}, 1fr))`, ...equal, ...(card.grid?.phone === 2 ? { "--eraser-card-phone": "2" } as CSSProperties : {}) }
+}
+
+/** La classe de la grille : « Même hauteur » étire aussi la carte dans sa case (app/globals.css). */
+export function cardGridClass(card: CardTemplate | null | undefined) {
+  return card?.grid?.equal ? "eraser-equal-cards" : ""
 }
 
 /** La largeur d'une carte (en rem) d'après ses réglages, pour les aperçus. */
@@ -733,7 +741,7 @@ export function IndexCardGrid({ card, cardOf, rows, rowSource, onOpen, hrefOf, r
   }, [more])
   if (!rows.length) return <div className="rounded-xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">{empty}</div>
   return <div className="grid gap-3">
-    <div className={cn("grid items-start", card.width === "full" ? "gap-1.5" : "gap-3")} style={cardGridStyle(card)}>
+    <div className={cn("grid items-start", card.width === "full" ? "gap-1.5" : "gap-3", cardGridClass(card))} style={cardGridStyle(card)}>
       {visible.map((row) => {
         const shown = cardOf?.(row.key) ?? card
         const node = <IndexCard key={row.key} card={shown} row={rowSource(row.key)} onOpen={() => onOpen(row.key)} href={hrefOf?.(row.key)} />

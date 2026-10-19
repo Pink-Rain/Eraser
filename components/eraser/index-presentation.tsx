@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { loadWorldIndexData } from "@/components/eraser/index-cells"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { addDays, addMonths, calendarsFromTables, compareCalendarDates, dateFromDayNumber, dayNumber, firstWeekdayOf, formatCalendarDate, monthLength, parseCalendarDate, realCalendar, REAL_CALENDAR, seasonOf, weekdayOf, weekStartOf, yearLength, type CalendarDate, type CalendarDefinition } from "@/lib/calendars"
-import { cardGridStyle, cardWidthRem, IndexCard, TypedValue, type CardRowSource } from "@/components/eraser/index-card"
+import { cardGridClass, cardGridStyle, cardWidthRem, IndexCard, TypedValue, type CardRowSource } from "@/components/eraser/index-card"
 import { RowHover } from "@/components/eraser/index-references"
 import { useRolesOf } from "@/components/eraser/view-roles"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -576,7 +576,7 @@ function ListLayout(props: PresentationProps) {
   const number = (index: number) => layout.numbered ? <span className="w-6 shrink-0 text-right font-display text-sm font-semibold tabular-nums" style={{ color: accentOf(look) }}>{index + 1}.</span> : null
   if (card) {
     // Chaque élément est une carte : une, deux ou trois par rangée, sections comprises.
-    return <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} onCommit={props.onCommit} render={(group) => <Paged rows={group} render={(shown) => <div className={`grid items-start ${layout.compact || look.density === "compact" ? "gap-1.5" : "gap-3"} ${cardTemplate ? "" : columnsClass}`} style={cardTemplate ? cardGridStyle(cardTemplate) : undefined}>{shown.map((row, index) => <Movable key={row} row={row}><div data-row-key={row} className="flex min-w-0 items-start gap-1.5">{number(index)}<div className={`min-w-0 flex-1 ${props.chosen === row && props.clickOf?.(row) !== "below" ? "rounded-xl ring-2 ring-primary/45 ring-offset-2 ring-offset-background" : ""}`}>{card(row) ?? <Item row={row} props={props} framed />}{props.chosen === row && props.clickOf?.(row) === "below" && <div className="mt-2"><DetailPanel row={row} rows={rows} props={props} inline /></div>}</div></div></Movable>)}</div>} />} />
+    return <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} onCommit={props.onCommit} render={(group) => <Paged rows={group} render={(shown) => <div className={`grid items-start ${layout.compact || look.density === "compact" ? "gap-1.5" : "gap-3"} ${cardTemplate ? cardGridClass(cardTemplate) : columnsClass}`} style={cardTemplate ? cardGridStyle(cardTemplate) : undefined}>{shown.map((row, index) => <Movable key={row} row={row}><div data-row-key={row} className="flex min-w-0 items-start gap-1.5">{number(index)}<div className={`min-w-0 flex-1 ${props.chosen === row && props.clickOf?.(row) !== "below" ? "rounded-xl ring-2 ring-primary/45 ring-offset-2 ring-offset-background" : ""}`}>{card(row) ?? <Item row={row} props={props} framed />}{props.chosen === row && props.clickOf?.(row) === "below" && <div className="mt-2"><DetailPanel row={row} rows={rows} props={props} inline /></div>}</div></div></Movable>)}</div>} />} />
   }
   const boxed = look.surface === "boxed"
   const zebra = look.surface === "zebra"
@@ -1088,7 +1088,7 @@ function GalleryLayout(props: PresentationProps) {
   if (card) {
     const cardTemplate = !layout.itemForm && layout.itemCard && rows[0] ? itemTemplateOf(props, rows[0]) : null
     const cardGap = look.density === "compact" ? "gap-2" : look.density === "airy" ? "gap-5" : "gap-3"
-    return <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} render={(group) => <Paged rows={group} render={(shown) => <div className={`grid items-start ${cardGap}`} style={cardTemplate ? cardGridStyle(cardTemplate) : { gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${width}rem), 1fr))` }}>{shown.map((row) => <div key={row} className="min-w-0">{card(row) ?? <Item row={row} props={props} framed />}</div>)}</div>} />} />
+    return <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} render={(group) => <Paged rows={group} render={(shown) => <div className={`grid items-start ${cardGap} ${cardGridClass(cardTemplate)}`} style={cardTemplate ? cardGridStyle(cardTemplate) : { gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${width}rem), 1fr))` }}>{shown.map((row) => <div key={row} className="min-w-0">{card(row) ?? <Item row={row} props={props} framed />}</div>)}</div>} />} />
   }
   if (!layout.imageColumn) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne des images dans les réglages de cette vue.</p>
   const tile = (row: string) => {

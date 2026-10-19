@@ -129,3 +129,10 @@ test("un bloc de carte : une icône, une couleur prise dans une colonne (qui sui
   const renamed = cards.renameCardColumns(card, new Map([["couleur", "Teinte"]]));
   assert.equal(renamed.blocks[0].tone, "{Teinte}");
 });
+
+test("la grille : « Même hauteur » et « Remplir la largeur » se gardent, seulement quand ils sont cochés", () => {
+  const withGrid = cards.parseCardTemplate(JSON.stringify({ ...sample, grid: { max: 3, equal: true, fill: true } }));
+  assert.deepEqual(withGrid.grid, { max: 3, equal: true, fill: true });
+  const unchecked = cards.parseCardTemplate(JSON.stringify({ ...sample, grid: { equal: false, fill: "oui" } }));
+  assert.equal(unchecked.grid, undefined, "une case décochée (ou illisible) n'est pas enregistrée");
+});

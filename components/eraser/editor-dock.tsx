@@ -12,7 +12,7 @@
  * La fenêtre du dock ne couvre que la zone des pages (`area`) et ne bloque rien autour : les onglets,
  * la navigation et l'en-tête restent cliquables pendant qu'elle est ouverte.
  */
-import { createContext, Fragment, useContext, useLayoutEffect, useMemo, useState, type ReactNode, type RefObject } from "react"
+import { createContext, Fragment, useContext, useEffect, useLayoutEffect, useMemo, useState, type ReactNode, type RefObject } from "react"
 
 type Docked = { key: string; model: unknown; node: ReactNode }
 
@@ -83,4 +83,40 @@ export function useEditorDock() {
 /** Pour l'éditeur posé dans le dock : la zone des pages (`area`, `null` le temps de la mesurer) ; `null` ailleurs (il garde sa fenêtre centrée et modale). */
 export function useDockArea() {
   return useContext(AreaContext)
+}
+
+/** L'élément peut-il encore défiler dans ce sens (il garde alors la molette) ? */
+function canScroll(element: HTMLElement, dx: number, dy: number) {
+  const style = window.getComputedStyle(element)
+  if (dy !== 0 && /(auto|scroll|overlay)/.test(style.overflowY) && element.scrollHeight > element.clientHeight + 1) {
+    if (dy < 0 ? element.scrollTop > 0 : element.scrollTop + element.clientHeight < element.scrollHeight - 1) return true
+  }
+  if (dx !== 0 && /(auto|scroll|overlay)/.test(style.overflowX) && element.scrollWidth > element.clientWidth + 1) {
+    if (dx < 0 ? element.scrollLeft > 0 : element.scrollLeft + element.clientWidth < element.scrollWidth - 1) return true
+  }
+  return false
+}
+
+/**
+ * La molette dans une fenêtre qui ne bloque pas la page (l'éditeur posé dans le dock) : elle fait
+ * défiler la fenêtre, jamais le tableau caché dessous. Une zone de la fenêtre qui défile garde la
+ * molette jusqu'à son bord ; au-delà, ou sur une partie qui ne défile pas (en-tête, pied), le
+ * défilement s'arrête là au lieu de passer à la page derrière.
+ */
+export function useContainedWheel(ref: RefObject<HTMLElement | null>, active: boolean) {
+  useEffect(() => {
+    const root = ref.current
+    if (!active || !root) return
+    const onWheel = (event: WheelEvent) => {
+      // Ctrl + molette : le zoom d'Eraser, laissé tel quel.
+      if (event.ctrlKey) return
+      for (let node = event.target instanceof Element ? event.target : null; node; node = node.parentElement) {
+        if (node instanceof HTMLElement && canScroll(node, event.deltaX, event.deltaY)) return
+        if (node === root) break
+      }
+      event.preventDefault()
+    }
+    root.addEventListener("wheel", onWheel, { passive: false })
+    return () => root.removeEventListener("wheel", onWheel)
+  }, [ref, active])
 }
