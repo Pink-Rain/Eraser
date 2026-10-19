@@ -52,7 +52,8 @@ Mesuré sur un banc qui reproduit Eraser avec de vraies quantités (1 800 items,
   leur règle de comparaison à chaque paire.
 
 Sur ce banc : Fiche → Items 8,6 s → 2,3 s ; Items → PNJ 7,6 s → 2,0 s ; Tableau ↔ Cartes
-7,8 s → 0,3 s ; ouverture complète de l'index des items 15 s → 6,4 s, des créatures 6,5 s → 0,9 s.
+7,8 s → 0,3 s ; onglet Inventaire 2,0 s → 0,3 s ; ouverture complète de l'index des items
+15 s → 7 s, des PNJ 11,6 s → 3,3 s.
 
 ## Un écran plus léger
 
