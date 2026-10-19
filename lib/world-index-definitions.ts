@@ -3,9 +3,9 @@
  * Ce fichier ne dépend de rien côté serveur : l'interface s'en sert aussi pour savoir
  * quelles colonnes sont des listes de noms reliées à un autre index.
  */
-import { foldName, isIdHeader, type ChoiceOption, type IndexColumnSpec, type TabColumnSettings } from "@/lib/index-columns"
+import { foldName, isIdHeader, objectColumnSpec, type ChoiceOption, type IndexColumnSpec, type TabColumnSettings } from "@/lib/index-columns"
 import { CALENDAR_COLOR_HEADER, CALENDAR_DAYS_HEADER, CALENDAR_DESCRIPTION_HEADER, CALENDAR_ERA_HEADER, CALENDAR_HEADER, CALENDAR_MONTHS_TAB, CALENDAR_ORDER_HEADER, CALENDAR_SEASON_HEADER, CALENDAR_SEASONS_TAB, CALENDAR_WEEKDAYS_TAB, CALENDARS_TAB } from "@/lib/calendars"
-import type { ColumnPolicy } from "@/lib/index-schema-shared"
+import { objectColumnPolicy, type ColumnPolicy } from "@/lib/index-schema-shared"
 import { stateFxList } from "@/lib/state-fx"
 import { isRarityPlacesHeader, rarityPlacesSpec } from "@/lib/rarity-places"
 import {
@@ -117,8 +117,15 @@ export type EntityWorldIndexKey = "npcs" | "campaigns" | "characters" | "classes
 
 export type BuiltinWorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages" | "states" | "weapon-modifiers" | "skills" | "achievements" | "vocabulary" | "calendars" | EntityWorldIndexKey
 
-/** Un index du monde : prévu par Eraser, ou créé depuis « Nouvel index » (« perso-… »). */
-export type WorldIndexKey = BuiltinWorldIndexKey | `perso-${string}`
+/**
+ * L'Index des items : un index du moteur comme les autres. Ses onglets sont ceux de son
+ * classeur (dossier « Objets »), ses colonnes gardent les types et les verrous des items : les
+ * inventaires, les magasins et la table les lisent par leur nom.
+ */
+export const OBJECTS_INDEX_KEY = "objects" as const
+
+/** Un index du monde : prévu par Eraser, l'Index des items, ou créé depuis « Nouvel index » (« perso-… »). */
+export type WorldIndexKey = BuiltinWorldIndexKey | typeof OBJECTS_INDEX_KEY | `perso-${string}`
 
 export type WorldIndexTabDefinition = {
   name: string
@@ -671,9 +678,11 @@ export function worldColumnPolicy(index: WorldIndexKey, tab: string, header: str
   const pair = links.find(([end]) => linkEndCovers(end, index, tab) && foldName(end.column) === foldName(header))
   if (pair) {
     const other = pair[1]
-    const where = isBuiltinWorldIndexKey(other.index) ? worldIndexDefinitions[other.index].title : other.index
+    const where = isBuiltinWorldIndexKey(other.index) ? worldIndexDefinitions[other.index].title : other.index === OBJECTS_INDEX_KEY ? "Items" : other.index
     return { rename: false, type: false, remove: false, reasons: [`Répond à « ${other.column} » (${where}${other.tab === "*" ? "" : `, onglet ${other.tab}`}) : les deux colonnes se recopient par leur nom. Changer son nom, son type ou la supprimer couperait le lien.`], allowed: only }
   }
+  // Les items : leurs colonnes lues par l'inventaire, les magasins et la table gardent leur nom.
+  if (index === OBJECTS_INDEX_KEY) return objectColumnPolicy(header)
   const readers = builtinReaders(index, tab, header, context)
   // Recopiée comme du texte : sa liste (valeurs comprises) et son type restent libres.
   if (readers.length && index === "creatures" && creatureTextHeaders.some((name) => foldName(name) === foldName(header))) return { rename: false, type: true, remove: false, reasons: readers, allowed: "Le type et ses réglages (les valeurs d’une liste comprises), et tout l’affichage." }
@@ -759,7 +768,9 @@ function isHeader(header: string, candidates: string[]) {
  * Le type de chaque colonne d'un index du monde, reconnu par son en-tête. Une colonne
  * ajoutée à la main dans Sheets est du texte enrichi, la norme.
  */
-export function worldColumnSpec(index: WorldIndexKey, tab: string, header: string): IndexColumnSpec {
+export function worldColumnSpec(index: WorldIndexKey, tab: string, header: string, headers: string[] = [header]): IndexColumnSpec {
+  // Les items : le type que leur donnent leurs en-têtes (« Valeur » est un prix sans colonne Prix).
+  if (index === OBJECTS_INDEX_KEY) return objectColumnSpec(header, headers)
   // L'identifiant est utile à Eraser, rarement à l'écran : il est masqué d'office.
   if (isIdHeader(header)) return { kind: "id", hidden: true }
   // Tous les noms ouvrent la fiche de leur ligne (Nom formulaire).

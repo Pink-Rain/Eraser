@@ -124,17 +124,20 @@ noms et ne se renomment jamais : actions `save-view`, `delete-view`,
 `save-view-preset`, clés `views` et `viewPresets` de l’API des réglages, portées
 du Worker, colonnes de la feuille, préfixe de version `vue:`, élément `@vue`.
 
-## L’Index des items sur le moteur des index
+## L’Index des items, un index du moteur
 
-La page des items est celle du moteur (`WorldIndexManager`, clé `objects`) : mêmes
-présentations, cartes, vues, « Modifier », stats et rangement en onglets que les autres index.
-`lib/object-index-engine.ts` présente les tableaux du dossier « Objets » comme un index du
-moteur (`origins` : le classeur et l’onglet Google de chaque onglet) ;
-`lib/object-index-engine-server.ts` sert ces données sous `/api/resources/world-indexes?key=objects`
-et traduit les écritures pour les fonctions des items (ligne retrouvée par son ID, case par son
-en-tête). Les inventaires, magasins et fouilles lisent toujours les items par leurs colonnes.
-Les vues d’avant désignaient un onglet par « fichier:sheetId » : la page les lit sous le nom de
-l’onglet. Les relations (colonne liée, recherche, agrégat) ne sont pas encore proposées aux items.
+L’Index des items est l’index `objects` du moteur (`OBJECTS_INDEX_KEY`,
+`lib/world-index-definitions.ts`) : `lib/world-indexes.ts` le lit, l’écrit, gère ses relations
+(colonnes liées, listes liées, recherches, agrégats), son « Modifier » et sa corbeille, comme
+pour tout index. Sa page est `WorldIndexPage`. Particularités :
+- ses onglets sont ceux du classeur « Index des objets » (dossier « Objets ») ; il est lu par
+  le lecteur des items (`listObjectIndexTables` : ID figés, icônes, en-têtes réparés), que
+  suivent aussi l’inventaire et les magasins ;
+- ses colonnes prennent le type et les verrous des items (`objectColumnSpec`,
+  `objectColumnPolicy`) : l’inventaire, les magasins et la table les lisent par leur nom ;
+- toute écriture dans son classeur fait relire les items à l’inventaire et aux magasins
+  (`announceSpreadsheetWrite`).
+Les vues d’avant désignaient un onglet par « fichier:sheetId » : la page les lit sous son nom.
 
 ## Rareté et emplacements, sections, listes d’index, index des pages
 

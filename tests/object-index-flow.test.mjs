@@ -295,34 +295,43 @@ test("Une écriture faite pendant la relecture partielle n'est pas masquée par 
   assert.ok(names.includes("Lance") && names.includes("Masse"), names.join(", "));
 });
 
-test("Items sur le moteur des index : la page du moteur lit et écrit les tableaux d'items par leur ID", async () => {
-  const engine = await vite.ssrLoadModule("/lib/object-index-engine-server.ts");
+test("Items, un index du moteur : le moteur des index lit et écrit les items, l'inventaire voit ses écritures", async () => {
+  const world = await vite.ssrLoadModule("/lib/world-indexes.ts");
   const id = objectsFile([
     { title: "Armes", grid: [["ID", "Nom", "Type", "Prix", "Rareté principale"], ["ARM-1", "Épée", "Arme", "10", "commun"], ["ARM-2", "Dague", "Arme", "4", "Rare"]] },
     { title: "Livres", grid: [["ID", "Nom", "Type"], ["LIV-1", "Grimoire", "Livre"]] },
   ]);
-  const data = await engine.objectEngineData();
+  assert.equal(await world.knownWorldIndexKey("objects"), "objects");
+  const data = await world.getWorldIndex("objects", { refresh: true });
   assert.deepEqual(data.tables.map((table) => table.tabName).sort(), ["Armes", "Livres"]);
-  assert.equal(data.origins.Armes.fileId, id);
+  assert.equal(data.columns.Armes.find((column) => column.header === "ID").spec.kind, "id");
   // Une case : sous son en-tête, à la ligne de son ID (même si la page la voyait ailleurs).
   google.grid(id, "Armes").splice(1, 0, ["ARM-0", "Hache", "Arme", "6", ""]);
-  await engine.objectEngineWrite({ action: "update-cell", tabName: "Armes", row: { rowNumber: 3, id: "ARM-2", name: "Dague" }, rows: [], header: "Prix", html: "5" });
+  await world.updateWorldIndexCell("objects", "Armes", { rowNumber: 3, id: "ARM-2", name: "Dague" }, "Prix", "5");
   assert.deepEqual(google.grid(id, "Armes").find((row) => row[0] === "ARM-2"), ["ARM-2", "Dague", "Arme", "5", "Rare"]);
-  // « Corriger N fautes » : la rareté mal écrite prend le choix de la liste, rien d'autre ne bouge.
-  sheets.clearObjectIndexTableCache();
-  const corrected = await engine.objectEngineWrite({ action: "normalize-choices", tabName: "Armes", row: null, rows: [] });
-  assert.equal(corrected.corrected, 1);
+  // L'inventaire et les magasins (le lecteur des items) voient l'écriture du moteur.
+  const read = await sheets.listObjectIndexTables();
+  const armes = read.find((table) => table.tabName === "Armes");
+  assert.equal(armes.rows.find((row) => row.values[0] === "ARM-2").values[3], "5");
+  // « Corriger N fautes » : la rareté mal écrite prend le choix de la liste.
+  assert.equal(await world.normalizeWorldIndexChoices("objects"), 1);
   assert.equal(google.grid(id, "Armes").find((row) => row[0] === "ARM-1")[4], "Commun");
-  // Changer d'onglet : l'item garde son ID ; ajouter : chaque valeur sous son en-tête.
-  sheets.clearObjectIndexTableCache();
-  await engine.objectEngineData({ refresh: true });
-  const moved = await engine.objectEngineWrite({ action: "move", tabName: "Armes", row: null, rows: [{ rowNumber: 3, id: "ARM-1", name: "Épée" }], toTab: "Livres" });
-  assert.ok(google.grid(id, "Livres").some((row) => row[0] === "ARM-1" && row.includes("Épée")));
+  // Vers un autre onglet : l'item garde son ID, ses colonnes remplies arrivent avec lui.
+  const epee = google.grid(id, "Armes").findIndex((row) => row[0] === "ARM-1") + 1;
+  await world.moveWorldIndexRows("objects", "Armes", "Livres", [{ rowNumber: epee, id: "ARM-1", name: "Épée" }]);
+  const livres = google.grid(id, "Livres");
+  assert.ok(livres[0].includes("Prix") && livres[0].includes("Rareté principale"));
+  const moved = livres.find((row) => row[0] === "ARM-1");
+  assert.equal(moved[livres[0].indexOf("Prix")], "10");
   assert.ok(!google.grid(id, "Armes").some((row) => row[0] === "ARM-1"));
-  assert.ok(moved.data.tables.find((table) => table.tabName === "Livres").rows.some((row) => row.values.includes("ARM-1")));
-  await engine.objectEngineWrite({ action: "add", tabName: "Armes", row: null, rows: [], headers: ["ID", "Nom", "Type", "Prix", "Rareté principale"], values: ["", "Lance", "Arme", "7", ""] });
+  // Ajouter : chaque valeur sous son en-tête, avec un identifiant.
+  await world.addWorldIndexRow("objects", "Armes", ["", "Lance", "Arme", "7", ""], ["ID", "Nom", "Type", "Prix", "Rareté principale"]);
   const lance = google.grid(id, "Armes").find((row) => row[1] === "Lance");
   assert.deepEqual(lance.slice(1, 4), ["Lance", "Arme", "7"]);
-  // Un onglet que la page ne connaît plus : rien n'est écrit.
-  await assert.rejects(engine.objectEngineWrite({ action: "update-cell", tabName: "Inconnu", row: { rowNumber: 2, id: "ARM-2" }, rows: [], header: "Prix", html: "1" }), /OBJECT_INDEX_CHANGED/);
+  assert.ok(lance[0].trim());
+  // Une liste liée d'un autre index vers les items : le nom choisi y crée sa ligne.
+  assert.equal(await world.ensureWorldIndexEntry("objects", "Armes", "Arbalète"), true);
+  assert.ok(google.grid(id, "Armes").some((row) => row[1] === "Arbalète"));
+  // Les items sont une cible de relation comme les autres index.
+  assert.ok((await world.worldRelationTargets()).some((target) => target.index === "objects" && target.tabs.some((tab) => tab.name === "Armes")));
 });

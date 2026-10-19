@@ -103,9 +103,10 @@
 - Les rôles d'un lecteur pour une ligne (joueur, joueur de la campagne, joueur propriétaire,
   MJ, MJ de la campagne, admin) sont dans `lib/view-roles.ts` ; ils règlent l'affichage
   (boutons, clic, détail modifiable), jamais les droits d'écriture, que le serveur vérifie.
-- Tous les index passent par le même moteur (`components/eraser/world-index-manager.tsx`),
-  y compris l’Index des items (clé `objects`, `lib/object-index-engine-server.ts`). Ne jamais
-  recréer une page d’index à part : une possibilité ajoutée au moteur doit valoir pour tous.
+- Tous les index sont le même moteur, côté page (`components/eraser/world-index-manager.tsx`)
+  comme côté serveur (`lib/world-indexes.ts`), y compris l’Index des items (clé `objects`).
+  Ne jamais recréer une page, une passerelle ou un code d’index à part : une possibilité
+  ajoutée au moteur vaut pour tous les index.
 - Le chantier en cours suit la roadmap « Eraser · Vues des index » (document
   partagé du propriétaire) : la relire et la mettre à jour à chaque étape.
 

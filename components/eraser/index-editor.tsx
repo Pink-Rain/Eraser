@@ -1513,7 +1513,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
                     ? <Button type="button" variant="secondary" size="icon-sm" onClick={() => updateColumn({ ...column, removed: false })} aria-label="Annuler la suppression" title="Mise à la corbeille à « Enregistrer » : cliquer pour annuler"><Undo2 /></Button>
                     : <Button type="button" variant="ghost" size="icon-sm" className={policy.remove ? "text-destructive/80 hover:text-destructive" : "text-muted-foreground/50"} disabled={readOnly || tab.removed || !policy.remove} onClick={() => updateColumn({ ...column, removed: true })} aria-label="Mettre la colonne à la corbeille" title={policy.remove ? "Mettre la colonne à la corbeille (à « Enregistrer »)" : "Suppression verrouillée : voir le cadenas."}>{policy.remove ? <Trash2 /> : <Lock />}</Button>}
                 </span>
-                <ColumnTypeMenu spec={column.spec} policy={policy} disabled={columnDisabled} family={model.family} onPick={pickKind} icons={kindIcons} />
+                <ColumnTypeMenu spec={column.spec} policy={policy} disabled={columnDisabled} onPick={pickKind} icons={kindIcons} />
               </div>
               {column.removed && <p className="text-[11px] text-muted-foreground">Cette colonne part à la corbeille à « {submitLabel} » (restaurable depuis Administration › Corbeille).</p>}
               {policy.unlocked && !column.removed && <p className="flex items-center gap-1.5 text-[11px] text-destructive"><TriangleAlert className="size-3.5 shrink-0" />Cadenas d’Eraser retiré : ce qui lit cette colonne par son nom peut casser si elle change. Le cadenas se remet d’un clic.</p>}
@@ -1533,7 +1533,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
                 sampleRows={sampleRows[tab.original ?? tab.name] ?? []}
                 openGuide={(section) => setGuide(section)}
               />
-              {model.family === "world" && DEFAULT_VALUE_KINDS.has(column.spec.kind) && <label className="grid gap-1 text-xs">
+              {DEFAULT_VALUE_KINDS.has(column.spec.kind) && <label className="grid gap-1 text-xs">
                 <span><b>Valeur d’une nouvelle ligne</b> : écrite dans la case laissée vide quand une ligne est ajoutée (ou tapée dans Sheets puis reçue par Eraser).</span>
                 <Input disabled={typeDisabled} value={column.spec.defaultValue ?? ""} maxLength={200} onChange={(event) => updateColumn({ ...column, spec: { ...column.spec, defaultValue: event.target.value || (column.originalSpec?.defaultValue ? "" : undefined) } })} placeholder={column.spec.kind === "checkbox" ? "Oui ou Non" : "Vide"} className="h-8 text-xs" />
               </label>}

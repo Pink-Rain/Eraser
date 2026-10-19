@@ -6,8 +6,6 @@ import { getCampaignForMj, getCharacterForUser, listCachedClassOptions } from "@
 import { googleFailureMessage } from "@/lib/google-failures"
 import { authorizedAccount, currentAuthToken } from "@/lib/server-auth"
 import { isClassRankHeader } from "@/lib/world-index-definitions"
-import { isObjectsEngineKey, objectEngineData, objectEngineWrite } from "@/lib/object-index-engine-server"
-import { OBJECT_INDEX_CHANGED_MESSAGE } from "@/lib/object-index-refs"
 import {
   addWorldIndexRow,
   deleteWorldIndexRows,
@@ -45,8 +43,6 @@ const conflicts: Record<string, string> = {
 function failure(error: unknown) {
   const code = error instanceof Error ? error.message : ""
   if (conflicts[code]) return { status: 409, message: conflicts[code] }
-  // Items : la ligne ou la colonne n'est plus là où la page la voyait (rien n'a été écrit).
-  if (code === "OBJECT_INDEX_CHANGED") return { status: 409, message: OBJECT_INDEX_CHANGED_MESSAGE }
   if (code === "WORLD_INDEX_OWNER_LOCKED") return { status: 403, message: "Le propriétaire se change depuis l’administration, par un administrateur." }
   if (code === "WORLD_INDEX_WRITE_DENIED") return { status: 403, message: "Seuls son propriétaire, le MJ de sa campagne ou un administrateur peuvent modifier cette ligne." }
   if (code === "WORLD_INDEX_SCHEMA_UNAVAILABLE") return { status: 503, message: "Les réglages de cet index n’ont pas pu être lus dans Google Sheets : rien n’a été écrit. Réessaie dans un instant." }
@@ -66,6 +62,7 @@ function errorMessage(code: string) {
   if (code === "CLASS_SPELL_ID_REQUIRED") return "Ce sort n’a pas encore d’identifiant : actualise le tableau puis recommence."
   if (code === "CLASS_RANK_INVALID") return "Le rang doit être compris entre 0 et 20."
   if (code.startsWith("CLASS_COLUMN_NOT_FOUND")) return "Cette classe n’a pas de colonne dans la feuille « Sorts de classe » et elle n’a pas pu être ajoutée."
+  if (code === "OBJECT_INDEX_NOT_REGROUPED") return "Les items sont encore répartis dans plusieurs classeurs : regroupe-les d’abord en un seul « Index des objets »."
   if (code === "WORLD_INDEX_ROWS_LOCKED") return "Les lignes de cet index se créent depuis leur page et partent à la corbeille : le tableau n’en ajoute, n’en copie ni n’en supprime."
   // Le refus de Google (ou une coupure), tel quel : sans lui, impossible de savoir ce qui bloque.
   const google = googleFailureMessage(code)
@@ -92,8 +89,6 @@ export async function GET(request: Request) {
   if (!account) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   const parameters = new URL(request.url).searchParams
   try {
-    // L'Index des items : les tableaux du dossier « Objets », vus comme un index du moteur.
-    if (isObjectsEngineKey(parameters.get("key"))) return NextResponse.json({ data: await objectEngineData({ refresh: parameters.get("refresh") === "1" }) })
     const key = await knownWorldIndexKey(parameters.get("key"))
     if (!key) return NextResponse.json({ error: "Index inconnu." }, { status: 400 })
     // « Actualiser » relit Google Sheets ; sinon l'index gardé en mémoire suffit.
@@ -118,12 +113,6 @@ export async function POST(request: Request) {
     const rows = rowRefs(body.rows, rowNumbers)
     // La ligne d'une seule case (ou d'une fiche) : son numéro, son identifiant et son nom.
     const row: WorldIndexRowRef | null = typeof body.rowNumber === "number" ? { rowNumber: body.rowNumber, id: text(body.rowId), name: text(body.rowName) } : rows[0] ?? null
-    // L'Index des items : la même page, ses écritures traduites pour les tableaux d'items.
-    if (isObjectsEngineKey(body.key)) {
-      if (!body.tabName) throw new Error("INVALID_WORLD_INDEX")
-      const result = await objectEngineWrite({ action: body.action, tabName: body.tabName, row, rows, column: typeof body.column === "number" ? body.column : undefined, header: typeof body.header === "string" ? body.header : undefined, html: body.html, values: body.values, headers: Array.isArray(body.headers) ? body.headers.map((header) => String(header ?? "")) : undefined, toTab: body.toTab, count: body.count })
-      return NextResponse.json({ ok: true, changed: [], ...result })
-    }
     const key = await knownWorldIndexKey(body.key)
     if (!key || !body.tabName) throw new Error("INVALID_WORLD_INDEX")
     // Personnages et campagnes, pour un MJ : seulement ses lignes, jamais la case du propriétaire.

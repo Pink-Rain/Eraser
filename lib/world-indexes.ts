@@ -14,6 +14,7 @@ import {
   getCharacterForMj,
   googleSheetsJson,
   listClassOptions,
+  listObjectIndexTables,
   onSpreadsheetWrite,
   readFormattedSheet,
   readNamedColumns,
@@ -64,6 +65,7 @@ import {
   worldIndexSeeds,
   worldColumnSpec,
   defaultLinkEnds,
+  OBJECTS_INDEX_KEY,
   TAB_COLUMN_ENTRY,
   type BuiltinWorldIndexKey,
   type EntityWorldIndexKey,
@@ -104,8 +106,6 @@ export type WorldIndexData = {
   links: WorldIndexLink[]
   /** Personnages et campagnes : propriétaire et liens de chaque ligne (par identifiant), lus à chaque requête. */
   extras?: EntityIndexExtras
-  /** L'Index des items (lib/object-index-engine.ts) : le classeur et l'onglet Google de chaque onglet. */
-  origins?: Record<string, { fileId: string; fileName: string; tabName: string; sheetId: number; webViewLink: string }>
   /** Sorts des classes : la colonne « Classes et rangs », tirée des colonnes de rang (une par classe). */
   classRanks?: ClassRanksExtra
 }
@@ -148,7 +148,7 @@ export type EntityIndexExtras = {
 
 /** Clé d'index du monde connue : prévue par Eraser, ou inscrite au registre des index personnalisés. */
 export async function knownWorldIndexKey(value: unknown): Promise<WorldIndexKey | null> {
-  if (isBuiltinWorldIndexKey(value)) return value
+  if (isBuiltinWorldIndexKey(value) || value === OBJECTS_INDEX_KEY) return value
   if (isCustomIndexKey(value) && await customIndexEntry(value)) return value
   return null
 }
@@ -248,6 +248,25 @@ async function loadEffectiveIndex(key: WorldIndexKey, options: { strict?: boolea
     const schema = all.filter((entry) => !foreign(entry))
     return { spreadsheetId: sheet.spreadsheetId, webViewLink: sheet.webViewLink, schema, foreign: all.filter(foreign), definition: { ...base, tabs: effectiveTabs(base.tabs, schema), tabColumn: tabColumnOf(all) }, degraded }
   }
+  // L'Index des items : son classeur (le dossier « Objets », regroupé en un seul) et ses onglets
+  // tels qu'ils y sont. Lus par le lecteur des items (ID figés, en-têtes réparés), que suivent
+  // aussi l'inventaire et les magasins.
+  if (key === OBJECTS_INDEX_KEY) {
+    const tables = await listObjectIndexTables()
+    const files = [...new Set(tables.map((table) => table.fileId))]
+    if (!files.length) throw new Error("OBJECT_INDEX_NOT_FOUND")
+    if (files.length > 1) throw new Error("OBJECT_INDEX_NOT_REGROUPED")
+    const { all: schema, degraded } = await schemaFor(key, files[0], strict)
+    const base = tables.map((table): WorldIndexTabDefinition => ({ name: table.tabName, itemLabel: "un item", headers: table.headers.filter((header) => header.trim()), widths: [], idPrefix: "OBJ" }))
+    return {
+      spreadsheetId: files[0],
+      webViewLink: tables[0].webViewLink,
+      schema,
+      foreign: [],
+      definition: { key, sheetName: tables[0].fileName, title: "Items", path: "/ressources/index-des-objets", itemLabel: "un item", tabs: effectiveTabs(base, schema), tabColumn: tabColumnOf(schema) },
+      degraded,
+    }
+  }
   const entry = await customIndexEntry(key)
   if (!entry) throw new Error("WORLD_INDEX_NOT_FOUND")
   const { all: schema, degraded } = await schemaFor(key, entry.spreadsheetId, strict)
@@ -278,8 +297,8 @@ async function workbook(key: WorldIndexKey, options: { refresh?: boolean; strict
   // Sans son schéma, un index ne reçoit aucune colonne : il recréerait celles qu'on a renommées ou supprimées.
   if (!effective.degraded && !readyWorkbooks.has(readyKey)) {
     // Les en-têtes d'un index d'entités appartiennent au code de sa feuille (alias compris) :
-    // le moteur n'en ajoute aucun, il les lit.
-    if (!definition.entity) {
+    // le moteur n'en ajoute aucun, il les lit. Les onglets des items sont ceux de leur classeur.
+    if (!definition.entity && key !== OBJECTS_INDEX_KEY) {
       // Un onglet absent de la copie en mémoire fait relire la liste avant d'être créé.
       const existing = await cachedSpreadsheetTabs(effective.spreadsheetId, definition.tabs.map((tab) => tab.name))
       // Tous les onglets sont là et leurs colonnes ont été vérifiées il y a peu (même version
@@ -447,9 +466,9 @@ async function sheetIdOf(spreadsheetId: string, tabName: string) {
  * Le type effectif d'une colonne : celui du schéma, sinon le type prévu par Eraser
  * (d'après son nom d'origine si elle a été renommée).
  */
-export function effectiveColumnSpec(key: WorldIndexKey, tab: string, header: string, schema: SchemaEntry[]): IndexColumnSpec {
+export function effectiveColumnSpec(key: WorldIndexKey, tab: string, header: string, schema: SchemaEntry[], headers?: string[]): IndexColumnSpec {
   const entry = findEntry(schema, tab, header)
-  const base = worldColumnSpec(key, tab, entry?.origin || header)
+  const base = worldColumnSpec(key, tab, entry?.origin || header, headers)
   if (!entry?.spec) return base
   // Un réglage enregistré avant qu'Eraser range un fichier à part (le portrait d'une créature
   // et son token) le garde : seuls les réglages écrits dans « Modifier » remplacent les siens.
@@ -468,7 +487,7 @@ function columnsOf(key: WorldIndexKey, table: WorldIndexTable, schema: SchemaEnt
     const folded = foldName(header)
     if (!header.trim() || seen.has(folded) || trashed(findEntry(schema, table.tabName, header))) return []
     seen.add(folded)
-    return [{ header, spec: effectiveColumnSpec(key, table.tabName, header, schema) }]
+    return [{ header, spec: effectiveColumnSpec(key, table.tabName, header, schema, table.headers) }]
   })
   const tabSpec = findEntry(schema, table.tabName, "")?.spec
   const order = tabSpec?.kind === "tab" ? tabSpec.columns ?? [] : []
@@ -603,8 +622,32 @@ async function addMissingRows(key: WorldIndexKey, sheet: Awaited<ReturnType<type
   return wrote
 }
 
+/**
+ * L'Index des items, lu par le lecteur des items : ses ID déjà figés (ceux que citent les
+ * inventaires), ses icônes, ses en-têtes réparés. Rien n'y est ajouté au chargement : ni lignes
+ * de départ, ni identifiants (le lecteur des items les donne).
+ */
+async function loadObjectsIndex(sheet: Awaited<ReturnType<typeof workbook>>): Promise<WorldIndexData> {
+  const read = (await listObjectIndexTables()).filter((table) => table.fileId === sheet.spreadsheetId)
+  const tables = sheet.definition.tabs.flatMap((tab): WorldIndexTable[] => {
+    const table = read.find((candidate) => candidate.tabName === tab.name)
+    if (!table) return []
+    rememberSheetId(sheet.spreadsheetId, table.tabName, table.sheetId)
+    return [{ tabName: table.tabName, sheetId: table.sheetId, headers: [...table.headers], rows: table.rows.map((row) => ({ rowNumber: row.rowNumber, values: [...row.values], html: [...row.html] })) }]
+  })
+  return {
+    key: OBJECTS_INDEX_KEY,
+    webViewLink: sheet.webViewLink,
+    tables,
+    definition: sheet.definition,
+    columns: Object.fromEntries(tables.map((table) => [table.tabName, columnsOf(OBJECTS_INDEX_KEY, table, sheet.schema)])),
+    links: linksOf(OBJECTS_INDEX_KEY),
+  }
+}
+
 async function loadWorldIndex(key: WorldIndexKey): Promise<WorldIndexData> {
   const sheet = await workbook(key)
+  if (key === OBJECTS_INDEX_KEY) return loadObjectsIndex(sheet)
   let tables = await Promise.all(sheet.definition.tabs.map((tab) => readTable(sheet.spreadsheetId, key, tab.name)))
   // Sans son schéma (lecture ratée), l'index est seulement affiché : rien n'y est écrit.
   if (!sheet.degraded) {
@@ -1658,9 +1701,20 @@ export function moveWorldIndexRows(key: WorldIndexKey, fromTab: string, toTab: s
     // L'ancien réglage « onglets d'arrivée » de la colonne « Onglet » (retirée) n'est plus
     // modifiable : un réglage resté dans la feuille ne bloque plus le déplacement.
     const source = await plainTable(key, fromTab)
-    const target = await plainTable(key, toTab)
+    let target = await plainTable(key, toTab)
+    const indexes = [...new Set(rows.map((row) => resolveRow(source, row)))].sort((left, right) => left - right)
+    // Une colonne remplie dans une ligne déplacée, que l'onglet d'arrivée n'a pas : elle y est
+    // ajoutée à droite, avec ses réglages. Rien de la ligne ne se perd en route.
+    const missing = source.headers.filter((header, column) => header.trim() && columnOf(target.headers, header) < 0 && indexes.some((index) => (source.rows[index]?.[column] ?? "").trim()))
+    if (missing.length) {
+      for (const header of missing) await appendHeader(sheet.spreadsheetId, toTab, header)
+      const settings = missing.flatMap((header) => { const entry = findEntry(sheet.schema, fromTab, header); return entry?.spec && !trashed(entry) ? [{ header, spec: entry.spec }] : [] })
+      if (settings.length) await rewriteSchema(sheet.spreadsheetId, (entries) => { for (const item of settings) upsertEntry(entries, toTab, item.header, { spec: item.spec, state: "ajouté", deletedAt: "" }) })
+      forgetWorkbook(sheet.spreadsheetId)
+      target = await plainTable(key, toTab)
+    }
     const moved: WorldIndexRowRef[] = []
-    for (const index of [...new Set(rows.map((row) => resolveRow(source, row)))].sort((left, right) => left - right)) {
+    for (const index of indexes) {
       const row = source.rows[index]
       if (!row?.some((value) => value.trim())) continue
       const values = target.headers.map((header) => {
@@ -1812,8 +1866,11 @@ export async function worldEditorModel(key: WorldIndexKey): Promise<IndexEditorM
   })
   const deleteIndex = isBuiltinWorldIndexKey(key)
     ? { allowed: false, reason: "Index prévu par Eraser : le code le lit (fiches, colonnes liées, création de personnage, statistiques). On peut en supprimer des onglets et des colonnes, pas l’index entier." }
+    : key === OBJECTS_INDEX_KEY
+    ? { allowed: false, reason: "Les items sont dans les inventaires, les magasins et les fouilles. On peut en supprimer des onglets et des colonnes, pas l’index entier." }
     : { allowed: true }
-  return { family: "world", key, title: data.definition.title, tabs, addTabs: !entity, relationTargets: await worldRelationTargets(), deleteIndex, ...(data.definition.tabs.length > 1 ? { tabColumn: data.definition.tabColumn ?? {} } : {}) }
+  // « objects » : les boutons propres aux items (envoyer dans un inventaire) et l'alignement des onglets.
+  return { family: key === OBJECTS_INDEX_KEY ? "objects" : "world", key, title: data.definition.title, tabs, addTabs: !entity, relationTargets: await worldRelationTargets(), deleteIndex, ...(data.definition.tabs.length > 1 ? { tabColumn: data.definition.tabColumn ?? {} } : {}) }
 }
 
 /** Les index du monde qu'une relation peut viser, avec leurs onglets et colonnes. */
@@ -1832,7 +1889,9 @@ export async function worldRelationTargets(): Promise<RelationTarget[]> {
     const tabs = await tabsOf(entry.key).catch(() => [] as WorldIndexTabDefinition[])
     return { index: entry.key, title: entry.title, tabs: tabs.map((tab) => ({ name: tab.name, columns: tab.headers })) }
   }))
-  return [...builtin, ...custom]
+  // L'Index des items, visé comme les autres (sans classeur des items, il n'est pas proposé).
+  const objects = await tabsOf(OBJECTS_INDEX_KEY).then((tabs) => [{ index: OBJECTS_INDEX_KEY as WorldIndexKey, title: "Items", tabs: tabs.map((tab) => ({ name: tab.name, columns: tab.headers })) }], () => [])
+  return [...builtin, ...objects, ...custom]
 }
 
 async function writeHeader(spreadsheetId: string, tabName: string, column: number, header: string) {

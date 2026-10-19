@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 import { indexColumnKinds, kindGroups, type IndexColumnKind, type IndexColumnSpec } from "@/lib/index-columns"
-import { creatableKinds, freePolicy, type ColumnPolicy, type IndexEditorModel } from "@/lib/index-schema-shared"
+import { creatableKinds, freePolicy, type ColumnPolicy } from "@/lib/index-schema-shared"
 import { cn } from "@/lib/utils"
 
 /**
@@ -117,14 +117,12 @@ export function ColumnDescriptionButton({ value, onChange, disabled }: { value: 
 }
 
 /** L'icône de chaque type, pour le repérer d'un coup d'œil. */
-export function ColumnTypeMenu({ spec, onPick, policy, disabled, family, icons }: { spec: IndexColumnSpec; onPick: (kind: IndexColumnKind) => void; policy: ColumnPolicy; disabled: boolean; family: IndexEditorModel["family"]; icons: Partial<Record<IndexColumnKind, LucideIcon>> }) {
+export function ColumnTypeMenu({ spec, onPick, policy, disabled, icons }: { spec: IndexColumnSpec; onPick: (kind: IndexColumnKind) => void; policy: ColumnPolicy; disabled: boolean; icons: Partial<Record<IndexColumnKind, LucideIcon>> }) {
   const [open, setOpen] = useState(false)
   const [hovered, setHovered] = useState<IndexColumnKind | null>(null)
-  const objects = family === "objects"
   const blocked = (kind: IndexColumnKind) => {
     if (kind === spec.kind) return ""
     if (!policy.type && !(["name", "name-form"].includes(kind) && ["name", "name-form"].includes(spec.kind))) return "Type verrouillé : voir le cadenas."
-    if (objects && ["linked", "linked-choice", "lookup", "rollup"].includes(kind)) return "Pas encore dans l’index des items : l’inventaire et les boutiques lisent leurs cases comme du texte."
     return ""
   }
   const current = indexColumnKinds[spec.kind]

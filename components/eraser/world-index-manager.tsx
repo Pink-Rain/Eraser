@@ -42,9 +42,8 @@ import { usePersistentState } from "@/hooks/use-persistent-state"
 import { IN_PLACE_ATTRIBUTE, replaceAppUrl, URL_CHANGE_EVENT } from "@/components/eraser/app-tabs"
 import { IndexTabPicker, useIndexTabParam } from "@/components/eraser/index-tab-picker"
 import { buttonPresets, runActionButton, type ActionRuntime } from "@/lib/index-actions"
-import { choiceCorrection, computeRollup, isIdHeader, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, objectColumnSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
+import { choiceCorrection, computeRollup, isIdHeader, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
 import { numberCorrection } from "@/lib/index-numbers"
-import { OBJECTS_ENGINE_KEY } from "@/lib/object-index-engine"
 import { positionalObjectId } from "@/lib/object-item-id"
 import { ObjectIcon } from "@/components/eraser/object-icon"
 import { ObjectSendDialog } from "@/components/eraser/object-send-dialog"
@@ -63,6 +62,7 @@ import {
   labelColumnIndex,
   nameColumnIndex,
   linkEndCovers,
+  OBJECTS_INDEX_KEY,
   splitNames,
   worldColumnSpec,
   worldIndexDefinitions,
@@ -154,8 +154,8 @@ function columnIndexOf(table: WorldIndexTable, header: string) {
 }
 
 /** La définition de repli d'un index qui n'a pas pu être chargé. */
-function fallbackDefinition(indexKey: EngineIndexKey): WorldIndexDefinition {
-  if (indexKey === OBJECTS_ENGINE_KEY) return { key: indexKey as WorldIndexKey, sheetName: "Index des objets", title: "Items", path: "/ressources/index-des-objets", itemLabel: "un item", tabs: [] }
+function fallbackDefinition(indexKey: WorldIndexKey): WorldIndexDefinition {
+  if (indexKey === OBJECTS_INDEX_KEY) return { key: indexKey, sheetName: "Index des objets", title: "Items", path: "/ressources/index-des-objets", itemLabel: "un item", tabs: [] }
   return isBuiltinWorldIndexKey(indexKey) ? worldIndexDefinitions[indexKey] : { key: indexKey, sheetName: indexKey, title: indexKey, path: `/ressources/index/${indexKey}`, tabs: [], custom: true }
 }
 
@@ -192,10 +192,7 @@ export type IndexEmbed = {
 /** Les rangs d'un sort dans une classe : commun (0), puis 1 à 20. */
 const CLASS_RANKS = Array.from({ length: 21 }, (_, rank) => rank)
 
-/** Un index du moteur : un index du monde, ou l'Index des items (« objects », lib/object-index-engine.ts). */
-export type EngineIndexKey = WorldIndexKey | typeof OBJECTS_ENGINE_KEY
-
-type WorldIndexManagerProps = { indexKey: EngineIndexKey; initialData: WorldIndexData | null; initialError: string; embed?: IndexEmbed }
+type WorldIndexManagerProps = { indexKey: WorldIndexKey; initialData: WorldIndexData | null; initialError: string; embed?: IndexEmbed }
 
 /**
  * Les pages d'index rendent ce composant au même endroit de l'arbre : sans clé,
@@ -207,7 +204,7 @@ export function WorldIndexManager(props: WorldIndexManagerProps) {
 }
 
 /** Un index intégré dans une autre page : il charge ses données lui-même. */
-export function EmbeddedWorldIndex({ indexKey, embed }: { indexKey: EngineIndexKey; embed: IndexEmbed }) {
+export function EmbeddedWorldIndex({ indexKey, embed }: { indexKey: WorldIndexKey; embed: IndexEmbed }) {
   const [state, setState] = useState<{ data: WorldIndexData | null; error: string } | null>(null)
   useEffect(() => {
     let alive = true
@@ -230,10 +227,13 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   // Les lignes arrivent allégées (lib/index-rows-wire.ts) : rétablies une fois, ici.
   const [data, setData] = useState(() => initialData ? { ...initialData, tables: initialData.tables.map(unpackTableRows) } : initialData)
   const definition = useMemo(() => data?.definition ?? fallbackDefinition(indexKey), [data, indexKey])
-  // L'Index des items : les mêmes outils, plus les siens (icônes, envoi dans un inventaire, changer d'onglet).
-  const isObjects = indexKey === OBJECTS_ENGINE_KEY
-  // Items : une adresse ou une vue d'avant désignait un tableau par « classeur:onglet » ; c'est maintenant son nom.
-  const tabOfSource = useCallback((source: string) => Object.entries(data?.origins ?? {}).find(([, sheet]) => `${sheet.fileId}:${sheet.sheetId}` === source)?.[0] ?? source, [data])
+  // L'Index des items : les outils du moteur, plus ceux des items (icônes, envoi dans un inventaire).
+  const isObjects = indexKey === OBJECTS_INDEX_KEY
+  // Items : une adresse ou une vue d'avant désignait un tableau par « classeur:onglet » (fileId:sheetId) ; c'est maintenant son nom.
+  const tabOfSource = useCallback((source: string) => {
+    const sheetId = isObjects ? /^[^:]+:(\d+)$/.exec(source)?.[1] : undefined
+    return (sheetId && data?.tables.find((owner) => String(owner.sheetId) === sheetId)?.tabName) || source
+  }, [data, isObjects])
   // Plusieurs onglets : la liste s'ouvre sur « Tout ».
   // L'onglet affiché est dans l'adresse (`?onglet=`) : chaque onglet de l'application a le sien.
   // Intégré dans une autre page : son premier onglet (ou un onglet-fenêtre), sans toucher à l'adresse.
@@ -375,7 +375,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   // Le type de chaque colonne, par onglet et en-tête : celui du schéma envoyé par le
   // serveur (colonnes renommées, types choisis dans « Modifier »), sinon le type par défaut.
   const baseSpecOf = useCallback((tab: string, header: string) => data?.columns[tab]?.find((column) => foldName(column.header) === foldName(header))?.spec
-    ?? (indexKey === OBJECTS_ENGINE_KEY ? objectColumnSpec(header, data?.tables.find((candidate) => candidate.tabName === tab)?.headers ?? []) : worldColumnSpec(indexKey, tab, header)), [data, indexKey])
+    ?? worldColumnSpec(indexKey, tab, header, data?.tables.find((candidate) => candidate.tabName === tab)?.headers), [data, indexKey])
   // Une liste à ajout libre propose aussi les valeurs déjà écrites dans la colonne (tous onglets) :
   // une valeur ajoutée une fois se choisit ensuite. Pas pour « Corriger N fautes », qui lit `baseSpecOf`.
   const customChoiceSpecs = useMemo(() => {
@@ -615,15 +615,9 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   const refreshRef = useRef<() => Promise<void>>(async () => undefined)
   useLayoutEffect(() => { refreshRef.current = refresh })
 
-  // Déplacer une ligne n'a de sens qu'entre onglets aux mêmes colonnes (les lieux).
-  const moveTargetsOf = useCallback((fromTab: string) => {
-    // Items : vers n'importe quel autre onglet (une colonne remplie qui manque à l'arrivée y est ajoutée).
-    if (isObjects) return (data?.tables ?? []).map((owner) => owner.tabName).filter((name) => name !== fromTab)
-    const signature = (headers: string[]) => [...headers].map(foldName).sort().join("|")
-    const from = definition.tabs.find((tab) => tab.name === fromTab)
-    if (!from) return []
-    return definition.tabs.filter((tab) => tab.name !== fromTab && signature(tab.headers) === signature(from.headers)).map((tab) => tab.name)
-  }, [data, definition, isObjects])
+  // Une ligne peut aller dans n'importe quel autre onglet : une colonne remplie que l'onglet
+  // d'arrivée n'a pas y est ajoutée (lib/world-indexes.ts, moveWorldIndexRows).
+  const moveTargetsOf = useCallback((fromTab: string) => definition.tabs.filter((tab) => tab.name !== fromTab).map((tab) => tab.name), [definition])
 
   const busy = Boolean(pending)
   const fullscreen = useFullscreenPanel()
@@ -635,14 +629,15 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     return found && column >= 0 ? rawOf(rowKey, found.table.headers[column]).replace(/<[^>]+>/g, "") : ""
   }, [locate, ownNameColumn, rawOf])
 
+  // Le classeur de l'index (dans son adresse Google) : l'import d'une icône d'item et l'identifiant de place d'un item.
+  const spreadsheetId = /\/d\/([^/]+)/.exec(data?.webViewLink ?? "")?.[1] ?? ""
   /** Items : l'identifiant que citent les inventaires (sa case ID, sinon sa place dans son classeur). */
   const itemIdOf = useCallback((rowKey: string) => {
     const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
     if (id) return id
     const found = locate(rowKey)
-    const sheet = found ? data?.origins?.[found.table.tabName] : undefined
-    return found && sheet ? positionalObjectId(sheet.fileId, sheet.sheetId, found.row.rowNumber) : ""
-  }, [data, locate, rawOf])
+    return found && spreadsheetId ? positionalObjectId(spreadsheetId, found.table.sheetId, found.row.rowNumber) : ""
+  }, [locate, rawOf, spreadsheetId])
   const openSend = useCallback((rowKey: string) => { setSendRow({ itemId: itemIdOf(rowKey), name: nameOf(rowKey).trim() || "Item" }) }, [itemIdOf, nameOf])
   const shell = useOptionalShellData()
   /** Items : la case « Icône » telle qu'Eraser l'affiche (image du Drive, icône d'Eraser, émoji). */
@@ -654,11 +649,10 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   const uploadIcon = useCallback(async (file: File, _previous: string, rowKey: string) => {
     const found = locate(rowKey)
     const target = rowTargetOf(rowKey)
-    const sheet = found ? data?.origins?.[found.table.tabName] : undefined
-    if (!found || !target || !sheet) throw new Error("Cette ligne n’existe plus : actualise le tableau.")
+    if (!found || !target || !spreadsheetId) throw new Error("Cette ligne n’existe plus : actualise le tableau.")
     const form = new FormData()
-    form.set("fileId", sheet.fileId)
-    form.set("tabName", sheet.tabName)
+    form.set("fileId", spreadsheetId)
+    form.set("tabName", found.table.tabName)
     form.set("rowNumber", String(target.rowNumber))
     form.set("id", target.id ?? "")
     form.set("name", (target.name ?? "").replace(/<[^>]+>/g, "").trim())
@@ -679,7 +673,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     const idColumn = owner ? columnIndexOf(owner, "ID") : -1
     const row = owner?.rows.find((candidate) => target.id && idColumn >= 0 ? (candidate.values[idColumn] ?? "").trim() === target.id : candidate.rowNumber === target.rowNumber)
     return icon >= 0 ? row?.values[icon] ?? "" : ""
-  }, [applyData, data, indexKey, locate, origin, rowTargetOf])
+  }, [applyData, indexKey, locate, origin, rowTargetOf, spreadsheetId])
 
   /** Une ligne telle que la page qui accueille la vue intégrée la voit. */
   const embedRow = useCallback((rowKey: string): IndexEmbedRow => ({
@@ -922,11 +916,9 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     const spec = specOf(tab, via)
     if (spec.kind === "linked-choice" && spec.source) return { index: spec.source.index, tabs: null }
     if (spec.kind !== "linked") return null
-    // Les items n'ont pas (encore) de colonne liée : leurs liens sont toujours vides.
-    const self = indexKey as WorldIndexKey
-    const pair = links.find(([left, right]) => [left, right].some((end) => linkEndCovers(end, self, tab) && foldName(end.column) === foldName(via)))
+    const pair = links.find(([left, right]) => [left, right].some((end) => linkEndCovers(end, indexKey, tab) && foldName(end.column) === foldName(via)))
     if (!pair) return null
-    const other = linkEndCovers(pair[0], self, tab) && foldName(pair[0].column) === foldName(via) ? pair[1] : pair[0]
+    const other = linkEndCovers(pair[0], indexKey, tab) && foldName(pair[0].column) === foldName(via) ? pair[1] : pair[0]
     return { index: other.index, tabs: other.tab === "*" ? null : [other.tab] }
   }, [indexKey, links, specOf])
   const relatedKeys = useMemo(() => {
@@ -1136,10 +1128,10 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       move: (toTab) => mutateRowsRef.current("move", targets, "move", { toTab }, { rethrow: true }),
       // Items : « Ajouter à l'inventaire », la fenêtre d'envoi (campagne, joueur, PNJ, créature).
       ...(isObjects ? { campaignInventory: async () => openSend(rowKey) } : {}),
-      // « Envoyer dans un autre onglet » : les onglets aux mêmes colonnes, choisis au clic.
+      // « Envoyer dans un autre onglet » : l’onglet choisi au clic.
       moveAsk: async () => {
         const choices = moveTargetsOf(tab)
-        if (!choices.length) throw new Error("Aucun autre onglet n’a les mêmes colonnes : la ligne ne peut aller nulle part.")
+        if (!choices.length) throw new Error("Cet index n’a pas d’autre onglet : la ligne ne peut aller nulle part.")
         const toTab = await ask(`Envoyer « ${nameOf(rowKey)} » dans…`, choices.map((name) => ({ value: name, label: name })))
         if (toTab) await mutateRowsRef.current("move", targets, "move", { toTab }, { rethrow: true })
       },

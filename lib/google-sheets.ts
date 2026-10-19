@@ -31,7 +31,7 @@ import { withAsyncLock } from "@/lib/async-lock"
 import type { ObjectIndexCellRef, ObjectIndexRowRef } from "@/lib/object-index-refs"
 import { objectCombatColumn, objectPriceColumn, objectTraitLooks, planObjectCombatHeaders } from "@/lib/object-combat"
 import { isEntityWorldIndexKey, worldIndexDefinitions, type BuiltinWorldIndexKey, type EntityWorldIndexKey } from "@/lib/world-index-definitions"
-import { choiceCorrection, foldName, isImageSource, type IndexColumnSpec } from "@/lib/index-columns"
+import { foldName, isImageSource, type IndexColumnSpec } from "@/lib/index-columns"
 import { forgetJdrSheet, getJdrSheet, saveJdrSheet, type JdrSheetKey, type JdrSheetRecord } from "@/lib/jdr-sheets"
 import { forgetGoogleAccessToken, googleOAuthAuthorizedFetch, warmGoogleOAuthAccessToken } from "@/lib/google-oauth"
 import { acquireSheetsSlot, asBackgroundGoogleWork, googleQuotaUser, noteQuotaRefusal, noteQuotaSuccess, QUOTA_ERROR } from "@/lib/google-quota"
@@ -481,6 +481,9 @@ function announceSpreadsheetWrite(path: string, method: string) {
   if (!spreadsheetId) return
   // Les copies partagées de ce classeur (lib/shared-reads.ts) ne servent plus, pour aucune installation.
   void markSpreadsheetChanged(spreadsheetId)
+  // Le classeur des items écrit (par le moteur des index, l'inventaire…) : l'inventaire, les
+  // magasins et l'index relisent ce classeur, et lui seul.
+  if (objectIndexTableCache?.tables.some((table) => table.fileId === spreadsheetId)) markObjectIndexFileChanged(spreadsheetId)
   for (const listener of spreadsheetWriteListeners) {
     try { listener(spreadsheetId) } catch { /* un auditeur en échec n'empêche pas l'écriture */ }
   }
@@ -2124,33 +2127,6 @@ async function fillObjectIndexCells(table: ObjectIndexTable, header: string, cel
   })
   if (writes.length) await updateRanges(table.fileId, writes)
   return writes.length
-}
-
-/**
- * « Corriger N fautes » des items : les cases d'une liste mal orthographiées (« Rarre ») prennent
- * le choix de la liste. Chaque case n'est réécrite que si elle porte encore la valeur vue
- * (relue juste avant) ; une colonne dont l'en-tête revient (deux « Rareté ») est laissée.
- * `specOf` : le type effectif d'une colonne. Rend le nombre de cases corrigées.
- */
-export async function normalizeObjectIndexChoices(specOf: (table: ObjectIndexTable, header: string) => IndexColumnSpec) {
-  let corrected = 0
-  for (const table of await listObjectIndexTables()) {
-    for (const [column, header] of table.headers.entries()) {
-      if (!header.trim() || table.headers.slice(0, column).some((other) => other.trim() === header.trim())) continue
-      const spec = specOf(table, header)
-      if (spec.kind !== "choice" || !spec.options?.length) continue
-      // Par valeur d'origine : la case n'est écrite que si elle la porte encore.
-      const byValue = new Map<string, Array<{ row: ObjectIndexRow; value: SheetCell }>>()
-      for (const row of table.rows) {
-        const before = row.values[column] ?? ""
-        const next = choiceCorrection(before, spec.options)
-        if (next) byValue.set(before, [...byValue.get(before) ?? [], { row, value: next }])
-      }
-      for (const [before, cells] of byValue) corrected += await fillObjectIndexCells(table, header, cells, (current) => current === before)
-    }
-  }
-  if (corrected) clearObjectIndexTableCache()
-  return corrected
 }
 
 /**
