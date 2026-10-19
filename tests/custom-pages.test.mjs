@@ -143,7 +143,9 @@ test("Ce que reçoit chaque rôle : blocs masqués et secrets non révélés ne 
   assert.equal(forPlayer.canReveal, false);
   const forMj = pages.pageForViewer(page, mj);
   assert.deepEqual(blockIds(forMj), ["b-titre", "b-mj", "b-secret", "b-notes"]);
-  assert.equal(forMj.editable, true);
+  // Un MJ lit la page sans pouvoir la modifier : les pages se construisent en vue administrateur.
+  assert.equal(forMj.editable, false);
+  assert.equal(pages.pageForViewer(page, admin).editable, true);
   const forAdmin = pages.pageForViewer(page, admin);
   assert.deepEqual(blockIds(forAdmin), ["b-titre", "b-mj", "b-secret", "b-notes", "b-admin"]);
   // Révélé : le secret part vers les joueurs, avec qui l'a révélé.
@@ -164,7 +166,9 @@ test("Ce que reçoit chaque rôle : blocs masqués et secrets non révélés ne 
 test("Brouillons, visibilité de la page, campagnes et droits de l'atelier", () => {
   const draft = stored({ status: "brouillon", published: null });
   assert.equal(pages.pageForViewer(draft, player), null);
-  assert.equal(pages.pageForViewer(draft, mj).draft, true);
+  // Un brouillon n'est lu que par qui construit les pages (administrateurs).
+  assert.equal(pages.pageForViewer(draft, mj), null);
+  assert.equal(pages.pageForViewer(draft, admin).draft, true);
   const mjOnly = stored({ vis: "mj" });
   assert.equal(pages.pageForViewer(mjOnly, player), null);
   assert.ok(pages.pageForViewer(mjOnly, mj));
@@ -179,13 +183,22 @@ test("Brouillons, visibilité de la page, campagnes et droits de l'atelier", () 
   assert.equal(pages.pageForViewer(campaign, player), null);
   assert.ok(pages.pageForViewer(campaign, { ...player, member: true }));
   assert.equal(pages.canEditPage(campaign, { ...mj, member: true }), false);
-  assert.equal(pages.canEditPage(campaign, { ...mj, member: true, manager: true }), true);
+  // Les pages se construisent en vue administrateur seulement : même le MJ de la campagne ne les modifie pas.
+  assert.equal(pages.canEditPage(campaign, { ...mj, member: true, manager: true }), false);
+  assert.equal(pages.canEditPage(stored({ place: "regles" }), mj), false);
   assert.equal(pages.canEditPage(campaign, admin), true);
+  assert.equal(pages.canBuildPages("mj"), false);
+  assert.equal(pages.canBuildPages("admin"), true);
+  // Un MJ lit toujours les pages et y révèle les secrets.
+  assert.equal(pages.canManagePages("mj"), true);
+  assert.equal(pages.canRevealSecrets("mj"), true);
   // Publiée puis modifiée : les joueurs lisent la version publiée, l'atelier le brouillon.
   const edited = stored({ title: "Nouveau titre" });
   assert.equal(pages.pageForViewer(edited, player).title, "Guide du joueur");
-  assert.equal(pages.pageForViewer(edited, mj).unpublished, true);
-  assert.equal(pages.pageForViewer(edited, mj, { draft: true }).title, "Nouveau titre");
+  assert.equal(pages.pageForViewer(edited, admin).unpublished, true);
+  assert.equal(pages.pageForViewer(edited, admin, { draft: true }).title, "Nouveau titre");
+  // Un MJ lit la version publiée, même s'il demande le brouillon.
+  assert.equal(pages.pageForViewer(edited, mj, { draft: true }).title, "Guide du joueur");
   assert.equal(pages.pageForViewer(edited, player, { draft: true }).title, "Guide du joueur");
 });
 

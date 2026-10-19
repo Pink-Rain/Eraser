@@ -4,7 +4,7 @@ import { NO_CLASS } from "@/lib/class-visibility"
 import Link from "next/link"
 import dynamic from "next/dynamic"
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react"
-import { ArrowUpRight, Backpack, BookOpen, Check, CircleUserRound, ImagePlus, Pencil, Plus, Save, Trash2, Upload, Users, X } from "lucide-react"
+import { ArrowUpRight, Backpack, BookOpen, Check, CircleUserRound, Eye, EyeOff, ImagePlus, Pencil, Plus, Save, Trash2, Upload, Users, X } from "lucide-react"
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { RichTextView } from "@/components/eraser/rich-text"
@@ -47,7 +47,7 @@ function DeferredCampaignInventory({ campaignId, readOnly }: { campaignId: strin
 }
 
 export function CampaignDashboard({
-  initialCampaign, initialMembers, initialGroupNpcs, npcsUnavailable = false, canManage, ownedCharacterIds, userEmail,
+  initialCampaign, initialMembers, initialGroupNpcs, npcsUnavailable = false, canManage, ownedCharacterIds, userEmail, hiddenCharacterIds = [], canHideCharacters = false,
 }: {
   initialCampaign: CampaignRecord
   initialMembers: CampaignMemberRecord[]
@@ -57,8 +57,27 @@ export function CampaignDashboard({
   canManage: boolean
   ownedCharacterIds: string[]
   userEmail: string
+  /** Pour le MJ : les personnages qu'il cache aux autres joueurs de la campagne. */
+  hiddenCharacterIds?: string[]
+  /** Le serveur partagé est là : le MJ peut cacher un personnage aux autres joueurs. */
+  canHideCharacters?: boolean
 }) {
   const [campaign, setCampaign] = useState(initialCampaign)
+  const [hiddenCharacters, setHiddenCharacters] = useState(hiddenCharacterIds)
+  const [hidingId, setHidingId] = useState("")
+  const [hidingError, setHidingError] = useState("")
+  /** Cache (ou remontre) un personnage aux autres joueurs : il reste dans la campagne, son joueur le voit toujours. */
+  async function toggleHidden(character: CampaignMemberRecord) {
+    const hidden = !hiddenCharacters.includes(character.id)
+    setHidingId(character.id); setHidingError("")
+    try {
+      const response = await fetch(`/api/campaigns/${encodeURIComponent(campaign.id)}/characters`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ characterId: character.id, hidden }) })
+      const payload = (await response.json().catch(() => ({}))) as { hidden?: string[]; error?: string }
+      if (!response.ok || !payload.hidden) throw new Error(payload.error || "Ce choix n’a pas pu être enregistré.")
+      setHiddenCharacters(payload.hidden)
+    } catch (caught) { setHidingError(caught instanceof Error ? caught.message : "Ce choix n’a pas pu être enregistré.") }
+    setHidingId("")
+  }
   const [members, setMembers] = useState(initialMembers)
   const [editingTitle, setEditingTitle] = useState(false)
   const [title, setTitle] = useState(campaign.name)
@@ -250,10 +269,11 @@ export function CampaignDashboard({
               const classes = parseListCell(character.classes).entries.join(" · ")
               const honoraryTitle = parseListCell(character.honoraryTitle).selected
               const classAndLevel = [classes || NO_CLASS, character.level ? `Niveau ${character.level}` : ""].filter(Boolean).join(" · ")
-              return <article key={character.id} className="group relative grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] overflow-hidden rounded-2xl border bg-card/75 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"><div className="relative min-h-36 bg-muted"><div className="absolute inset-0 grid place-items-center"><CircleUserRound className="size-10 text-primary/20" /></div><img src={`/api/characters/portrait/${encodeURIComponent(character.id)}`} alt={`Portrait de ${character.name}`} loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover transition duration-300 group-hover:scale-[1.025]" onError={(event) => { event.currentTarget.style.display = "none" }} /></div><div className="min-w-0 p-4 pr-11"><h3 className="font-display text-xl font-semibold leading-tight">{character.name}{character.playerName && <span className="font-sans text-sm font-normal text-muted-foreground"> • {character.playerName}</span>}</h3>{honoraryTitle && <p className="mt-1 text-sm font-medium leading-snug" style={{ color: campaign.accentColor }}>{honoraryTitle}</p>}{classAndLevel && <p className="mt-3 text-sm font-semibold leading-snug text-foreground/80">{classAndLevel}</p>}{people && <p className="mt-1 text-sm leading-snug text-muted-foreground">{people}</p>}</div><div className="absolute right-2 top-2 flex flex-col gap-1">{canOpen && <Button asChild size="icon-sm" variant="ghost" aria-label={`Ouvrir la fiche de ${character.name}`} title="Ouvrir la fiche"><Link href={`/personnage/${encodeURIComponent(character.id)}`} prefetch={false}><ArrowUpRight /></Link></Button>}{canManage && <Button type="button" size="icon-sm" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" aria-label={`Retirer ${character.name} de la campagne`} title="Retirer de la campagne" onClick={() => setRemoveTarget(character)}><Trash2 /></Button>}</div></article>
+              return <article key={character.id} className="group relative grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] overflow-hidden rounded-2xl border bg-card/75 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"><div className="relative min-h-36 bg-muted"><div className="absolute inset-0 grid place-items-center"><CircleUserRound className="size-10 text-primary/20" /></div><img src={`/api/characters/portrait/${encodeURIComponent(character.id)}`} alt={`Portrait de ${character.name}`} loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover transition duration-300 group-hover:scale-[1.025]" onError={(event) => { event.currentTarget.style.display = "none" }} /></div><div className="min-w-0 p-4 pr-11"><h3 className="font-display text-xl font-semibold leading-tight">{character.name}{character.playerName && <span className="font-sans text-sm font-normal text-muted-foreground"> • {character.playerName}</span>}</h3>{honoraryTitle && <p className="mt-1 text-sm font-medium leading-snug" style={{ color: campaign.accentColor }}>{honoraryTitle}</p>}{classAndLevel && <p className="mt-3 text-sm font-semibold leading-snug text-foreground/80">{classAndLevel}</p>}{people && <p className="mt-1 text-sm leading-snug text-muted-foreground">{people}</p>}{canManage && hiddenCharacters.includes(character.id) && <p className="mt-2 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><EyeOff className="size-3" />Caché aux autres joueurs</p>}</div><div className="absolute right-2 top-2 flex flex-col gap-1">{canHideCharacters && <Button type="button" size="icon-sm" variant={hiddenCharacters.includes(character.id) ? "secondary" : "ghost"} aria-pressed={hiddenCharacters.includes(character.id)} disabled={hidingId === character.id} aria-label={hiddenCharacters.includes(character.id) ? `Montrer ${character.name} aux autres joueurs` : `Cacher ${character.name} aux autres joueurs`} title={hiddenCharacters.includes(character.id) ? "Caché aux autres joueurs — cliquer pour le leur montrer" : "Visible de tous — cliquer pour le cacher aux autres joueurs (son joueur le voit toujours)"} onClick={() => void toggleHidden(character)}>{hidingId === character.id ? <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : hiddenCharacters.includes(character.id) ? <EyeOff /> : <Eye />}</Button>}{canOpen && <Button asChild size="icon-sm" variant="ghost" aria-label={`Ouvrir la fiche de ${character.name}`} title="Ouvrir la fiche"><Link href={`/personnage/${encodeURIComponent(character.id)}`} prefetch={false}><ArrowUpRight /></Link></Button>}{canManage && <Button type="button" size="icon-sm" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" aria-label={`Retirer ${character.name} de la campagne`} title="Retirer de la campagne" onClick={() => setRemoveTarget(character)}><Trash2 /></Button>}</div></article>
             }) : <p className="text-sm text-muted-foreground">Aucun personnage dans cette campagne.</p>}
           </div>
           {canManage && !addingCharacter && availableError && <p className="mt-3 text-sm text-destructive">{availableError}</p>}
+          {hidingError && <p className="mt-3 text-sm text-destructive">{hidingError}</p>}
           {canManage && memberWarning && <p className="mt-3 rounded-xl border border-amber-400/40 bg-amber-50 px-4 py-3 text-sm text-amber-900">{memberWarning}</p>}
           <AlertDialog open={Boolean(removeTarget)} onOpenChange={(open) => { if (!open && !removing) setRemoveTarget(null) }}>
             <AlertDialogContent>

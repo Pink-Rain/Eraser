@@ -4,7 +4,7 @@
  * elles-mêmes sont dans lib/custom-pages.ts.
  */
 import { getCampaignForMj, getCampaignForPlayer, listAllCampaignsForAdmin, listCampaignsForMj, listCampaignsForPlayer } from "@/lib/google-sheets"
-import { canEditPage, canManagePages, canReadPage, pageForViewer, pageHref, placeLabel, type CustomPage, type PageAuthor, type PagePlace, type PageView, type PageViewer } from "@/lib/custom-pages"
+import { canBuildPages, canEditPage, canManagePages, canReadPage, pageForViewer, pageHref, placeLabel, type CustomPage, type PageAuthor, type PagePlace, type PageView, type PageViewer } from "@/lib/custom-pages"
 import { knownCustomPages, knownCustomPagesSoon, listCustomPages } from "@/lib/custom-pages-store"
 import type { BlockDataOptions, IndexSource } from "@/lib/custom-pages-data"
 import { rowPageHref, templateForRow } from "@/lib/custom-pages-rows"
@@ -234,12 +234,12 @@ function linkTargetsAmong(view: PageView, readable: ReturnType<typeof readableAm
 /** Les pages vers lesquelles mènent les blocs Lien d'une page : seulement celles que le lecteur peut ouvrir. */
 export async function linkTargetsOf(view: PageView, account: Pick<AuthorizedUser, "uid" | "role" | "displayName" | "email">) {
   const linked = view.sections.some((section) => section.cols.flat().some((block) => block.type === "link" && block.pageId))
-  return linkTargetsAmong(view, linked ? await readablePages(account, { includeDrafts: canManagePages(account.role) }) : [])
+  return linkTargetsAmong(view, linked ? await readablePages(account, { includeDrafts: canBuildPages(account.role) }) : [])
 }
 
 /** Les mêmes, tout de suite d'après la copie en mémoire (page d'Eraser remplacée, dans la coque). */
 export function linkTargetsKnown(view: PageView, account: Pick<AuthorizedUser, "uid" | "role" | "displayName" | "email">) {
-  return linkTargetsAmong(view, readableKnownPages(account, { includeDrafts: canManagePages(account.role) }))
+  return linkTargetsAmong(view, readableKnownPages(account, { includeDrafts: canBuildPages(account.role) }))
 }
 
 /** L'adresse de l'index de chaque bloc Vue (MJ et admins : les joueurs n'ont pas accès aux index). */

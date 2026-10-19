@@ -712,6 +712,13 @@ export type PageViewer = { role: PageRole; uid: string; name?: string; member?: 
 
 export const canManagePages = (role: PageRole) => role === "admin" || role === "mj"
 
+/**
+ * Construire des pages (créer, modifier, l'atelier, les modèles, l'éditeur du menu) : les
+ * administrateurs seulement. Un MJ lit les pages, y révèle les secrets et écrit dans les carnets
+ * ouverts aux MJ (`canManagePages`, `canRevealSecrets`, `canEditNotes`), sans les construire.
+ */
+export const canBuildPages = (role: PageRole) => role === "admin"
+
 export function blockVisibleTo(vis: BlockVisibility, role: PageRole) {
   if (vis === "tous") return true
   if (vis === "joueurs") return role === "joueur"
@@ -729,10 +736,9 @@ export function pageVisibleTo(vis: PageVisibility, role: PageRole) {
  * aux admins et hors Administration, et pour une page de campagne seulement la sienne.
  */
 export function canEditPage(page: Pick<CustomPage, "vis" | "place">, viewer: PageViewer) {
-  if (viewer.role === "admin") return true
-  if (viewer.role !== "mj") return false
-  if (page.vis === "admin" || page.place === "administration") return false
-  return page.place !== "campagne" || Boolean(viewer.manager)
+  // Les pages se construisent en vue administrateur seulement (voir `canBuildPages`).
+  void page
+  return canBuildPages(viewer.role)
 }
 
 /** La section accepte-t-elle ce rôle (Administration : admins ; Index, Bac à sable : MJ et admins) ? */

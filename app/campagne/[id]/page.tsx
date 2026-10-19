@@ -9,6 +9,7 @@ import { authorizedAccount, type AuthorizedUser } from "@/lib/server-auth"
 import { identityUidsForUser } from "@/lib/identity-links"
 import { playerNamesFor } from "@/lib/chat-accounts"
 import { ownedBy } from "@/lib/ownership"
+import { campaignHidingAvailable, hiddenCampaignCharacters, visibleCampaignCharacters } from "@/lib/campaign-hidden-characters"
 
 export const dynamic = "force-dynamic"
 
@@ -26,7 +27,7 @@ async function CampaignDashboardData({
   // Chaque partie de la page se lit à part : quand Google refuse une lecture (tous les
   // joueurs ouvrent la campagne en même temps), seule cette partie le dit, au lieu de
   // « Impossible d'afficher cette page » pour tout le monde sauf un.
-  const [listed, npcRead] = await Promise.all([
+  const [listed, npcRead, hidden] = await Promise.all([
     listCampaignMembers(campaign.id).catch((error) => {
       console.error("CAMPAIGN_MEMBERS_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
       return []
@@ -35,6 +36,8 @@ async function CampaignDashboardData({
       console.error("CAMPAIGN_GROUP_NPCS_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
       return { npcs: [], unavailable: true }
     }),
+    // Les personnages que le MJ cache aux autres joueurs (serveur partagé).
+    hiddenCampaignCharacters(campaign.id),
   ])
   const { npcs: groupNpcs, unavailable: npcsUnavailable } = npcRead
   // Le joueur de chaque personnage, pour sa carte (« • Nom du joueur »).
@@ -42,10 +45,12 @@ async function CampaignDashboardData({
     identityUidsForUser(accountUid).catch(() => [accountUid]),
     playerNamesFor(account, listed.map((character) => character.ownerUid)).catch(() => new Map<string, string>()),
   ])
-  const members = listed.map((character) => ({ ...character, playerName: players.get(character.ownerUid) ?? "" }))
+  const owned = listed.filter((character) => ownedBy(character.ownerUid, identities)).map((character) => character.id)
+  // Un joueur ne voit pas les personnages que le MJ cache aux autres (les siens, si).
+  const members = visibleCampaignCharacters(listed, hidden, { manager: canManage, ownIds: owned }).map((character) => ({ ...character, playerName: players.get(character.ownerUid) ?? "" }))
   // Les joueurs ne voient ni les notes MJ ni la note de fond du PNJ.
   const visibleNpcs = canManage ? groupNpcs : groupNpcs.map((npc) => ({ ...npc, gmNotes: "", lore: "" }))
-  return <CampaignDashboard initialCampaign={campaign} initialMembers={members} initialGroupNpcs={visibleNpcs} npcsUnavailable={npcsUnavailable} canManage={canManage} ownedCharacterIds={members.filter((character) => ownedBy(character.ownerUid, identities)).map((character) => character.id)} userEmail={userEmail} />
+  return <CampaignDashboard initialCampaign={campaign} initialMembers={members} initialGroupNpcs={visibleNpcs} npcsUnavailable={npcsUnavailable} canManage={canManage} ownedCharacterIds={owned} userEmail={userEmail} hiddenCharacterIds={canManage ? hidden : []} canHideCharacters={canManage && campaignHidingAvailable()} />
 }
 
 export default async function CampaignDashboardPage({ params }: { params: Promise<{ id: string }> }) {

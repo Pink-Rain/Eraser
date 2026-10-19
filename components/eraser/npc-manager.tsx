@@ -22,6 +22,7 @@ import { Progress } from "@/components/ui/progress"
 import { CharacterInventory } from "@/components/eraser/character-inventory"
 import { CharacteristicBadges, CharacteristicInputs } from "@/components/eraser/characteristic-fields"
 import { npcCharacteristicKeys, npcCharacteristics, type CharacteristicName } from "@/lib/characteristics"
+import { RevealToggle } from "@/components/eraser/session-reveal"
 import { AddToSessionDialog, patchSession } from "@/components/eraser/session-picker"
 import { SpellPicker, useSpellOptions } from "@/components/eraser/spell-picker"
 import { TokenButton } from "@/components/eraser/token-editor"
@@ -226,6 +227,7 @@ function NpcCard({ npc, pending, mode, action, shops = [], onEdit, onAction, onS
             {action.kind === "add-to-session" && <Button type="button" variant="ghost" size="icon-sm" onClick={onAction} disabled={pending} title="Ajouter à la session" aria-label={`Ajouter ${npc.name} à la session`}><MapPinned /></Button>}
             {onLinkShop && <Button type="button" variant="ghost" size="icon-sm" onClick={onLinkShop} disabled={pending} title="Lier un magasin (ce PNJ en devient le vendeur)" aria-label={`Lier un magasin à ${npc.name}`}><Store /></Button>}
             {onSend && <Button type="button" variant="ghost" size="icon-sm" onClick={onSend} disabled={pending} title="Envoyer dans une autre session (il reste aussi dans celle-ci)" aria-label={`Envoyer ${npc.name} dans une autre session`}><Send /></Button>}
+            {action.kind === "remove-from-session" && <RevealToggle kind="npc" id={npc.id} name={npc.name} />}
             {action.kind === "remove-from-session" && <Button type="button" variant="ghost" size="icon-sm" className="text-destructive" onClick={onAction} disabled={pending} title="Retirer de la session" aria-label={`Retirer ${npc.name} de la session`}><CircleMinus /></Button>}
             {mode === "manage" && <AlertDialog><AlertDialogTrigger asChild><Button type="button" variant="ghost" size="icon-sm" className="text-destructive" disabled={pending} aria-label={`Supprimer ${npc.name}`}><Trash2 /></Button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Supprimer « {npc.name} » ?</AlertDialogTitle><AlertDialogDescription>Cette suppression est définitive.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={onDelete}>Supprimer</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>}
           </div>

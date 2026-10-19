@@ -11,6 +11,8 @@ import { listCampaignMembers, listCharactersForUser, listNpcs, listSavedShops } 
 import { campaignReader } from "@/lib/session-access"
 import { listSessionNotes } from "@/lib/session-notes"
 import { authorizedAccount } from "@/lib/server-auth"
+import { revealedSession } from "@/lib/session-reveal"
+import { hiddenCampaignCharacters } from "@/lib/campaign-hidden-characters"
 
 export const dynamic = "force-dynamic"
 
@@ -64,7 +66,7 @@ export default async function CampaignJournalPage({ params, searchParams }: { pa
   })
   const viewer = { uid: account.uid, manager: reader.manager }
   // Chaque lecture peut manquer (feuille pas encore créée, Google indisponible) : le reste s'affiche.
-  const [notes, members, mine, npcs, shops, events] = await Promise.all([
+  const [notes, listedMembers, mine, npcs, shops, events, hiddenCharacters] = await Promise.all([
     // Le journal ne montre que les notes de session (publiques) ; les notes privées restent dans la fiche.
     listSessionNotes(id, viewer).then((notes) => notes.filter((note) => !note.private)).catch(() => null),
     listCampaignMembers(id).catch(() => []),
@@ -72,9 +74,19 @@ export default async function CampaignJournalPage({ params, searchParams }: { pa
     listNpcs(id).catch(() => []),
     listSavedShops(id).catch(() => []),
     listCampaignEvents(id).catch(() => []),
+    hiddenCampaignCharacters(id),
   ])
   const visuals = await noteVisuals(notes)
-  const list = sessions ?? []
+  // Un joueur ne voit que ce que le MJ a révélé dans chaque session (Créateur de session), et
+  // pas les personnages que le MJ cache aux autres joueurs (les siens restent visibles).
+  const ownIds = mine.map((character) => character.id)
+  const veiledCharacters = reader.manager ? new Set<string>() : new Set(hiddenCharacters.filter((characterId) => !ownIds.includes(characterId)))
+  const members = listedMembers.filter((member) => !veiledCharacters.has(member.id))
+  const list = (sessions ?? []).map((session) => {
+    if (reader.manager) return session
+    const shown = revealedSession(session)
+    return { ...shown, characterIds: shown.characterIds.filter((characterId) => !veiledCharacters.has(characterId)) }
+  })
   // Un joueur ne voit que ce qui est entré dans une session ; la préparation du MJ reste à lui.
   const inSessions = { npcs: new Set(list.flatMap((session) => session.npcIds)), shops: new Set(list.flatMap((session) => [...session.shopIds, ...session.eventIds.filter((entry) => entry.startsWith("shop:")).map((entry) => entry.slice(5))])), events: new Set(list.flatMap((session) => session.eventIds)) }
   const shown = <T extends { id: string }>(items: T[], set: Set<string>) => reader.manager ? items : items.filter((item) => set.has(item.id))
@@ -89,6 +101,8 @@ export default async function CampaignJournalPage({ params, searchParams }: { pa
     eventIds: session.eventIds.filter((entry) => !entry.startsWith("shop:")),
     // Les lieux notés par le MJ en préparant la session : à lui seul.
     places: reader.manager ? session.places : "",
+    // Le MJ voit ce qui reste caché aux joueurs ; un joueur ne voit les personnages cachés ni dans le groupe, ni parmi les absents.
+    ...(reader.manager ? { hidden: session.hidden } : { veiledCharacterIds: (sessions ?? []).find((candidate) => candidate.id === session.id)?.characterIds.filter((characterId) => !session.characterIds.includes(characterId)) ?? [] }),
   }))
   return (
     <AuthenticatedShell pageLabel={`Journal de ${reader.campaign.name}`}>

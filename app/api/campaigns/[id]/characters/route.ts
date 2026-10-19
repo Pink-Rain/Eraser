@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 import { addCharacterToCampaign, getCampaignDashboard, listAvailableCampaignCharacters, removeCharacterFromCampaign } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
 import { playerNamesFor } from "@/lib/chat-accounts"
+import { setCampaignCharacterHidden } from "@/lib/campaign-hidden-characters"
 
 // Le lien a bien été créé localement, mais pas encore écrit dans la feuille
 // partagée : c'est un avertissement, pas un échec — les autres installations ne
@@ -71,5 +72,22 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     return NextResponse.json({ removed: characterId, warning: sharedWarning(sharedError, account.role === "admin") })
   } catch (error) {
     return NextResponse.json({ error: membershipErrorMessage(error, "Le personnage n’a pas pu être retiré.", account.role === "admin") }, { status: 400 })
+  }
+}
+
+/** Cache (ou remontre) un personnage aux autres joueurs de la campagne : le MJ de la campagne ou un administrateur. */
+export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const account = await authorizedAccount(["admin", "mj"])
+  if (!account) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
+  const { id } = await params
+  const campaign = await getCampaignDashboard(account.role === "admin" ? null : account.uid, id).catch(() => null)
+  if (!campaign) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
+  try {
+    const body = (await request.json()) as { characterId?: unknown; hidden?: unknown }
+    if (typeof body.characterId !== "string" || !body.characterId || body.characterId.length > 200 || typeof body.hidden !== "boolean") throw new Error("INVALID")
+    return NextResponse.json({ hidden: await setCampaignCharacterHidden(id, body.characterId, body.hidden) })
+  } catch (error) {
+    const code = error instanceof Error ? error.message : ""
+    return NextResponse.json({ error: code === "SHARED_STORE_UNAVAILABLE" ? "Cacher un personnage demande le serveur partagé d’Eraser, qui n’est pas configuré ici." : "Ce choix n’a pas pu être enregistré. Réessaie dans un instant." }, { status: 400 })
   }
 }

@@ -19,6 +19,8 @@ import { CreateSessionDialog, deleteSession, patchSession, SESSION_UPDATED_EVENT
 import { SavedShopCollection } from "@/components/eraser/shop-generator"
 import { SessionEvents } from "@/components/eraser/session-events"
 import { RichTextField } from "@/components/eraser/rich-text"
+import { RevealAllBar, RevealToggle, SessionRevealProvider } from "@/components/eraser/session-reveal"
+import { sessionItemKey, sessionItemKeys, type SessionRevealKind } from "@/lib/session-reveal"
 import { replaceAppUrl } from "@/components/eraser/app-tabs"
 import type { CampaignNpcRecord, SavedShopRecord, ShopGeneratorItem } from "@/lib/shop-schema"
 import { builtinShopTypes, type ShopTypeDefinition } from "@/lib/shop-types"
@@ -59,6 +61,7 @@ function PlayerCard({ member, pending, onRemove }: { member: SessionMember; pend
       {member.people && <p className="mt-1 text-sm text-muted-foreground">{member.people}</p>}
     </div>
     <div className="absolute right-2 top-2 flex flex-col gap-1">
+      <RevealToggle kind="character" id={member.id} name={member.name} />
       <Button asChild size="icon-sm" variant="ghost" aria-label={`Ouvrir la fiche de ${member.name}`} title="Ouvrir la fiche"><Link href={`/personnage/${encodeURIComponent(member.id)}`} prefetch={false}><ArrowUpRight /></Link></Button>
       <Button type="button" size="icon-sm" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={pending} aria-label={`Retirer ${member.name} de la session`} title="Retirer de la session" onClick={onRemove}><CircleMinus /></Button>
     </div>
@@ -113,6 +116,32 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
     replace(await patchSession(campaignId, session.id, body))
   }
 
+  // La visibilité dans le journal : l'œil change tout de suite, l'enregistrement suit ; en cas
+  // d'échec, la session revient à ce qu'elle était.
+  const [savingReveal, setSavingReveal] = useState<string | null>(null)
+  // Une session lue avant la colonne « Cachés (JSON) » n'a rien de caché.
+  const hiddenKeys = session?.hidden ?? []
+  async function changeVisibility(change: { reveal?: string[]; hide?: string[]; all?: "reveal" | "hide" }, saving: string | null) {
+    if (!session) return
+    const before = session
+    const hidden = change.all === "reveal" ? [] : change.all === "hide" ? sessionItemKeys(session) : [...new Set([...hiddenKeys.filter((key) => !(change.reveal ?? []).includes(key)), ...(change.hide ?? [])])]
+    replace({ ...session, hidden })
+    setSavingReveal(saving); setError("")
+    try { replace(await patchSession(campaignId, session.id, { visibility: change })) }
+    catch (caught) { replace(before); setError(caught instanceof Error ? caught.message : "La visibilité n’a pas pu être enregistrée.") }
+    setSavingReveal(null)
+  }
+  const reveal = {
+    isHidden: (kind: SessionRevealKind, id: string) => hiddenKeys.includes(sessionItemKey(kind, id)),
+    toggle: (kind: SessionRevealKind, id: string) => {
+      const key = sessionItemKey(kind, id)
+      void changeVisibility(hiddenKeys.includes(key) ? { reveal: [key] } : { hide: [key] }, key)
+    },
+    saving: savingReveal,
+  }
+  const allKeys = session ? sessionItemKeys(session) : []
+  const hiddenCount = allKeys.filter((key) => hiddenKeys.includes(key)).length
+
   async function guarded(task: () => Promise<void>) {
     setPending(true); setError("")
     try { await task() } catch (caught) { setError(caught instanceof Error ? caught.message : "La session n’a pas pu être modifiée.") }
@@ -149,7 +178,7 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
   const players = members.filter((member) => inSession.has(member.id))
   const addable = members.filter((member) => !inSession.has(member.id))
 
-  return <div className="mt-7 space-y-8">
+  return <SessionRevealProvider value={reveal}><div className="mt-7 space-y-8">
     <div className="flex flex-col gap-3 rounded-2xl border bg-card/65 p-3 sm:flex-row sm:items-center">
       <NativeSelect value={selectedId} onChange={(event) => select(event.target.value)} aria-label="Session" className="w-full sm:w-auto" disabled={!sessions.length}>
         {!sessions.length && <NativeSelectOption value="">Aucune session</NativeSelectOption>}
@@ -191,6 +220,8 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
           </div>
         </div>
       </section>
+
+      <RevealAllBar hiddenCount={hiddenCount} total={allKeys.length} pending={Boolean(savingReveal)} onAll={(all) => void changeVisibility({ all }, "*")} />
 
       <section>
         <SectionTitle>Lieux de la session</SectionTitle>
@@ -248,5 +279,5 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
         <AlertDialogFooter><AlertDialogCancel disabled={pending}>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" disabled={pending} onClick={(event) => { event.preventDefault(); void removeSession() }}>{pending ? <LoaderCircle className="animate-spin" /> : <Trash2 />}Supprimer</AlertDialogAction></AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
-  </div>
+  </div></SessionRevealProvider>
 }

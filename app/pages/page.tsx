@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic"
 
 /** L'Index des pages du créateur de pages : admins et MJ. */
 export default async function PagesIndexPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  const account = await authorizedAccount(["admin", "mj"])
+  const account = await authorizedAccount(["admin"])
   if (!account) redirect("/")
   const parameters = await searchParams
   const [pages, templates, campaigns] = await Promise.all([
@@ -34,7 +34,7 @@ export default async function PagesIndexPage({ searchParams }: { searchParams: P
   const single = (value: string | string[] | undefined) => Array.isArray(value) ? value[0] : value
   const wantsNew = single(parameters.nouvelle) === "1"
   return (
-    <AuthenticatedShell pageLabel="Index des pages" roles={["admin", "mj"]}>
+    <AuthenticatedShell pageLabel="Index des pages" roles={["admin"]}>
       <PageDirectory
         // « Nouvelle page » depuis le menu, alors que l'Index est déjà ouvert : la fenêtre s'ouvre quand même.
         key={wantsNew ? `nouvelle:${single(parameters.section) ?? ""}` : "index"}

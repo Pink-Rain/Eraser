@@ -224,10 +224,15 @@ export function isShopTypePlace(place: string, type: Pick<ShopTypeDefinition, "n
   return Boolean(folded) && (folded === foldText(type.name) || folded.replace(/\s+/g, "-") === type.key || foldText(place).replace(/s\b/g, "") === foldText(type.name).replace(/s\b/g, ""))
 }
 
-/** Le type et le sous-type d'un item sont-ils permis par ce type de magasin ? */
-export function shopTypeAllows(type: ShopTypeDefinition, item: Pick<ShopGeneratorItem, "type" | "subtype">) {
-  const allowed = (list: string[], value: string) => !list.length || list.some((entry) => foldText(entry) === foldText(value))
-  return allowed(type.types, item.type) && allowed(type.subtypes, item.subtype)
+/**
+ * Le type et le sous-type d'un item sont-ils permis par ce type de magasin ? Un « Type autorisé »
+ * peut aussi nommer un genre (« Arme », « Armes ») : les types autorisés d'avant visaient souvent
+ * un onglet (Armes, Équipement), que la colonne « Genre » remplace.
+ */
+export function shopTypeAllows(type: ShopTypeDefinition, item: Pick<ShopGeneratorItem, "type" | "subtype" | "genre">) {
+  const singular = (value: string) => foldText(value).replace(/s\b/g, "")
+  const allowed = (list: string[], ...values: Array<string | undefined>) => !list.length || list.some((entry) => values.some((value) => value && (foldText(entry) === foldText(value) || singular(entry) === singular(value))))
+  return allowed(type.types, item.type, item.genre) && allowed(type.subtypes, item.subtype)
 }
 
 /** L'index d'où vient un item (« objects » pour l'Index des items). */

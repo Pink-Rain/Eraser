@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic"
 
 /** L'éditeur du menu latéral (admins et MJ) : un réglage commun à toute la table. */
 export default async function MenuEditorPage() {
-  const account = await authorizedAccount(["admin", "mj"])
+  const account = await authorizedAccount(["admin"])
   if (!account) redirect("/")
   const [layout, previous, pages] = await Promise.all([
     readMenuLayout().catch(() => null),
@@ -20,7 +20,7 @@ export default async function MenuEditorPage() {
     readablePages(account, { includeDrafts: true }).catch(() => []),
   ])
   return (
-    <AuthenticatedShell pageLabel="Menu" roles={["admin", "mj"]}>
+    <AuthenticatedShell pageLabel="Menu" roles={["admin"]}>
       <MenuEditor
         role={account.role}
         initial={{

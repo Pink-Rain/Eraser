@@ -33,7 +33,7 @@ export async function createSession(campaignId: string, name: string) {
   return payload.session
 }
 
-export async function patchSession(campaignId: string, sessionId: string, body: { name?: string; add?: SessionMembership; remove?: SessionMembership; places?: string; document?: string; events?: { add?: string[]; remove?: string[] } } | FormData) {
+export async function patchSession(campaignId: string, sessionId: string, body: { name?: string; add?: SessionMembership; remove?: SessionMembership; places?: string; document?: string; events?: { add?: string[]; remove?: string[] }; visibility?: { reveal?: string[]; hide?: string[]; all?: "reveal" | "hide" } } | FormData) {
   const init: RequestInit = body instanceof FormData
     ? { method: "PATCH", body }
     : { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }

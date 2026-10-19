@@ -17,6 +17,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { RevealToggle } from "@/components/eraser/session-reveal"
 import { AddToSessionDialog, patchSession, SessionPicker } from "@/components/eraser/session-picker"
 import { TokenButton } from "@/components/eraser/token-editor"
 import { conversionsOf, findUnit, formatIndexNumber, parseIndexNumber, unitTone, type NumberFormat } from "@/lib/index-numbers"
@@ -428,6 +429,7 @@ function ShopCards({ shops, actions, pending, npcs = [], onSave, onSend, onSendS
         {onSendSession && <Button type="button" size="icon-sm" variant="ghost" disabled={pending} onClick={() => onSendSession(shop)} aria-label={`Envoyer ${shop.name} dans une autre session`} title="Envoyer dans une autre session (il reste aussi dans celle-ci)"><Send /></Button>}
         {onAdd && actions !== "locations" && <Button type="button" size="icon-sm" variant="outline" disabled={pending} onClick={() => onAdd(shop)} aria-label={`Ajouter ${shop.name} à la session`} title="Ajouter à la session"><MapPinned /></Button>}
         {onLink && <Button type="button" size="icon-sm" variant="ghost" disabled={pending} onClick={() => onLink(shop)} aria-label={`Lier ${shop.name} à un PNJ`} title="Lier à un PNJ"><Link2 /></Button>}
+        {actions === "locations" && <RevealToggle kind="shop" id={shop.id} name={shop.name} />}
         {(actions === "saved" || actions === "locations") && <Button type="button" size="icon-sm" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={pending} onClick={() => onDelete?.(shop)} aria-label={actions === "locations" ? `Retirer ${shop.name} de la session` : `Supprimer ${shop.name}`} title={actions === "locations" ? "Retirer de la session" : "Supprimer"}>{actions === "locations" ? <CircleMinus /> : <Trash2 />}</Button>}
       </div>}
     </header>

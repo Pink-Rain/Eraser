@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic"
  */
 export default function PageStudioLegacyPage() {
   return (
-    <AuthenticatedShell pageLabel="Atelier" roles={["admin", "mj"]}>
+    <AuthenticatedShell pageLabel="Atelier" roles={["admin"]}>
       <Suspense fallback={null}><StudioRedirect /></Suspense>
     </AuthenticatedShell>
   )

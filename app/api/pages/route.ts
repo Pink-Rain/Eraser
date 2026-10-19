@@ -4,6 +4,7 @@ import {
   blockVisibleTo,
   canEditNotes,
   canEditPage,
+  canBuildPages,
   canManagePages,
   canRevealSecrets,
   findBlock,
@@ -90,13 +91,13 @@ export async function GET(request: Request) {
   const parameters = new URL(request.url).searchParams
   try {
     if (parameters.get("list")) {
-      if (!canManagePages(account.role)) return denied()
+      if (!canBuildPages(account.role)) return denied()
       return NextResponse.json(await directory(account))
     }
     // Les versions brouillon d'une page (atelier) : lues en GET, pour ne pas compter comme une écriture.
     const draftsOf = parameters.get("drafts")
     if (draftsOf) {
-      if (!canManagePages(account.role)) return denied()
+      if (!canBuildPages(account.role)) return denied()
       const page = await readCustomPage(draftsOf, { fresh: true })
       if (!page) return missing()
       if (!canEditPage(page, await viewerFor(account, page))) return denied()
@@ -104,7 +105,7 @@ export async function GET(request: Request) {
     }
     const id = parameters.get("id")
     if (id) {
-      if (!canManagePages(account.role)) return denied()
+      if (!canBuildPages(account.role)) return denied()
       const page = await readCustomPage(id, { fresh: true })
       if (!page) return missing()
       const viewer = await viewerFor(account, page)
@@ -151,6 +152,8 @@ export async function POST(request: Request) {
     }
 
     if (!canManagePages(account.role)) return denied()
+    // Révéler un secret reste au MJ ; tout le reste construit la page : les administrateurs seulement.
+    if (action !== "reveal" && action !== "hide" && !canBuildPages(account.role)) return denied()
 
     if (action === "create") {
       // Depuis un modèle : son contenu, avec la place et l'adresse choisies.

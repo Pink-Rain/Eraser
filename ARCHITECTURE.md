@@ -74,6 +74,18 @@ identifiants de ses personnages, PNJs et magasins ; la colonne « Ajouté au
 créateur de session » des PNJs et magasins vaut « Oui » tant qu’ils figurent dans
 au moins une session.
 
+Ce que les joueurs voient d’une session est réglé dans la colonne « Cachés (JSON) »
+(`lib/session-reveal.ts`, clés `character:ID`, `npc:ID`, `shop:ID`, `event:ID`) :
+toute chose ajoutée arrive cachée, l’œil du Créateur la révèle, le journal des
+joueurs ne montre que ce qui est révélé (`revealedSession`). Une case vide (sessions
+d’avant l’alpha 237) ne cache rien ; une case illisible cache tout.
+
+Un MJ peut aussi cacher un personnage joueur aux autres joueurs de la campagne
+(tableau de bord) : portée Worker `campaign-hidden-characters`, une entrée par
+campagne (`lib/campaign-hidden-characters.ts`). Le tableau de bord, le journal, les
+relations et les transferts d’objets des joueurs l’ignorent ; son joueur, le MJ et
+les administrateurs le voient toujours.
+
 Les portraits, bannières et fonds de carte partagés passent par Google Drive.
 `lib/shared-media.ts` utilise le stockage local comme cache et sait migrer les
 anciens médias locaux sans remplacer Drive comme source partagée.
@@ -140,6 +152,12 @@ pour tout index. Sa page est `WorldIndexPage`. Particularités :
   `writeObjectIndexCells` les recopie dans le catalogue gardé, reconnu par numéro et ID de ligne,
   et ne fait relire le classeur que si la ligne n’y est pas telle quelle.
 - « Actualiser » (`refresh=1`) relit aussi le catalogue des items.
+- tous les items peuvent tenir dans un seul onglet : la colonne « Genre » range chaque item
+  dans l’inventaire (`genreInventoryCategory`, `inventoryKindOf`, `lib/inventory-schema.ts`) :
+  Arme → Armes, Équipement → Équipement, tout autre genre → Inventaire (qui peut aussi aller au
+  sol ou dans l’esthétique). Sans genre, le type décide, comme avant. Les types de magasin
+  comparent aussi le genre (`shopTypeAllows`) : un type réglé sur « Armes » vend les items de
+  genre « Arme ».
 Les vues d’avant désignaient un onglet par « fichier:sheetId » : la page les lit sous son nom.
 
 ## Rareté et emplacements, sections, listes d’index, index des pages
@@ -164,6 +182,10 @@ Les vues d’avant désignaient un onglet par « fichier:sheetId » : la page le
   feuille, construit pour chaque lecteur depuis les pages du Worker et le menu
   d’Eraser. Cartes, survols et vues comme un autre index ; utilisable dans un
   bloc Vue d’index.
+- **Créateur de pages** : réservé aux administrateurs (`canBuildPages`,
+  `lib/custom-pages.ts`) — créer, modifier, brouillons, menu. `canManagePages` (MJ
+  et administrateurs) garde ce que le MJ fait d’une page qu’il lit (secrets, notes),
+  sans la construire.
 - **Versions brouillon d’une page** : portée Worker `custom-page-drafts`
   (`listPageSnapshots`, `savePageSnapshot`), 20 par page, supprimées avec la page.
 

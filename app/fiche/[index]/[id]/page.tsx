@@ -6,7 +6,7 @@ import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { CustomPageView } from "@/components/eraser/custom-page-view"
 import { moduleSlots } from "@/components/eraser/eraser-modules"
 import { Button } from "@/components/ui/button"
-import { canManagePages, pageForViewer } from "@/lib/custom-pages"
+import { canBuildPages, pageForViewer } from "@/lib/custom-pages"
 import { blocksForRow, packRowContext, rowContextOf, rowFormIdsOf, rowValuesOf, templateForRow } from "@/lib/custom-pages-rows"
 import { listIndexLayouts } from "@/lib/index-layouts-store"
 import { tabFormOrBuiltin, tabLayoutOrBuiltin } from "@/lib/index-layout-defaults"
@@ -29,7 +29,8 @@ export default async function RowPage({ params }: { params: Promise<{ index: str
   const key = await knownWorldIndexKey(decodeURIComponent(index))
   if (!key) notFound()
   const player = viewAccount.role === "joueur"
-  const manager = canManagePages(viewAccount.role)
+  // Les brouillons des modèles : pour qui construit les pages (administrateurs).
+  const manager = canBuildPages(viewAccount.role)
   // Les modèles lisibles par le compte (brouillons compris pour qui peut les modifier).
   const templates = (await readablePages(viewAccount, { includeDrafts: manager }).catch(() => [])).filter(({ page }) => page.rowOf?.index === key).map(({ page }) => page)
   if (!templates.length) notFound()
@@ -50,7 +51,8 @@ export default async function RowPage({ params }: { params: Promise<{ index: str
   const layouts = formIds ? await listIndexLayouts(key).catch(() => ({})) : {}
   const form = formIds ? tabLayoutOrBuiltin(layouts, key, row.tab, "form") : null
   const forms = formIds ? Object.fromEntries(formIds.filter(Boolean).flatMap((formId) => { const layout = tabFormOrBuiltin(layouts, key, row.tab, formId); return layout ? [[formId, layout]] : [] })) : {}
-  const indexHref = manager ? (source.nameHref ? source.nameHref.replace("{id}", encodeURIComponent(row.id)) : `${source.path}?ligne=${encodeURIComponent(row.id)}`) : ""
+  // Le lien vers la ligne dans son index : MJ et administrateurs (les joueurs n'ont pas accès aux index).
+  const indexHref = !player ? (source.nameHref ? source.nameHref.replace("{id}", encodeURIComponent(row.id)) : `${source.path}?ligne=${encodeURIComponent(row.id)}`) : ""
   return (
     <AuthenticatedShell pageLabel={row.name}>
       <CustomPageView

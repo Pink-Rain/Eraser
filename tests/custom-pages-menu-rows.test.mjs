@@ -34,11 +34,12 @@ test("Menu d'Eraser par défaut : chaque rôle voit ses entrées, comme avant l'
   const player = menu.resolveMenu(null, { role: "joueur", pages: {} });
   assert.deepEqual(keys(player), ["accueil", "personnage", "regles[regles/classes,regles/vocabulaire,regles/combat,regles/hors-combat]"]);
   const mj = menu.resolveMenu(null, { role: "mj", pages: {} });
-  assert.deepEqual(mj.map((item) => item.key), ["accueil", "dossier", "regles", "index-rouges", "index", "bac-a-sable", "pages"]);
+  // Le créateur de pages (« Pages ») n'est qu'au menu des administrateurs.
+  assert.deepEqual(mj.map((item) => item.key), ["accueil", "dossier", "regles", "index-rouges", "index", "bac-a-sable"]);
   assert.deepEqual(mj.find((item) => item.key === "bac-a-sable").children.map((child) => child.key), ["bac-a-sable/tabletop", "bac-a-sable/magasin", "bac-a-sable/pnjs"]);
-  // « Pages » (après le Bac à sable, jamais dedans) : son « + » crée une page.
-  assert.deepEqual(mj.find((item) => item.key === "pages").action, { href: "/pages?nouvelle=1", label: "Nouvelle page" });
   const admin = menu.resolveMenu(null, { role: "admin", pages: {} });
+  // « Pages » (après le Bac à sable, jamais dedans) : son « + » crée une page.
+  assert.deepEqual(admin.find((item) => item.key === "pages").action, { href: "/pages?nouvelle=1", label: "Nouvelle page" });
   assert.deepEqual(admin.map((item) => item.key), ["accueil", "regles", "index-rouges", "index", "bac-a-sable", "pages", "administration"]);
   // Les pages créées apparaissent sous leur section (sauf si elles sont placées ailleurs dans le menu).
   const withPages = menu.resolveMenu([{ id: "page:p-2" }], { role: "joueur", pages: { "p-2": { title: "Dieux", href: "/regles/dieux", icon: "", emoji: "" } }, sectionPages: { regles: [{ title: "Guide", href: "/regles/guide", icon: "", emoji: "" }, { title: "Dieux", href: "/regles/dieux", icon: "", emoji: "" }] } });
@@ -295,8 +296,11 @@ test("Index des pages : pages créées et pages d'Eraser au même rang, lues par
   assert.equal(player.find((row) => row.href === "/regles/combat").origin, "Eraser, modifiée");
 
   const mj = pagesIndex.pagesIndexRows(all, { uid: "mj-1", role: "mj" }, new Set(), { includeDrafts: true });
-  assert.ok(mj.some((row) => row.title === "Notes du MJ") && mj.some((row) => row.title === "Brouillon" && row.status === "Brouillon") && mj.some((row) => row.title === "Créatures"));
+  // Un MJ lit les pages publiées qui lui sont réservées ; les brouillons sont à qui construit les pages (administrateurs).
+  assert.ok(mj.some((row) => row.title === "Notes du MJ") && !mj.some((row) => row.title === "Brouillon") && mj.some((row) => row.title === "Créatures"));
   assert.ok(draft.id && mj.length > player.length);
+  const admin = pagesIndex.pagesIndexRows(all, { uid: "admin-1", role: "admin" }, null, { includeDrafts: true });
+  assert.ok(admin.some((row) => row.title === "Brouillon" && row.status === "Brouillon"));
 
   // Lu comme un index : chaque ligne s'ouvre sur sa page, pour tous les lecteurs.
   const source = pagesIndex.pagesIndexSourceOf(player);

@@ -422,6 +422,23 @@ test("Relations, sessions, vocabulaire et to-do : lus et écrits par nom de colo
   assert.deepEqual([legacy.legacyEvents.map((event) => event.name), legacy.eventIds], [["Ancien"], ["EV-1"]]);
   const cleaned = await sessionsModule.updateSessionEvents("CAMP-1", session.id, { remove: ["OLD-1"] });
   assert.deepEqual([cleaned.legacyEvents, cleaned.eventIds], [[], ["EV-1"]]);
+  // L'œil du Créateur de session : ce qui s'ajoute arrive caché, se révèle, se recache en bloc.
+  const reveal = await vite.ssrLoadModule("/lib/session-reveal.ts");
+  assert.ok(cleaned.hidden.includes("event:EV-1") && cleaned.hidden.includes("event:shop:SHOP-9"));
+  assert.ok(!cleaned.hidden.includes("event:OLD-1"), "une chose retirée quitte la liste des cachées");
+  const withNpc = await sessionsModule.updateSessionMembership("CAMP-1", session.id, { npcIds: ["PNJ-1"] }, {});
+  assert.ok(withNpc.hidden.includes("npc:PNJ-1"));
+  const shown = await sessionsModule.updateSessionVisibility("CAMP-1", session.id, { reveal: ["npc:PNJ-1"] });
+  assert.deepEqual(reveal.revealedSession(shown).npcIds, ["PNJ-1"]);
+  assert.deepEqual(reveal.revealedSession(shown).eventIds, []);
+  assert.deepEqual((await sessionsModule.updateSessionVisibility("CAMP-1", session.id, { all: "reveal" })).hidden, []);
+  assert.deepEqual((await sessionsModule.listCampaignSessions("CAMP-1"))[0].hidden, []);
+  const hiddenAgain = await sessionsModule.updateSessionVisibility("CAMP-1", session.id, { all: "hide", hide: ["npc:INCONNU"] });
+  assert.deepEqual([...hiddenAgain.hidden].sort(), reveal.sessionItemKeys(hiddenAgain).sort());
+  // Les sessions d'avant l'œil (case vide) : rien n'y est caché.
+  const sessionGrid = google.grid(sessions, "Sessions");
+  sessionGrid[1][sessionGrid[0].indexOf("Cachés (JSON)")] = "";
+  assert.deepEqual((await sessionsModule.listCampaignSessions("CAMP-1"))[0].hidden, []);
 
   const vocabularyModule = await vite.ssrLoadModule("/lib/vocabulary.ts");
   const vocabulary = fresh("vocabulary");

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { sessionManager } from "@/lib/session-access"
-import { deleteCampaignSession, renameCampaignSession, saveSessionBanner, updateSessionEvents, updateSessionMembership, updateSessionTexts, type SessionMembership } from "@/lib/campaign-sessions"
+import { deleteCampaignSession, renameCampaignSession, saveSessionBanner, updateSessionEvents, updateSessionMembership, updateSessionTexts, updateSessionVisibility, type SessionMembership } from "@/lib/campaign-sessions"
 
 function ids(value: unknown) {
   return Array.isArray(value) && value.length <= 200 && value.every((item) => typeof item === "string" && item.length > 0 && item.length <= 200) ? value as string[] : undefined
@@ -30,7 +30,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (!(file instanceof File)) throw new Error("INVALID_BANNER")
       return NextResponse.json({ session: await saveSessionBanner(id, sessionId, file) })
     }
-    const body = (await request.json()) as { name?: unknown; add?: unknown; remove?: unknown; places?: unknown; document?: unknown; events?: unknown }
+    const body = (await request.json()) as { name?: unknown; add?: unknown; remove?: unknown; places?: unknown; document?: unknown; events?: unknown; visibility?: unknown }
+    // Révéler ou recacher des choses de la session aux joueurs (leurs clés « npc:ID »…), ou toutes.
+    if (body.visibility && typeof body.visibility === "object") {
+      const change = body.visibility as Record<string, unknown>
+      const all = change.all === "reveal" || change.all === "hide" ? change.all : undefined
+      return NextResponse.json({ session: await updateSessionVisibility(id, sessionId, { reveal: ids(change.reveal), hide: ids(change.hide), all }) })
+    }
     if (typeof body.places === "string" || typeof body.document === "string") {
       return NextResponse.json({ session: await updateSessionTexts(id, sessionId, { places: typeof body.places === "string" ? body.places : undefined, document: typeof body.document === "string" ? body.document : undefined }) })
     }

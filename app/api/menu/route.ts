@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 
 import { mergeMenu } from "@/lib/app-menu"
 import { hasPreviousMenu, readMenuLayout, resetMenuLayout, restorePreviousMenu, saveMenuLayout } from "@/lib/app-menu-store"
-import { canManagePages, pageHref } from "@/lib/custom-pages"
+import { canBuildPages, pageHref } from "@/lib/custom-pages"
 import { PageStoreError } from "@/lib/custom-pages-store"
 import { pageAuthor, readablePages } from "@/lib/custom-pages-server"
 import { authorizedAccount } from "@/lib/server-auth"
@@ -18,7 +18,7 @@ function failure(error: unknown) {
 /** Le menu réglé (admins et MJ) : le réglage complété du menu d'Eraser, et les pages qu'on peut y placer. */
 export async function GET() {
   const account = await authorizedAccount(["admin", "mj"])
-  if (!account || !canManagePages(account.role)) return denied()
+  if (!account || !canBuildPages(account.role)) return denied()
   try {
     const [layout, pages, previous] = await Promise.all([readMenuLayout(), readablePages(account, { includeDrafts: true }), hasPreviousMenu()])
     return NextResponse.json({
@@ -37,7 +37,7 @@ export async function GET() {
 /** save (items, base) · reset (« Rétablir le menu d'Eraser ») · restore (remettre le menu d'avant). */
 export async function POST(request: Request) {
   const account = await authorizedAccount(["admin", "mj"])
-  if (!account || !canManagePages(account.role)) return denied()
+  if (!account || !canBuildPages(account.role)) return denied()
   let body: { action?: string; items?: unknown; base?: string }
   try { body = await request.json() } catch { return NextResponse.json({ error: "Requête illisible." }, { status: 400 }) }
   const by = pageAuthor(account).name

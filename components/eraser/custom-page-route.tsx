@@ -6,7 +6,7 @@ import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { PageLabel } from "@/components/eraser/app-shell"
 import { CustomPageView } from "@/components/eraser/custom-page-view"
 import { moduleSlots } from "@/components/eraser/eraser-modules"
-import { canManagePages, pageForViewer, studioHref, type CustomPage, type PagePlace, type PageView } from "@/lib/custom-pages"
+import { canBuildPages, pageForViewer, studioHref, type CustomPage, type PagePlace, type PageView } from "@/lib/custom-pages"
 import { findCustomPage } from "@/lib/custom-pages-store"
 import { campaignsOf, indexPathsOf, linkTargetsKnown, linkTargetsOf, viewerFor } from "@/lib/custom-pages-server"
 import { replacementLabel, rowOfRoute, type ReplaceMode } from "@/lib/page-replacements"
@@ -51,7 +51,8 @@ export async function CustomPageRoute({ place, slug, campaignId = "" }: { place:
  * appelle la page directement) : sans middleware, son travail serveur ne s'évite pas.
  */
 export async function ReplacementView({ page, view: viewed, mode, pathname, account, children }: { page: CustomPage; view: PageView; mode: ReplaceMode; pathname: string; account: AuthorizedUser; children: React.ReactNode }) {
-  const manager = canManagePages(account.role)
+  // L'avis « cette page remplace… » et son lien vers l'atelier : pour qui construit les pages.
+  const manager = canBuildPages(account.role)
   // La page d'une ligne d'index (une classe) : la ligne affichée, lue comme le lecteur peut la
   // lire ; introuvable (classe retirée…) : la page d'origine, qui sait le dire.
   const target = rowOfRoute(page.replaces, pathname)

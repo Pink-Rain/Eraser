@@ -19,6 +19,7 @@ import type { CampaignNpcRecord } from "@/lib/shop-schema"
 import { authorizedAccount } from "@/lib/server-auth"
 import { honoraryTitleText, listText } from "@/lib/character-card"
 import { playerNamesFor } from "@/lib/chat-accounts"
+import { hiddenCampaignCharacters, visibleCampaignCharacters } from "@/lib/campaign-hidden-characters"
 
 type RelationCandidate = {
   id: string
@@ -55,7 +56,9 @@ async function authorizedCharacter(id: string) {
 
 async function relationCandidates(access: NonNullable<Awaited<ReturnType<typeof authorizedCharacter>>>, relatedNpcIds = new Set<string>(), withPlayers = true) {
   const groups = await Promise.all(access.campaigns.map(async (campaign) => {
-    const [npcs, characters] = await Promise.all([listNpcs(campaign.id), listCampaignMembers(campaign.id)])
+    const [npcs, members, hidden] = await Promise.all([listNpcs(campaign.id), listCampaignMembers(campaign.id), hiddenCampaignCharacters(campaign.id)])
+    // Un joueur ne se voit pas proposer les personnages que le MJ cache aux autres joueurs (les siens, si).
+    const characters = access.account.role === "joueur" ? visibleCampaignCharacters(members, hidden, { manager: false, ownIds: members.filter((member) => member.ownerUid === access.account.uid || member.id === access.character.id).map((member) => member.id) }) : members
     const visibleNpcs = access.account.role === "joueur"
       ? npcs.filter((npc) => npc.inCampaign || npc.inPlayerGroup || npc.createdByUid === access.account.uid || relatedNpcIds.has(npc.id))
       : npcs

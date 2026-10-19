@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic"
  * toujours vers l'Index des pages.
  */
 export default async function PageStudioPage({ params }: { params: Promise<{ id: string }> }) {
-  const account = await authorizedAccount(["admin", "mj"])
+  const account = await authorizedAccount(["admin"])
   if (!account) redirect("/")
   const { id: rawId } = await params
   const id = decodeURIComponent(rawId)
@@ -36,7 +36,7 @@ export default async function PageStudioPage({ params }: { params: Promise<{ id:
     return [pageSummary(other, otherViewer)]
   }).sort((left, right) => left.title.localeCompare(right.title, "fr"))
   return (
-    <AuthenticatedShell pageLabel={`Atelier · ${page.title}`} roles={["admin", "mj"]}>
+    <AuthenticatedShell pageLabel={`Atelier · ${page.title}`} roles={["admin"]}>
       <PageStudio
         key={page.id}
         initial={studioPage(page)}

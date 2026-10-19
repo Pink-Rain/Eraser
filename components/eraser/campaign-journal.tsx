@@ -25,7 +25,13 @@ import { ObjectIcon } from "@/components/eraser/object-icon"
 import { cn } from "@/lib/utils"
 
 export type JournalSession = { id: string; name: string; createdAt: string }
-export type JournalSessionDetail = JournalSession & { bannerUrl: string; characterIds: string[]; npcIds: string[]; shopIds: string[]; eventIds: string[]; places: string }
+export type JournalSessionDetail = JournalSession & {
+  bannerUrl: string; characterIds: string[]; npcIds: string[]; shopIds: string[]; eventIds: string[]; places: string
+  /** Pour le MJ : ce que le Créateur de session cache encore aux joueurs (« npc:ID », « event:shop:ID »…). */
+  hidden?: string[]
+  /** Pour un joueur : les personnages de la session qu'on ne lui montre pas (ni dans le groupe, ni parmi les absents). */
+  veiledCharacterIds?: string[]
+}
 /** Ce que l'index montre d'un lieu, d'une créature ou d'un objet cité par une note (« place:Nom »). */
 export type JournalVisual = { image?: string; type?: string; color?: string; object?: { icon: string; type: string; subtype: string } }
 /** Un magasin et quelques objets de sa vitrine (icônes de l'Index des items). */
@@ -409,7 +415,8 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
   const byId = <T extends { id: string }>(list: T[], ids: string[]) => ids.flatMap((id) => list.find((item) => item.id === id) ?? [])
   const group = byId(members, current.characterIds)
   // Les membres de la campagne qui n'ont pas été ajoutés à cette session (si elle a un groupe).
-  const absents = current.characterIds.length ? members.filter((member) => !current.characterIds.includes(member.id)) : []
+  const veiled = new Set(current.veiledCharacterIds ?? [])
+  const absents = current.characterIds.length ? members.filter((member) => !current.characterIds.includes(member.id) && !veiled.has(member.id)) : []
   const sessionNpcs = byId(npcs, current.npcIds)
   const sessionEvents = byId(events, current.eventIds)
   const npcEvents = sessionEvents.filter((event) => event.kind === "npc" || event.kind === "generic-npc")
@@ -428,10 +435,14 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
   const timeline = here.filter((note) => note.type === "evenement")
   const summaries = here.filter((note) => note.type === "resume")
   const isNew = (key: string) => firstSeen.get(key) === index
+  // Le MJ voit ce que les joueurs ne voient pas encore (caché dans le Créateur de session).
+  const hiddenHere = new Set(current.hidden ?? [])
+  const veilTag = (key: string) => hiddenHere.has(key) || (key.startsWith("shop:") && hiddenHere.has(`event:${key}`)) ? <Tag>caché aux joueurs</Tag> : null
   const seenTag = (key: string) => {
     const first = firstSeen.get(key)
-    if (first === undefined || first > index) return null
-    return first === index ? <Tag fresh>Nouveau</Tag> : <Tag>Depuis S{first + 1}</Tag>
+    const seen = first === undefined || first > index ? null : first === index ? <Tag fresh>Nouveau</Tag> : <Tag>Depuis S{first + 1}</Tag>
+    const veil = veilTag(key)
+    return veil ? <>{seen}{veil}</> : seen
   }
   const countNew = (keys: string[]) => keys.filter(isNew).length
   const plural = (count: number, one: string, many: string) => `${count} ${count > 1 ? many : one}`
@@ -579,7 +590,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
           <div key={`recit-${current.id}`} className="journal-rise min-w-0 space-y-10 lg:col-start-2 lg:row-start-2">
             <Section id="journal-groupe" icon={linkKindLabels.character.icon} title="Le groupe" count={absents.length ? `${group.length} · ${plural(absents.length, "absent", "absents")}` : group.length}>
               {group.length + absents.length ? <div className={cardGrid}>
-                {group.map((member) => <EntityCard key={member.id} kind="character" name={member.name} hint={member.hint} image={member.image} color={avatarColor(member.name)} link={`character:${member.id}`} />)}
+                {group.map((member) => <EntityCard key={member.id} kind="character" name={member.name} hint={member.hint} image={member.image} color={avatarColor(member.name)} link={`character:${member.id}`} tags={veilTag(`character:${member.id}`)} />)}
                 {absents.map((member) => <EntityCard key={member.id} kind="character" name={member.name} hint={member.hint} image={member.image} color={avatarColor(member.name)} link={`character:${member.id}`} absent tags={<Tag>absent</Tag>} />)}
               </div> : <EmptyHint icon={linkKindLabels.character.icon}>Personne n’a été ajouté à cette session.</EmptyHint>}
             </Section>

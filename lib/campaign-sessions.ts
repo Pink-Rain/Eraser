@@ -21,6 +21,7 @@ import {
   updateRanges,
 } from "@/lib/google-sheets"
 import { withAsyncLock } from "@/lib/async-lock"
+import { hiddenAfterChange, sessionItemKeys } from "@/lib/session-reveal"
 import { getSharedMedia, putSharedMedia } from "@/lib/shared-media"
 
 /**
@@ -50,6 +51,11 @@ export type CampaignSessionRecord = {
   eventIds: string[]
   /** Événements écrits en entier dans la session par l'alpha 193 : affichés et retirables. */
   legacyEvents: SessionEvent[]
+  /**
+   * Ce que le MJ n'a pas encore révélé aux joueurs (« npc:ID », « event:shop:ID »…, voir
+   * lib/session-reveal.ts) : absent du journal pour eux. Une chose ajoutée y entre.
+   */
+  hidden: string[]
 }
 
 /**
@@ -153,6 +159,19 @@ function sessionFromRow(row: string[], strict = false, strictEvents = false): Ca
     places: row[10] || "",
     document: row[11] || "",
     ...(() => { const events = eventList(row[12], strictEvents); return { eventIds: events.ids, legacyEvents: events.legacy } })(),
+    // Une case illisible ne révèle rien en douce : tout ce que la session contient reste caché.
+    hidden: hiddenList(row[13], row),
+  }
+}
+
+/** Les choses cachées d'une session ; une case illisible cache tout ce que la session contient. */
+function hiddenList(value: string | undefined, row: string[]) {
+  if (!value?.trim()) return []
+  try {
+    return idList(value, true)
+  } catch {
+    const lists = { characterIds: idList(row[4]), npcIds: idList(row[5]), shopIds: idList(row[6]), ...(() => { const events = eventList(row[12], false); return { eventIds: events.ids, legacyEvents: events.legacy } })() }
+    return sessionItemKeys(lists)
   }
 }
 
@@ -169,6 +188,7 @@ function sessionCells(change: Partial<CampaignSessionRecord>) {
   if (change.places !== undefined) cells["Lieux de la session"] = change.places
   if (change.document !== undefined) cells["Document"] = change.document
   if (change.eventIds !== undefined && change.legacyEvents !== undefined) cells["Événements (JSON)"] = eventsJson({ eventIds: change.eventIds, legacyEvents: change.legacyEvents })
+  if (change.hidden !== undefined) cells["Cachés (JSON)"] = JSON.stringify(change.hidden)
   return cells
 }
 
@@ -177,7 +197,7 @@ function sessionRow(session: CampaignSessionRecord) {
     session.id, session.campaignId, session.name, session.bannerUrl,
     JSON.stringify(session.characterIds), JSON.stringify(session.npcIds), JSON.stringify(session.shopIds),
     session.createdByUid, session.createdAt, session.updatedAt,
-    session.places, session.document, eventsJson(session),
+    session.places, session.document, eventsJson(session), JSON.stringify(session.hidden),
   ]
 }
 
@@ -288,7 +308,10 @@ export async function createCampaignSession(campaignId: string, name: string, cr
     document: "",
     eventIds: [],
     legacyEvents: [],
+    hidden: [],
   }
+  // Tout ce qu'une nouvelle session reçoit est caché aux joueurs jusqu'à ce que le MJ le révèle.
+  session.hidden = sessionItemKeys(session)
   const sheet = await sessionsSheet()
   // Deux créations simultanées ne prennent pas la même ligne libre.
   await withAsyncLock("sessions", async () => {
@@ -305,6 +328,21 @@ export async function createCampaignSession(campaignId: string, name: string, cr
     clearSpreadsheetReadCache(sheet.spreadsheetId)
   })
   return session
+}
+
+/**
+ * Révèle ou recache des choses de la session (leurs clés, lib/session-reveal.ts), ou toutes
+ * (« Tout révéler », « Tout cacher ») : appliqué à la session relue juste avant d'écrire.
+ */
+export async function updateSessionVisibility(campaignId: string, sessionId: string, change: { reveal?: string[]; hide?: string[]; all?: "reveal" | "hide" }) {
+  return updateSession(campaignId, sessionId, (session) => {
+    const known = new Set(sessionItemKeys(session))
+    if (change.all === "reveal") return { hidden: [] }
+    if (change.all === "hide") return { hidden: [...known] }
+    const revealed = new Set(change.reveal ?? [])
+    const hidden = [...new Set([...session.hidden.filter((key) => !revealed.has(key)), ...(change.hide ?? []).filter((key) => known.has(key))])]
+    return { hidden }
+  })
 }
 
 export async function renameCampaignSession(campaignId: string, sessionId: string, name: string) {
@@ -329,7 +367,9 @@ export async function updateSessionEvents(campaignId: string, sessionId: string,
     const removed = new Set(change.remove ?? [])
     const eventIds = [...new Set([...session.eventIds, ...(change.add ?? [])])].filter((id) => !removed.has(id)).slice(0, 300)
     const legacyEvents = session.legacyEvents.filter((event) => !removed.has(event.id))
-    return { eventIds, legacyEvents }
+    const before = [...session.eventIds, ...session.legacyEvents.map((event) => event.id)]
+    const after = [...eventIds, ...legacyEvents.map((event) => event.id)]
+    return { eventIds, legacyEvents, hidden: hiddenAfterChange(session.hidden, "event", before, after) }
   }, { events: true })
   // Un marché ambulant retiré : les alphas 194-195 l'avaient marqué « dans la campagne ». S'il n'est
   // dans les magasins d'aucune session, la marque s'enlève (le pont Roll20 ne l'exporte plus).
@@ -356,11 +396,19 @@ export async function updateSessionMembership(campaignId: string, sessionId: str
   // Ajouts et retraits appliqués aux listes relues juste avant d'écrire.
   // Seules les listes touchées sont réécrites.
   const touched = (key: keyof SessionMembership) => Boolean(add[key]?.length || remove[key]?.length)
-  const next = await updateSession(campaignId, sessionId, (session) => ({
-    ...(touched("characterIds") ? { characterIds: merged(session.characterIds, add.characterIds, remove.characterIds) } : {}),
-    ...(touched("npcIds") ? { npcIds: merged(session.npcIds, add.npcIds, remove.npcIds) } : {}),
-    ...(touched("shopIds") ? { shopIds: merged(session.shopIds, add.shopIds, remove.shopIds) } : {}),
-  }), { lists: true })
+  const next = await updateSession(campaignId, sessionId, (session) => {
+    const lists = {
+      ...(touched("characterIds") ? { characterIds: merged(session.characterIds, add.characterIds, remove.characterIds) } : {}),
+      ...(touched("npcIds") ? { npcIds: merged(session.npcIds, add.npcIds, remove.npcIds) } : {}),
+      ...(touched("shopIds") ? { shopIds: merged(session.shopIds, add.shopIds, remove.shopIds) } : {}),
+    }
+    // Une chose ajoutée arrive cachée aux joueurs ; une chose retirée quitte la liste des cachées.
+    let hidden = session.hidden
+    if (lists.characterIds) hidden = hiddenAfterChange(hidden, "character", session.characterIds, lists.characterIds)
+    if (lists.npcIds) hidden = hiddenAfterChange(hidden, "npc", session.npcIds, lists.npcIds)
+    if (lists.shopIds) hidden = hiddenAfterChange(hidden, "shop", session.shopIds, lists.shopIds)
+    return { ...lists, hidden }
+  }, { lists: true })
   const others = (await listCampaignSessions(campaignId)).filter((candidate) => candidate.id !== sessionId)
   await syncCampaignFlags(campaignId, next, others, add, remove)
   return next

@@ -18,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { ImageField } from "@/components/eraser/index-cells"
 import { IndexImage } from "@/components/eraser/index-image"
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
+import { RevealToggle } from "@/components/eraser/session-reveal"
 import { AddToSessionDialog, patchSession } from "@/components/eraser/session-picker"
 import { countChoices, eventShopTypes, generateEventShop, SavedShopCollection, shopSummary } from "@/components/eraser/shop-generator"
 import { persistShops } from "@/components/eraser/shop-persistence"
@@ -179,7 +180,7 @@ function blankEvent(kind: CreatableKind, candidate?: Candidate): SessionEvent {
 
 type CardAction = { label: string; icon: typeof Sparkles; onClick?: () => void; href?: string; destructive?: boolean }
 
-function EventCard({ event, pending, actions, children }: { event: SessionEvent; pending: boolean; actions: CardAction[]; children?: ReactNode }) {
+function EventCard({ event, pending, actions, leading, children }: { event: SessionEvent; pending: boolean; actions: CardAction[]; /** Avant les actions : l'œil du Créateur de session. */ leading?: ReactNode; children?: ReactNode }) {
   return <article id={event.id} className="relative flex min-w-0 flex-col overflow-hidden rounded-2xl border bg-card/80 shadow-sm target:ring-2 target:ring-primary">
     <div className="flex gap-3 p-3 pr-2">
       <EventPortrait event={event} />
@@ -189,6 +190,7 @@ function EventCard({ event, pending, actions, children }: { event: SessionEvent;
         <TagChip event={event} />
       </div>
       <div className="flex max-w-[5.5rem] shrink-0 flex-wrap content-start justify-end gap-0.5 self-start">
+        {leading}
         {actions.map((action) => action.href
           ? <Button key={action.label} asChild size="icon-sm" variant="ghost" title={action.label} aria-label={`${action.label} : ${event.name}`}><Link href={action.href} prefetch={false}><action.icon /></Link></Button>
           : <Button key={action.label} type="button" size="icon-sm" variant="ghost" disabled={pending} title={action.label} aria-label={`${action.label} : ${event.name}`} onClick={action.onClick} className={action.destructive ? "text-destructive hover:bg-destructive/10 hover:text-destructive" : undefined}><action.icon /></Button>)}
@@ -430,7 +432,7 @@ export function SessionEvents({ campaignId, session, events, shops, shopTypes = 
     {error && <p className="text-sm text-destructive">{error}</p>}
     {notice && <p className="text-sm text-primary">{notice}</p>}
     {inSession.length
-      ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{inSession.map((entry) => <EventCard key={entry.id} event={entry.event} pending={pending} actions={[
+      ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{inSession.map((entry) => <EventCard key={entry.id} event={entry.event} pending={pending} leading={<RevealToggle kind="event" id={entry.id} name={entry.event.name} />} actions={[
           { label: "Ouvrir", icon: ArrowUpRight, href: entry.shop ? `/campagne/${encodeURIComponent(campaignId)}/magasin-et-fouille/sauvegardes?shop=${encodeURIComponent(entry.shop.id)}` : `${eventsHref}#${encodeURIComponent(entry.id)}` },
           { label: "Envoyer dans une autre session (il reste aussi dans celle-ci)", icon: Send, onClick: () => setSending(entry) },
           { label: "Retirer de la session", icon: CircleMinus, onClick: () => void guarded(async () => { onUpdated(await patchSession(campaignId, session.id, { events: { remove: [entry.id] } })) }), destructive: true },

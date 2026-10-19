@@ -25,6 +25,8 @@ export type ShopGeneratorItem = {
   effectHtml: string
   type: string
   subtype: string
+  /** Le genre de l'item (colonne « Genre » : Arme, Équipement, Objet…). */
+  genre?: string
   price: string
   icon: string
   /** L'index d'où vient la trouvaille (« creatures »…) ; absent : l'Index des items. */
@@ -132,8 +134,10 @@ export async function loadShopGeneratorItems() {
       nameHtml: cell(table.headers, row.html, ["Nom", "Nom de l'objet", "Objet", "Arme", "Équipement", "Equipement", "Ressource", "Livre", "Titre"]),
       descriptionHtml: cell(table.headers, row.html, ["Description", "Déscription"]),
       effectHtml: cell(table.headers, row.html, ["Effet", "Effets", "Propriété", "Propriete"]),
-      type: cell(table.headers, row.values, ["Type", "Catégorie", "Categorie"]) || table.tabName,
+      // Type vide : le Genre (tous les items peuvent vivre dans un même onglet), puis le nom de l'onglet.
+      type: cell(table.headers, row.values, ["Type", "Catégorie", "Categorie"]) || cell(table.headers, row.values, ["Genre"]) || table.tabName,
       subtype: cell(table.headers, row.values, ["Sous-type", "Sous type", "Subtype"]),
+      genre: cell(table.headers, row.values, ["Genre"]).trim(),
       price: objectIndexPrice(table, row),
       icon: cell(table.headers, row.values, ["Icône", "Icone", "Icon"]),
       locations,

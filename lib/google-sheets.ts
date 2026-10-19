@@ -42,6 +42,7 @@ import { freshAfter, mustReread } from "@/lib/request-freshness"
 import { markSpreadsheetChanged, sharedReadsActive, sharedSheetRead } from "@/lib/shared-reads"
 import { traced } from "@/lib/perf-trace"
 import { remoteAccountsConfig } from "@/lib/accounts-remote"
+import { hiddenCampaignCharacters, visibleCampaignCharacters } from "@/lib/campaign-hidden-characters"
 import { listAccounts } from "@/lib/site-auth"
 import {
   htmlToRichText,
@@ -70,6 +71,7 @@ import {
   baseInventoryContainerTypes,
   baseInventoryTypeIds,
   canItemBeAutoPlacedInInventoryCategory,
+  inventoryKindOf,
   canItemGoInInventoryCategory,
   GROUND_CATEGORY,
   inventoryCategories,
@@ -2499,7 +2501,7 @@ export async function enrichObjectIndexTables() {
       const name = objectIndexCell(table, row, OBJECT_INDEX_NAME_ALIASES).trim()
       const currentDescription = descriptionColumn >= 0 ? (row.values[descriptionColumn] || "").trim() : ""
       if (!name || (currentDescription && !oldGeneratedDescriptions.has(currentDescription))) return []
-      const type = objectIndexCell(table, row, ["Type", "Catégorie", "Categorie"]) || inferredObjectType(table)
+      const type = objectItemType(table, row)
       const subtype = objectIndexCell(table, row, ["Sous-type", "Sous type", "Subtype"])
       const effect = objectIndexCell(table, row, ["Effet", "Effets", "Propriété", "Proprieté", "Propriétés", "Proprietes"])
       return [{ row, value: suggestedObjectDescription(name, type, subtype, effect, `${table.fileId}:${table.sheetId}:${row.rowNumber}`) }]
@@ -2524,7 +2526,7 @@ function objectIndexRowsNeedingIcon(table: ObjectIndexTable) {
   return table.rows.flatMap((row) => {
     const name = objectIndexCell(table, row, OBJECT_INDEX_NAME_ALIASES).trim()
     if (!name || !isGeneratedObjectIcon(row.values[iconColumn] || "")) return []
-    const type = objectIndexCell(table, row, ["Type", "Catégorie", "Categorie"]) || inferredObjectType(table)
+    const type = objectItemType(table, row)
     const subtype = objectIndexCell(table, row, ["Sous-type", "Sous type", "Subtype"])
     return [{ row, iconColumn, key: suggestedObjectIconKey(name, type, subtype) }]
   })
@@ -2617,7 +2619,7 @@ export async function ensureObjectIndexStackLimits() {
     const cells = table.rows.flatMap((row) => {
       const name = objectIndexCell(table, row, OBJECT_INDEX_NAME_ALIASES).trim()
       if (!name || (maximumColumn >= 0 && (row.values[maximumColumn] || "").trim())) return []
-      const type = objectIndexCell(table, row, ["Type", "Catégorie", "Categorie"]) || inferredObjectType(table)
+      const type = objectItemType(table, row)
       const subtype = objectIndexCell(table, row, ["Sous-type", "Sous type", "Subtype"])
       return [{ row, value: suggestedObjectStackLimit(name, type, subtype) }]
     })
@@ -3417,7 +3419,8 @@ const NPC_LAST_COLUMN = columnName(npcSheetHeaders.length)
 // Les trois dernières sont venues après : dans une feuille existante, elles s'ajoutent à droite.
 export const campaignEventSheetHeaders = ["ID", "ID campagne", "Type", "Référence", "Nom", "Icône", "Image", "Étiquette", "Couleur", "Description", "Créé par", "Créé le", "Modifié le"]
 export const sessionNoteSheetHeaders = ["ID", "ID campagne", "ID session", "Visibilité", "ID personnage", "Type", "Titre", "Texte", "Moment", "Liens (JSON)", "Quête (JSON)", "Auteur", "UID auteur", "Créé le", "Modifié le"]
-export const sessionSheetHeaders = ["ID", "ID campagne", "Titre", "Bannière", "Personnages (JSON)", "PNJs (JSON)", "Magasins (JSON)", "Créée par", "Créée le", "Modifiée le", "Lieux de la session", "Document", "Événements (JSON)"]
+// « Cachés (JSON) » : ce que le MJ n'a pas encore révélé aux joueurs (lib/session-reveal.ts), ajouté à droite.
+export const sessionSheetHeaders = ["ID", "ID campagne", "Titre", "Bannière", "Personnages (JSON)", "PNJs (JSON)", "Magasins (JSON)", "Créée par", "Créée le", "Modifiée le", "Lieux de la session", "Document", "Événements (JSON)", "Cachés (JSON)"]
 
 const npcSheetColumnWidths = [
   180, 190, 220, 180, 110, 110, 110, 100, 100, 110, 100, 100, 130, 120, 130, 120, 110,
@@ -6119,12 +6122,15 @@ export async function listInventoryTransferTargets(
   excludedOwnerId = "",
   playerVisibility?: { uid: string; relatedNpcIds: Set<string> },
 ): Promise<InventoryTransferTarget[]> {
-  const [campaign, characters, npcs] = await Promise.all([
+  const [campaign, members, npcs, hidden] = await Promise.all([
     getCampaignDashboard(null, campaignId),
     listCampaignMembers(campaignId),
     listNpcs(campaignId),
+    playerVisibility ? hiddenCampaignCharacters(campaignId) : Promise.resolve([] as string[]),
   ])
   if (!campaign) return []
+  // Un joueur ne voit pas les personnages que le MJ cache aux autres joueurs (sauf le sien).
+  const characters = playerVisibility ? visibleCampaignCharacters(members, hidden, { manager: false, ownIds: [excludedOwnerId, ...members.filter((member) => member.ownerUid === playerVisibility.uid).map((member) => member.id)] }) : members
   const campaignOwnerId = campaignInventoryOwnerId(campaignId)
   const visibleNpcs = playerVisibility
     ? npcs.filter((npc) => npc.inCampaign || npc.inPlayerGroup || npc.createdByUid === playerVisibility.uid || playerVisibility.relatedNpcIds.has(npc.id))
@@ -6955,6 +6961,15 @@ function inferredObjectType(table: ObjectIndexTable) {
   return "Objet"
 }
 
+/**
+ * Le type d'un item : sa colonne Type (ou Catégorie), sinon son Genre, sinon ce que dit le nom
+ * de son onglet (les anciens onglets « Armes », « Équipement »…). Tous les items peuvent vivre
+ * dans un même onglet : le nom d'onglet n'est plus qu'un dernier recours.
+ */
+function objectItemType(table: ObjectIndexTable, row: ObjectIndexRow) {
+  return objectIndexCell(table, row, ["Type", "Catégorie", "Categorie"]) || objectIndexCell(table, row, ["Genre"]) || inferredObjectType(table)
+}
+
 function parseObjectIndexItems(tables: ObjectIndexTable[]): InventoryItemRecord[] {
   return tables.flatMap((table) => table.rows.flatMap((row) => {
     const name = objectIndexCell(table, row, ["Nom", "Nom de l'objet", "Objet", "Arme", "Équipement", "Equipement", "Ressource", "Livre", "Titre"]).trim()
@@ -6964,8 +6979,9 @@ function parseObjectIndexItems(tables: ObjectIndexTable[]): InventoryItemRecord[
       id,
       name,
       description: objectIndexCell(table, row, ["Description", "Déscription"]),
-      type: objectIndexCell(table, row, ["Type", "Catégorie", "Categorie"]) || inferredObjectType(table),
+      type: objectItemType(table, row),
       subtype: objectIndexCell(table, row, ["Sous-type", "Sous type", "Subtype"]),
+      genre: objectIndexCell(table, row, ["Genre"]).trim(),
       effect: objectIndexCell(table, row, ["Effet", "Effets"]),
       nameHtml: objectIndexCellHtml(table, row, ["Nom", "Nom de l'objet", "Objet", "Arme", "Équipement", "Equipement", "Ressource", "Livre", "Titre"]),
       descriptionHtml: objectIndexCellHtml(table, row, ["Description", "Déscription"]),
@@ -7881,7 +7897,8 @@ export async function addCharacterInventoryItem(characterId: string, itemId: str
       .filter((container) => {
         if (isCampaignInventoryOwner(characterId)) return true
         const category = inventoryContainerCategory(container, typeById)
-        const itemType = `${item.type} ${item.subtype}`
+        // Le genre de l'item (colonne « Genre ») décide de sa famille ; sinon son type.
+        const itemType = inventoryKindOf(item)
         return container.id === requestedContainerId
           ? canItemGoInInventoryCategory(itemType, category)
           : canItemBeAutoPlacedInInventoryCategory(itemType, category)
@@ -8112,7 +8129,7 @@ export async function moveCharacterInventoryItem(characterId: string, slotId: st
     if (!sourceItem) throw new Error("INVENTORY_ITEM_NOT_FOUND")
     const typeById = new Map(workbook.containerTypes.map((type) => [type.id, type]))
     const targetContainer = workbook.containers.find((container) => container.id === targetContainerId && container.characterId === characterId && !container.deletedAt)
-    if (!targetContainer || (!isCampaignInventoryOwner(characterId) && !canItemGoInInventoryCategory(`${sourceItem.type} ${sourceItem.subtype}`, inventoryContainerCategory(targetContainer, typeById)))) {
+    if (!targetContainer || (!isCampaignInventoryOwner(characterId) && !canItemGoInInventoryCategory(inventoryKindOf(sourceItem), inventoryContainerCategory(targetContainer, typeById)))) {
       throw new Error("INVENTORY_NO_COMPATIBLE_CONTAINER")
     }
     const targetCategory = inventoryContainerCategory(targetContainer, typeById)
@@ -8160,7 +8177,7 @@ export async function transferCharacterInventoryItem(sourceId: string, slotId: s
     if (!sourceItem) throw new Error("INVENTORY_ITEM_NOT_FOUND")
     const typeById = new Map(workbook.containerTypes.map((type) => [type.id, type]))
     const containers = activeInventoryContainers(targetId, workbook)
-      .filter((container) => isCampaignInventoryOwner(targetId) || canItemBeAutoPlacedInInventoryCategory(`${sourceItem.type} ${sourceItem.subtype}`, inventoryContainerCategory(container, typeById)))
+      .filter((container) => isCampaignInventoryOwner(targetId) || canItemBeAutoPlacedInInventoryCategory(inventoryKindOf(sourceItem), inventoryContainerCategory(container, typeById)))
       .sort((left, right) => left.order - right.order)
     const ground = targetMode === "character" ? groundContainerOf(targetId, workbook) : undefined
     if (!containers.length && !ground) throw new Error("INVENTORY_NO_COMPATIBLE_CONTAINER")

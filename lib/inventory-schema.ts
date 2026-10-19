@@ -30,6 +30,12 @@ export type InventoryItemRecord = {
   description: string
   type: string
   subtype: string
+  /**
+   * Le genre de l'item (colonne « Genre » de l'Index des items) : il décide de son rangement
+   * (Arme → armes, Équipement → équipement, le reste → inventaire classique). Vide : le type
+   * et le sous-type en décident, comme avant.
+   */
+  genre?: string
   effect: string
   /** Mise en forme d'origine (couleurs, gras, liens) quand l'objet vient de l'index. */
   nameHtml: string
@@ -193,22 +199,50 @@ export const inventoryWorkbookTabs = [
   },
 ] as const
 
+const plainCategory = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").replace(/\s+/g, " ").trim()
+
 export function parseInventoryCategory(value: string): InventoryCategory | null {
-  const normalized = value.trim().toLocaleLowerCase("fr")
+  const normalized = plainCategory(value)
   if (normalized === "arme" || normalized === "armes") return "Armes"
-  if (normalized === "armure" || normalized === "equipement" || normalized === "équipement") return "Équipement"
-  if (normalized === "esthetique" || normalized === "esthétique" || normalized === "purement esthetique" || normalized === "purement esthétique") return "Esthétique"
-  if (normalized === "inventaire" || normalized === "objet" || normalized === "objets" || normalized === "ressource" || normalized === "ressources") return "Inventaire"
+  if (normalized === "armure" || normalized === "armures" || normalized === "equipement" || normalized === "equipements") return "Équipement"
+  if (normalized === "esthetique" || normalized === "purement esthetique") return "Esthétique"
+  if (normalized === "inventaire" || normalized === "inventaire classique" || normalized === "objet" || normalized === "objets" || normalized === "ressource" || normalized === "ressources") return "Inventaire"
   if (normalized === "bourse" || normalized === "monnaie" || normalized === "monnaies") return "Bourse"
-  if (normalized === "au sol" || normalized === "sol") return "Au sol"
+  if (normalized === "au sol" || normalized === "sol" || normalized === "par terre") return "Au sol"
   return null
+}
+
+/**
+ * La famille d'un item d'après son genre (colonne « Genre ») : Arme, Équipement, Monnaie, ou
+ * l'inventaire classique pour tout autre genre (un objet va aussi au sol ou en esthétique).
+ * `null` sans genre : le type en décide.
+ */
+export function genreInventoryCategory(genre: string | undefined): InventoryCategory | null {
+  if (!genre?.trim()) return null
+  const family = parseInventoryCategory(genre)
+  return family === "Armes" || family === "Équipement" || family === "Bourse" ? family : "Inventaire"
+}
+
+/**
+ * Ce qui décide du rangement d'un item : son genre s'il en a un, sinon son type et son sous-type.
+ * À passer à `canItemGoInInventoryCategory` et `canItemBeAutoPlacedInInventoryCategory`.
+ */
+export function inventoryKindOf(item: { genre?: string; type?: string; subtype?: string }) {
+  const family = genreInventoryCategory(item.genre)
+  if (family === "Armes") return "Arme"
+  if (family === "Équipement") return "Équipement"
+  if (family === "Bourse") return "Monnaie"
+  if (family) return "Objet"
+  return `${item.type ?? ""} ${item.subtype ?? ""}`.trim()
 }
 
 export function compatibleInventoryCategory(itemType: string): InventoryCategory {
   const normalized = itemType.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr")
-  if (/monnaie|bourse|piece/.test(normalized)) return "Bourse"
-  if (/arme|epee|dague|lame|arc|arbalete|lance|hache|marteau|masse|baton de combat|pistolet|fusil|bouclier|\becu\b/.test(normalized)) return "Armes"
-  if (/equipement|armure|casque|anneau|bague|collier|amulette|botte|gant|ceinture|cape|outil/.test(normalized)) return "Équipement"
+  // Chaque mot reconnu commence un mot : « Parchemin » (arc), « Marchandise » ou « Charme » (arme)
+  // passaient pour des armes, « Élégant » (gant) pour un équipement.
+  if (/\b(monnaie|bourse|piece)/.test(normalized)) return "Bourse"
+  if (/\b(arme|epee|dague|lame|arc|arbalete|lance|hache|marteau|masse|baton de combat|pistolet|fusil|bouclier)|\becu\b/.test(normalized)) return "Armes"
+  if (/\b(equipement|armure|casque|anneau|bague|collier|amulette|botte|gant|ceinture|cape|outil)/.test(normalized)) return "Équipement"
   return parseInventoryCategory(itemType) ?? "Inventaire"
 }
 

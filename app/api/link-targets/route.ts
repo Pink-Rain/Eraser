@@ -36,11 +36,14 @@ export async function GET() {
       { label: "Tabletop", href: "/bac-a-sable/tabletop", group: "Bac à sable" },
       { label: "Magasin", href: "/bac-a-sable/magasin", group: "Bac à sable" },
       { label: "PNJs", href: "/bac-a-sable/pnjs", group: "Bac à sable" },
-      { label: "Index des pages", href: "/pages", group: "Pages", hint: "Créateur de pages" },
-      { label: "Nouvelle page", href: "/pages?nouvelle=1", group: "Pages", hint: "Créateur de pages" },
-      { label: "Menu (éditeur du menu latéral)", href: "/pages/menu", group: "Pages", hint: "Créateur de pages" },
     )
   }
+  // Le créateur de pages : administrateurs seulement.
+  if (account.role === "admin") targets.push(
+    { label: "Index des pages", href: "/pages", group: "Pages", hint: "Créateur de pages" },
+    { label: "Nouvelle page", href: "/pages?nouvelle=1", group: "Pages", hint: "Créateur de pages" },
+    { label: "Menu (éditeur du menu latéral)", href: "/pages/menu", group: "Pages", hint: "Créateur de pages" },
+  )
   targets.push(...customPages)
   const seenCampaigns = new Set<string>()
   const campaignLinks = (id: string, name: string) => {
