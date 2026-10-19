@@ -2,7 +2,7 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell, session } = require("electron")
 const { spawn } = require("node:child_process")
 const { request } = require("node:http")
-const { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require("node:fs")
+const { appendFile, appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require("node:fs")
 const { dirname, join } = require("node:path")
 const { randomBytes } = require("node:crypto")
 const hotUpdate = require("./hot-update.cjs")
@@ -111,19 +111,49 @@ function localRequest(url) {
   })
 }
 
+// Le journal s'écrit par paquets, sans attendre le disque : ce processus est aussi celui qui
+// mène la fenêtre (clics, déplacements), et chaque ligne écrite d'un coup le figeait un
+// instant sur un disque lent. `flushLogNow` vide le paquet avant de relire le journal ou de
+// quitter.
+let pendingLog = ""
+let logFlushTimer = null
+
+function flushLogNow() {
+  if (logFlushTimer) { clearTimeout(logFlushTimer); logFlushTimer = null }
+  if (!pendingLog || !startupLogPath) return
+  const chunk = pendingLog
+  pendingLog = ""
+  try {
+    appendFileSync(startupLogPath, chunk, "utf8")
+  } catch {
+    // The dialog below still reports failures if the log cannot be written.
+  }
+}
+
+function flushLogSoon() {
+  logFlushTimer = null
+  if (!pendingLog || !startupLogPath) return
+  const chunk = pendingLog
+  pendingLog = ""
+  appendFile(startupLogPath, chunk, "utf8", () => {
+    // The dialog below still reports failures if the log cannot be written.
+  })
+}
+
 function logLine(message) {
   const line = `[${new Date().toISOString()}] ${message}\n`
   if (startupLogPath) {
-    try {
-      appendFileSync(startupLogPath, line, "utf8")
-    } catch {
-      // The dialog below still reports failures if the log cannot be written.
-    }
+    // Un flot de messages sans fin (boucle d'erreurs) ne remplit pas la mémoire.
+    if (pendingLog.length < 1_000_000) pendingLog += line
+    logFlushTimer ??= setTimeout(flushLogSoon, 250)
   }
   console.log(message)
 }
 
+process.on("exit", flushLogNow)
+
 function recentLog() {
+  flushLogNow()
   try {
     const content = readFileSync(startupLogPath, "utf8")
     return content.slice(-4_000).trim()
@@ -281,6 +311,7 @@ async function recoverFromCrash(code) {
   const now = Date.now()
   crashRestarts = crashRestarts.filter((at) => now - at < 5 * 60_000)
   if (crashRestarts.length >= 3) {
+    flushLogNow()
     dialog.showErrorBox("Eraser s’est arrêté", `Le service local s’est fermé plusieurs fois (code ${code}).\n\nJournal : ${startupLogPath}`)
     return
   }
@@ -299,6 +330,7 @@ async function recoverFromCrash(code) {
     logLine("Le service local a redémarré.")
   } catch (error) {
     logLine(`[service:error] Le redémarrage a échoué : ${error instanceof Error ? error.message : error}`)
+    flushLogNow()
     dialog.showErrorBox("Eraser s’est arrêté", `Le service local s’est fermé (code ${code}) et n’a pas pu redémarrer.\n\nJournal : ${startupLogPath}`)
   } finally {
     restartingServer = false
@@ -437,8 +469,15 @@ async function createWindow(address, bounds = null) {
   const persistentSession = session.fromPartition(PERSISTENT_PARTITION)
   if (!cookieFlushInstalled) {
     cookieFlushInstalled = true
+    // Plusieurs cookies changent souvent d'un coup (connexion, rôle de vue) : une seule
+    // écriture sur le disque, une seconde après le dernier.
+    let cookieFlushTimer = null
     persistentSession.cookies.on("changed", () => {
-      void persistentSession.cookies.flushStore()
+      if (cookieFlushTimer) clearTimeout(cookieFlushTimer)
+      cookieFlushTimer = setTimeout(() => {
+        cookieFlushTimer = null
+        void persistentSession.cookies.flushStore().catch(() => undefined)
+      }, 1_000)
     })
   }
   // Correcteur orthographique : Electron souligne les fautes mais n'affiche aucun
@@ -936,6 +975,7 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => app.quit())
 app.on("before-quit", () => {
   quitting = true
+  flushLogNow()
   try { discordPresence.stopDiscordPresence() } catch { /* Discord déjà parti */ }
   if (serverProcess && !serverProcess.killed) serverProcess.kill()
 })

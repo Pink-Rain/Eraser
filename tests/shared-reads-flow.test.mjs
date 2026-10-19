@@ -166,8 +166,10 @@ test("une réponse trop grosse pour être partagée : bail rendu avec la marque,
   const range = "Feuille!A1:B2001";
   const scope = scopeOf(id, range);
   assert.equal((await sheets.readRange(id, range)).length, 2_001);
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  assert.ok(JSON.parse(shared.store.records.get(scope)?.get("lease")?.value ?? "null")?.big, "le bail rendu ne dit pas que la réponse était trop grosse");
+  // La compression se fait hors du fil du serveur : le bail est rendu dès qu'elle a fini.
+  const leaseMarked = () => Boolean(JSON.parse(shared.store.records.get(scope)?.get("lease")?.value ?? "null")?.big);
+  for (let waited = 0; waited < 2_000 && !leaseMarked(); waited += 10) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(leaseMarked(), "le bail rendu ne dit pas que la réponse était trop grosse");
   assert.equal(shared.store.records.get(scope)?.get("manifest"), undefined);
   // La lecture suivante de la même plage : ni bail, ni attente, ni question au serveur partagé.
   sheets.clearSpreadsheetReadCache(id);

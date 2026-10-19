@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
-import { gunzipSync, gzipSync } from "node:zlib"
+import { promisify } from "node:util"
+import { gunzip as gunzipCallback, gzip as gzipCallback } from "node:zlib"
 
 import { freshAfter } from "@/lib/request-freshness"
 import { listSharedRecords, readSharedRecord, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
@@ -177,7 +178,14 @@ function usableManifest(manifest: Manifest | null, version: string, after: numbe
 }
 
 /** La copie de la portée si elle vaut pour cette version, assez récente, et lue après `after`. */
-function copyFrom(records: Array<{ key: string; value: string }>, version: string, after: number) {
+// La compression se fait hors du fil du serveur : une grosse réponse (plusieurs Mo de texte)
+// ne fige plus les autres pages le temps de la compresser ou de la décompresser.
+const gzip = promisify(gzipCallback)
+const gunzip = promisify(gunzipCallback)
+/** Au-delà, même compressée, la réponse ne tiendrait pas dans MAX_PARTS morceaux : inutile d'essayer. */
+const MAX_SHARED_TEXT = 16_000_000
+
+async function copyFrom(records: Array<{ key: string; value: string }>, version: string, after: number) {
   const byKey = new Map(records.map((record) => [record.key, record.value]))
   const manifest = parseJson<Manifest>(byKey.get("manifest"))
   if (!usableManifest(manifest, version, after)) return null
@@ -191,7 +199,7 @@ function copyFrom(records: Array<{ key: string; value: string }>, version: strin
   // Une copie en cours de remplacement (morceaux de deux lectures) : on ne la prend pas.
   if (sha(packed).slice(0, 24) !== manifest.sum) return null
   try {
-    return gunzipSync(Buffer.from(packed, "base64")).toString("utf8")
+    return (await gunzip(Buffer.from(packed, "base64"))).toString("utf8")
   } catch {
     return null
   }
@@ -221,7 +229,11 @@ const markedOversize = (lease: Lease | null) => Boolean(lease?.big && Date.now()
 
 /** Dépose la copie ; faux si elle est trop grosse pour être partagée (retenu aussitôt). */
 async function publish(scope: string, text: string, version: string, readAt: number) {
-  const packed = gzipSync(Buffer.from(text, "utf8")).toString("base64")
+  if (text.length > MAX_SHARED_TEXT) {
+    rememberOversize(scope)
+    return false
+  }
+  const packed = (await gzip(Buffer.from(text, "utf8"))).toString("base64")
   const parts = Array.from({ length: Math.ceil(packed.length / PART_SIZE) }, (_, index) => packed.slice(index * PART_SIZE, (index + 1) * PART_SIZE))
   if (parts.length > MAX_PARTS) rememberOversize(scope)
   if (!parts.length || parts.length > MAX_PARTS) return false

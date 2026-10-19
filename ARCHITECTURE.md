@@ -33,6 +33,11 @@ reçoit `ERASER_DESKTOP=1`, le chemin de la base utilisateur, le chemin des
 migrations et la configuration du Worker partagé. Les migrations SQL de
 `drizzle/` sont appliquées sans supprimer l’historique.
 
+`node:sqlite` est synchrone : chaque requête bloque le serveur. La base est donc en
+WAL avec `synchronous = NORMAL` (pas d'écriture forcée sur le disque à chaque modification),
+ses requêtes compilées sont gardées par texte, et `batch()` exécute sa transaction d'un seul
+tenant. Les médias en cache se lisent et s'écrivent de façon asynchrone.
+
 La base locale contient encore plusieurs tables couvrant comptes, caches,
 index et intégrations. Certaines servent de fallback ou de compatibilité quand
 le Worker n’est pas configuré. Cela ne transforme pas SQLite en source métier
@@ -188,6 +193,15 @@ Les vues d’avant désignaient un onglet par « fichier:sheetId » : la page le
   sans la construire.
 - **Versions brouillon d’une page** : portée Worker `custom-page-drafts`
   (`listPageSnapshots`, `savePageSnapshot`), 20 par page, supprimées avec la page.
+
+## Fluidité de l'interface
+
+Le réglage « Fluidité » du compte (`lib/visual-effects.ts`) pose `data-effects="light"` sur
+`<html>` avant le premier affichage (script de `app/layout.tsx`) : d'office sur un ordinateur à
+quatre cœurs ou moins, ou au choix. `app/globals.css` y coupe les animations et flous des états
+de la fiche, tout `backdrop-filter` et la glissade de la barre latérale. Les surfaces
+permanentes (en-tête, chat, barres collantes, notifications) n'utilisent pas de flou
+d'arrière-plan : un fond opaque, que la page défile dessous ou non.
 
 ## Tabletop
 

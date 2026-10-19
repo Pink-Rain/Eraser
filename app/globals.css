@@ -643,6 +643,22 @@ body:has(.tabletop-detail-windows) [data-radix-popper-content-wrapper] {
 @media (prefers-reduced-motion: reduce) { [class*="eraser-fx-"] { animation: none !important; } }
 
 /*
+ * Effets allégés (compte › Fluidité, lib/visual-effects.ts ; d'office sur un ordinateur à
+ * quatre cœurs ou moins) : les états restent visibles sur la fiche, mais immobiles et sans
+ * flou ; plus aucun verre dépoli ni glissade de la barre latérale. Ce sont eux qui
+ * redessinent la page à chaque image sur une carte graphique modeste.
+ */
+html[data-effects="light"] [class*="eraser-fx-"],
+html[data-effects="light"] [class*="eraser-fx-"] * { animation: none !important; }
+html[data-effects="light"] .eraser-fx-blur,
+html[data-effects="light"] .eraser-fx-blur-soft,
+html[data-effects="light"] .eraser-fx-mist > i,
+html[data-effects="light"] .eraser-fx-flames > i + i { filter: none; }
+html[data-effects="light"] *,
+html[data-effects="light"] .eraser-fx-frost::before { backdrop-filter: none !important; }
+html[data-effects="light"] :is([data-slot="sidebar-gap"], [data-slot="sidebar-container"]) { transition: none; }
+
+/*
  * Une référence à une ligne d'index (menu « { » de l'éditeur) : un lien vers la ligne,
  * montré comme une étiquette dans l'éditeur et les notes. Les textes d'index affichés
  * hors tableau la remplacent par le nom de la ligne ou la valeur de la case citée.

@@ -145,7 +145,7 @@ function parseTsv(text: string) {
 
 /** Habillage de la barre d'outils commune : mêmes boutons partout, plus la mise en page du tableau. */
 function SheetGridToolbar({ targetRef, ready, leading, trailing, readOnly, onReset }: { targetRef: MutableRefObject<RichTextTarget | null>; ready: boolean; leading?: ReactNode; trailing?: ReactNode; readOnly: boolean; onReset: () => void }) {
-  return <div className="flex flex-wrap items-center gap-1 border-b bg-card/95 px-2 py-1.5 backdrop-blur">
+  return <div className="flex flex-wrap items-center gap-1 border-b bg-card px-2 py-1.5">
     {readOnly ? leading : <RichTextToolbar targetRef={targetRef} ready={ready} leading={leading} />}
     {!ready && !readOnly && <span className="ml-1 text-[11px] text-muted-foreground">Clique dans une cellule pour mettre en forme.</span>}
     <span className="ml-auto flex items-center gap-1">

@@ -38,7 +38,7 @@ export function OpenInAppPrompt() {
     stay()
   }
 
-  return <div role="dialog" aria-label="Ouvrir dans l’application" className="fixed bottom-4 right-4 z-[1500] flex w-[min(24rem,calc(100vw-2rem))] items-start gap-3 rounded-2xl border bg-card/95 p-3.5 shadow-xl backdrop-blur-sm">
+  return <div role="dialog" aria-label="Ouvrir dans l’application" className="fixed bottom-4 right-4 z-[1500] flex w-[min(24rem,calc(100vw-2rem))] items-start gap-3 rounded-2xl border bg-card p-3.5 shadow-xl">
     {/* eslint-disable-next-line @next/next/no-img-element -- le logo local, sans optimisation */}
     <img src="/eraser-logo.png" alt="" className="size-10 shrink-0" />
     <div className="min-w-0 flex-1">

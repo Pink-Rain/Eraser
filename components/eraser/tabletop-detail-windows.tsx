@@ -131,7 +131,7 @@ export function TabletopDetailWindows({ windows, onClose, onToggle }: Props) {
     <>
       <div className="tabletop-detail-windows pointer-events-none fixed inset-x-4 bottom-20 z-[1180] flex max-h-[calc(100svh-7rem)] flex-row-reverse flex-wrap items-end gap-3 overflow-y-auto">
         {expanded.map((window) => (
-          <section key={window.id} className="pointer-events-auto w-[min(25rem,calc(100vw-2rem))] shrink-0 overflow-hidden rounded-2xl border bg-card/97 shadow-2xl backdrop-blur">
+          <section key={window.id} className="pointer-events-auto w-[min(25rem,calc(100vw-2rem))] shrink-0 overflow-hidden rounded-2xl border bg-card shadow-2xl">
             <WindowHeader window={window} onClose={() => onClose(window.id)} onToggle={() => onToggle(window.id)} />
             <div className="max-h-[min(32rem,62svh)] overflow-y-auto">
               {window.loading ? <div className="grid min-h-36 place-items-center"><span className="size-5 animate-spin rounded-full border-2 border-primary border-r-transparent" /></div> : window.kind === "shop" ? <ShopContent shop={window.shop} /> : <NpcContent npc={window.npc} entity={window.entity} />}
@@ -145,7 +145,7 @@ export function TabletopDetailWindows({ windows, onClose, onToggle }: Props) {
           {collapsed.map((window) => {
             const Icon = window.kind === "shop" ? Store : UserRound
             return (
-              <div key={window.id} className="flex h-10 max-w-64 shrink-0 items-center rounded-xl border bg-card/97 shadow-xl backdrop-blur">
+              <div key={window.id} className="flex h-10 max-w-64 shrink-0 items-center rounded-xl border bg-card shadow-xl">
                 <button type="button" onClick={() => onToggle(window.id)} className="flex min-w-0 flex-1 items-center gap-2 px-3 text-left text-sm font-semibold">
                   <Icon className="size-4 shrink-0 text-primary" /><span className="truncate">{window.entity.name}</span>
                 </button>

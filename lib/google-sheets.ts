@@ -2392,21 +2392,6 @@ export async function deleteObjectIndexRows(fileId: string, tabName: string, ref
   markObjectIndexFileChanged(fileId)
 }
 
-export async function deleteGoogleSheetRow(spreadsheetId: string, tabName: string, rowNumber: number, knownSheetId?: number) {
-  if (!/^[A-Za-z0-9_-]+$/.test(spreadsheetId) || !tabName.trim() || !Number.isInteger(rowNumber) || rowNumber < 2) throw new Error("INVALID_SHEET_ROW")
-  let sheetId = knownSheetId
-  if (sheetId === undefined) {
-    const metadata = await googleSheetsJson<{ sheets?: Array<{ properties?: { sheetId?: number; title?: string } }> }>(`spreadsheets/${spreadsheetId}?fields=sheets.properties(sheetId,title)`)
-    sheetId = metadata.sheets?.find((sheet) => sheet.properties?.title === tabName)?.properties?.sheetId
-  }
-  if (sheetId === undefined) throw new Error("SHEET_TAB_NOT_FOUND")
-  await googleSheetsJson(`spreadsheets/${spreadsheetId}:batchUpdate`, {
-    method: "POST",
-    body: JSON.stringify({ requests: [{ deleteDimension: { range: { sheetId, dimension: "ROWS", startIndex: rowNumber - 1, endIndex: rowNumber } } }] }),
-  })
-  clearSpreadsheetReadCache(spreadsheetId)
-}
-
 const oldGeneratedDescriptions = new Set([
   "Une sphère bleu pâle, veinée de givre ; son cœur tinte doucement lorsqu’on la remue.",
   "Une petite coque dense, marquée de fines rainures et d’un mécanisme aussi simple qu’inquiétant.",
@@ -5690,20 +5675,6 @@ export async function characterSheetSummaries() {
     summaries.set(id, { classes: formatCharacterClasses(columns.get(row, "Classe")), publicClasses: publicClassText(columns.get(row, "Classe"), columns.get(row, choicesHeader)), level: columns.get(row, "Level").trim(), portrait: columns.get(row, "Portrait").trim(), title: displayedMultipleValue(columns.get(row, "Titre honorifique"), "selected") })
   }
   return summaries
-}
-
-/** Ajoute classes et rang aux personnages ; en cas d'échec de lecture, la liste reste utilisable. */
-export async function withCharacterClasses<T extends CharacterRecord>(characters: T[]): Promise<T[]> {
-  if (!characters.length) return characters
-  const summaries = await characterSheetSummaries().catch((error) => {
-    console.error("CHARACTER_CLASSES_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
-    return null
-  })
-  if (!summaries) return characters
-  return characters.map((character) => {
-    const summary = summaries.get(character.id)
-    return summary ? { ...character, classes: summary.classes, level: summary.level } : character
-  })
 }
 
 /** Le pion d'une fiche, d'après ses cases lues par leur en-tête. */

@@ -156,7 +156,7 @@ export function ItemNotifications() {
   return (
     <div className="pointer-events-none fixed bottom-20 right-4 z-50 flex w-[min(20rem,calc(100vw-2rem))] flex-col gap-2" aria-live="polite">
       {shown.map((notification) => notification.kind === "page" ? (
-        <div key={notification.id} role="status" className="pointer-events-auto flex items-start gap-3 rounded-2xl border border-primary/25 bg-popover/95 p-3 text-popover-foreground shadow-[0_18px_45px_rgb(67_50_31/0.18)] backdrop-blur animate-in fade-in slide-in-from-bottom-2">
+        <div key={notification.id} role="status" className="pointer-events-auto flex items-start gap-3 rounded-2xl border border-primary/25 bg-popover p-3 text-popover-foreground shadow-[0_18px_45px_rgb(67_50_31/0.18)] animate-in fade-in slide-in-from-bottom-2">
           <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><Link2 className="size-4" /></span>
           <div className="min-w-0 flex-1 text-sm leading-5">
             <p><b className="font-semibold">{notification.senderName}</b> vous envoie une page{notification.title ? <> : <b className="font-semibold">{notification.title}</b></> : ""}</p>
@@ -166,7 +166,7 @@ export function ItemNotifications() {
           <button type="button" onClick={() => setShown((current) => current.filter((item) => item.id !== notification.id))} className="-mr-1 -mt-1 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Fermer"><X className="size-3.5" /></button>
         </div>
       ) : (
-        <div key={notification.id} role="status" className="pointer-events-auto flex items-start gap-3 rounded-2xl border border-primary/20 bg-popover/95 p-3 text-popover-foreground shadow-[0_18px_45px_rgb(67_50_31/0.18)] backdrop-blur animate-in fade-in slide-in-from-bottom-2">
+        <div key={notification.id} role="status" className="pointer-events-auto flex items-start gap-3 rounded-2xl border border-primary/20 bg-popover p-3 text-popover-foreground shadow-[0_18px_45px_rgb(67_50_31/0.18)] animate-in fade-in slide-in-from-bottom-2">
           <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><Gift className="size-4" /></span>
           <div className="min-w-0 flex-1 text-sm leading-5">
             <p><b className="font-semibold">{notification.senderName}</b> vous a envoyé <b className="font-semibold">{notification.quantity > 1 ? `${notification.quantity} × ` : ""}{notification.itemName}</b></p>

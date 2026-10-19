@@ -17,10 +17,12 @@ let installed = false
 
 /**
  * Des POST qui ne changent aucune page : la lecture des références « { » (affichées dans
- * presque toutes les pages) et le chat (jamais rendu par le serveur). Les compter comme des
+ * presque toutes les pages), le chat (jamais rendu par le serveur), l'accusé de lecture des
+ * notifications (envoyé dès qu'une notification s'affiche, et lues par la page elle-même) et
+ * le partage d'une page (qui écrit chez les autres, pas ici). Les compter comme des
  * écritures vidait les copies à chaque affichage, et chaque retour sur une page la relisait.
  */
-const notPageWrites = new Set(["/api/references", "/api/campaign-chat"])
+const notPageWrites = new Set(["/api/references", "/api/campaign-chat", "/api/notifications", "/api/share-page"])
 
 function isApiWrite(input: RequestInfo | URL, init?: RequestInit) {
   const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase()

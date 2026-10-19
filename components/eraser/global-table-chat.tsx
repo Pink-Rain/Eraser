@@ -344,7 +344,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
         {unread && <span className="absolute right-0.5 top-0.5 size-2.5 rounded-full bg-[#d33b2c] ring-2 ring-primary" aria-hidden="true" />}
       </Button>
       {open && (
-        <section className="fixed bottom-16 right-4 flex h-[min(34rem,calc(100svh-5rem))] w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border bg-card/95 shadow-2xl backdrop-blur">
+        <section className="fixed bottom-16 right-4 flex h-[min(34rem,calc(100svh-5rem))] w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border bg-card shadow-2xl">
           <div className="flex items-center gap-2 border-b p-3">
             <MessageCircle className="size-4 text-primary" />
             <div>

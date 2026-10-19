@@ -8,6 +8,7 @@ import { listCampaignsForMj, listCharactersForUser } from "@/lib/google-sheets";
 import { replacementFor, shellMenu, warmShellCopies } from "@/lib/custom-pages-server";
 import { currentRequestPath } from "@/lib/request-path";
 import { currentAccount, currentViewAccount } from "@/lib/server-auth";
+import { applyEffectsScript } from "@/lib/visual-effects";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -72,8 +73,12 @@ export default async function RootLayout({
     );
   }
   return (
-    <html lang="fr">
-      <body className="antialiased">{content}<UpdatePrompt /><OpenInAppPrompt /></body>
+    // `data-effects` est posé sur <html> avant l'affichage (effets allégés, lib/visual-effects.ts).
+    <html lang="fr" suppressHydrationWarning>
+      <body className="antialiased">
+        <script dangerouslySetInnerHTML={{ __html: applyEffectsScript }} />
+        {content}<UpdatePrompt /><OpenInAppPrompt />
+      </body>
     </html>
   );
 }

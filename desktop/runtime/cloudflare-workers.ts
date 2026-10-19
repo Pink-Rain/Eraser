@@ -1,6 +1,7 @@
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, readdirSync } from "node:fs"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, join, normalize, resolve, sep } from "node:path"
-import { DatabaseSync } from "node:sqlite"
+import { DatabaseSync, type StatementSync } from "node:sqlite"
 
 type BoundValue = ArrayBuffer | ArrayBufferView | bigint | boolean | null | number | string
 
@@ -45,25 +46,48 @@ function emptyMeta(startedAt: number, changes = 0, lastRowId = 0): D1Meta {
   }
 }
 
-class LocalD1PreparedStatement {
+// Les requêtes compilées, gardées par texte : la plupart reviennent à chaque page, et
+// SQLite n'a plus à les recompiler. Une requête au texte variable (listes « IN (?, ?…) »)
+// ne fait que remplir la réserve, vidée d'un coup quand elle déborde.
+const STATEMENT_CACHE_LIMIT = 400
+
+class StatementCache {
   readonly #database: DatabaseSync
+  readonly #statements = new Map<string, StatementSync>()
+
+  constructor(database: DatabaseSync) {
+    this.#database = database
+  }
+
+  get(query: string) {
+    let statement = this.#statements.get(query)
+    if (!statement) {
+      if (this.#statements.size >= STATEMENT_CACHE_LIMIT) this.#statements.clear()
+      statement = this.#database.prepare(query)
+      statement.setAllowBareNamedParameters(true)
+      this.#statements.set(query, statement)
+    }
+    return statement
+  }
+}
+
+class LocalD1PreparedStatement {
+  readonly #statements: StatementCache
   readonly #query: string
   readonly #values: BoundValue[]
 
-  constructor(database: DatabaseSync, query: string, values: BoundValue[] = []) {
-    this.#database = database
+  constructor(statements: StatementCache, query: string, values: BoundValue[] = []) {
+    this.#statements = statements
     this.#query = query
     this.#values = values
   }
 
   bind(...values: BoundValue[]) {
-    return new LocalD1PreparedStatement(this.#database, this.#query, values)
+    return new LocalD1PreparedStatement(this.#statements, this.#query, values)
   }
 
   #statement() {
-    const statement = this.#database.prepare(this.#query)
-    statement.setAllowBareNamedParameters(true)
-    return statement
+    return this.#statements.get(this.#query)
   }
 
   async first<T = Record<string, unknown>>(column?: string): Promise<T | null> {
@@ -83,6 +107,11 @@ class LocalD1PreparedStatement {
   }
 
   async run(): Promise<D1Result> {
+    return this.runNow()
+  }
+
+  /** Exécute sans rendre la main : `batch` s'en sert pour que rien ne s'intercale dans sa transaction. */
+  runNow(): D1Result {
     const startedAt = performance.now()
     const result = this.#statement().run(...this.#values.map(sqliteValue))
     return {
@@ -103,11 +132,20 @@ class LocalD1PreparedStatement {
 
 class LocalD1Database {
   readonly #database: DatabaseSync
+  readonly #statements: StatementCache
 
   constructor() {
     this.#database = new DatabaseSync(join(dataDirectory(), "eraser.sqlite"))
-    this.#database.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")
+    // Chaque requête SQLite bloque le serveur le temps qu'elle dure. En WAL, `synchronous =
+    // NORMAL` ne force plus l'écriture sur le disque à chaque modification (seulement aux
+    // points de contrôle) : la base ne peut pas se corrompre, et un portable au disque lent ne
+    // gèle plus à chaque écriture. Les tables temporaires restent en mémoire, le cache de
+    // pages passe à 16 Mo.
+    this.#database.exec(
+      "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 3000; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -16000;",
+    )
     this.#migrate()
+    this.#statements = new StatementCache(this.#database)
   }
 
   #migrate() {
@@ -138,7 +176,7 @@ class LocalD1Database {
   }
 
   prepare(query: string) {
-    return new LocalD1PreparedStatement(this.#database, query)
+    return new LocalD1PreparedStatement(this.#statements, query)
   }
 
   async batch(statements: LocalD1PreparedStatement[]) {
@@ -146,7 +184,7 @@ class LocalD1Database {
     this.#database.exec("BEGIN")
     try {
       for (const statement of statements) {
-        results.push(await statement.run())
+        results.push(statement.runNow())
       }
       this.#database.exec("COMMIT")
       return results
@@ -172,10 +210,12 @@ function safeObjectPath(key: string) {
   return target
 }
 
+// Les médias (portraits, bannières, sons) se lisent et s'écrivent sans bloquer le serveur :
+// une page aux vingt portraits ne fige plus les autres requêtes vingt fois de suite.
 class LocalR2Bucket {
   async put(key: string, value: ArrayBuffer | ArrayBufferView | ReadableStream, options?: { httpMetadata?: R2Metadata }) {
     const path = safeObjectPath(key)
-    mkdirSync(dirname(path), { recursive: true })
+    await mkdir(dirname(path), { recursive: true })
     let bytes: Uint8Array
     if (value instanceof ReadableStream) {
       bytes = new Uint8Array(await new Response(value).arrayBuffer())
@@ -184,8 +224,8 @@ class LocalR2Bucket {
     } else {
       bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
     }
-    writeFileSync(path, bytes)
-    writeFileSync(`${path}.metadata.json`, JSON.stringify(options?.httpMetadata ?? {}), "utf8")
+    await writeFile(path, bytes)
+    await writeFile(`${path}.metadata.json`, JSON.stringify(options?.httpMetadata ?? {}), "utf8")
     return null
   }
 
@@ -193,18 +233,19 @@ class LocalR2Bucket {
     const path = safeObjectPath(key)
     let bytes: Uint8Array
     try {
-      bytes = readFileSync(path)
+      bytes = await readFile(path)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null
       throw error
     }
     let httpMetadata: R2Metadata = {}
     try {
-      httpMetadata = JSON.parse(readFileSync(`${path}.metadata.json`, "utf8")) as R2Metadata
+      httpMetadata = JSON.parse(await readFile(`${path}.metadata.json`, "utf8")) as R2Metadata
     } catch {
       // Old files without metadata remain readable.
     }
-    const stableBytes = Uint8Array.from(bytes)
+    // `arrayBuffer()` rend le tampon entier : il ne doit contenir que ce fichier.
+    const stableBytes = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? new Uint8Array(bytes.buffer as ArrayBuffer) : Uint8Array.from(bytes)
     return {
       body: new Blob([stableBytes]).stream(),
       httpMetadata,

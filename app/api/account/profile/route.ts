@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
 
 import { currentAccount, currentAuthToken } from "@/lib/server-auth"
-import { sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
+import { publishAccountName } from "@/lib/chat-accounts"
+import { sharedStoreAvailable } from "@/lib/shared-store"
 import { updateOwnProfile } from "@/lib/site-auth"
 
 const messages: Record<string, string> = {
@@ -26,7 +27,7 @@ export async function POST(request: Request) {
     })
     // L’annuaire des noms du chat suit le nouveau pseudo.
     if (updated.displayName !== account.displayName && sharedStoreAvailable()) {
-      await writeSharedRecord("account-names", updated.uid, updated.displayName).catch(() => undefined)
+      await publishAccountName(updated.uid, updated.displayName)
     }
     return NextResponse.json({ ok: true, account: { uid: updated.uid, email: updated.email, displayName: updated.displayName } })
   } catch (error) {

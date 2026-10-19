@@ -30,25 +30,54 @@ function keyOf(image: HTMLImageElement) {
   return ""
 }
 
+/** Les avatars (et ceux déjà recadrés) d'une partie de la page, sans passer toutes ses images. */
+const CANDIDATES = `img[src*="/portrait/"], img[${MARK}]`
+
+/**
+ * Les images à recadrer attendent l'image suivante de l'écran, puis sont toutes mesurées
+ * avant d'être toutes modifiées : une liste de cinquante portraits ne recalcule plus la mise
+ * en page cinquante fois (une mesure après chaque modification).
+ */
+const queued = new Set<HTMLImageElement>()
+let scheduled = 0
+
 function frame(image: HTMLImageElement) {
-  if (image.hasAttribute("data-no-framing")) return
-  const key = keyOf(image)
-  const framing = key ? framings[key] : undefined
-  if (!framing || getComputedStyle(image).objectFit !== "cover") {
-    // Plus de cadrage (une autre image dans la même balise) : on rend la place à la vue.
-    if (image.hasAttribute(MARK)) { image.style.objectPosition = ""; image.style.transformOrigin = ""; image.style.transform = ""; image.removeAttribute(MARK) }
-    return
+  queued.add(image)
+  if (!scheduled) scheduled = requestAnimationFrame(flush)
+}
+
+type Framed = { image: HTMLImageElement; key: string; style: ReturnType<typeof framedImageStyle> | null }
+
+function flush() {
+  scheduled = 0
+  const images = [...queued]
+  queued.clear()
+  // D'abord toutes les lectures…
+  const plans: Framed[] = []
+  for (const image of images) {
+    if (!image.isConnected || image.hasAttribute("data-no-framing")) continue
+    const key = keyOf(image)
+    const framing = key ? framings[key] : undefined
+    if (!framing || getComputedStyle(image).objectFit !== "cover") {
+      // Plus de cadrage (une autre image dans la même balise) : on rend la place à la vue.
+      if (image.hasAttribute(MARK)) plans.push({ image, key, style: null })
+      continue
+    }
+    if (!image.naturalWidth) { image.addEventListener("load", () => frame(image), { once: true }); continue }
+    plans.push({ image, key, style: framedImageStyle(framing, { width: image.clientWidth, height: image.clientHeight }, { width: image.naturalWidth, height: image.naturalHeight }) })
   }
-  if (!image.naturalWidth) { image.addEventListener("load", () => frame(image), { once: true }); return }
-  const style = framedImageStyle(framing, { width: image.clientWidth, height: image.clientHeight }, { width: image.naturalWidth, height: image.naturalHeight })
-  image.style.objectPosition = style.objectPosition
-  image.style.transformOrigin = style.transformOrigin
-  image.style.transform = style.transform
-  image.setAttribute(MARK, key)
+  // … puis toutes les écritures.
+  for (const { image, key, style } of plans) {
+    if (!style) { image.style.objectPosition = ""; image.style.transformOrigin = ""; image.style.transform = ""; image.removeAttribute(MARK); continue }
+    image.style.objectPosition = style.objectPosition
+    image.style.transformOrigin = style.transformOrigin
+    image.style.transform = style.transform
+    image.setAttribute(MARK, key)
+  }
 }
 
 function frameAll(root: ParentNode = document) {
-  root.querySelectorAll<HTMLImageElement>("img").forEach((image) => { if (keyOf(image) || image.hasAttribute(MARK)) frame(image) })
+  root.querySelectorAll<HTMLImageElement>(CANDIDATES).forEach((image) => { if (keyOf(image) || image.hasAttribute(MARK)) frame(image) })
 }
 
 export function PortraitFramingEffect() {
@@ -71,7 +100,7 @@ export function PortraitFramingEffect() {
     window.addEventListener(EVENT, announced)
     const observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
-        if (mutation.type === "attributes" && mutation.target instanceof HTMLImageElement) frame(mutation.target)
+        if (mutation.type === "attributes" && mutation.target instanceof HTMLImageElement) { if (keyOf(mutation.target) || mutation.target.hasAttribute(MARK)) frame(mutation.target) }
         mutation.addedNodes.forEach((node) => {
           if (node instanceof HTMLImageElement) { if (keyOf(node)) frame(node) }
           else if (node instanceof Element) frameAll(node)
@@ -79,7 +108,7 @@ export function PortraitFramingEffect() {
       }
     })
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] })
-    return () => { alive = false; observer.disconnect(); window.removeEventListener(EVENT, announced) }
+    return () => { alive = false; observer.disconnect(); window.removeEventListener(EVENT, announced); cancelAnimationFrame(scheduled); scheduled = 0; queued.clear() }
   }, [])
   return null
 }

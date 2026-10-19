@@ -172,9 +172,18 @@ async function readAll() {
   return assembleChunks(await listSharedRecords(PAGES_SCOPE)).flatMap(([, value]) => { const page = parseCustomPage(value); return page ? [page] : [] })
 }
 
-/** Toutes les pages (corbeille comprise), gardées quinze secondes en mémoire. */
+/**
+ * Toutes les pages (corbeille comprise), gardées quinze secondes en mémoire. Passé ce délai,
+ * une lecture ordinaire (règles, ressources, fiche, page créée) reçoit tout de suite la
+ * dernière liste connue et la relecture part en arrière-plan : une page n'attend plus le
+ * serveur partagé toutes les quinze secondes. Ce qui décide d'une écriture demande `fresh`.
+ */
 export function listCustomPages(options: { fresh?: boolean } = {}) {
   if (!options.fresh && cache && cache.expiresAt > Date.now()) return cache.promise
+  if (!options.fresh && known) {
+    if (!refreshing) refreshing = readFresh()
+    return Promise.resolve(known)
+  }
   const promise = readAll()
   cache = { expiresAt: Date.now() + 15_000, promise }
   // Une lecture partie avant un enregistrement ne reprend pas la main sur la copie en mémoire.
@@ -189,9 +198,14 @@ export function listCustomPages(options: { fresh?: boolean } = {}) {
 export function knownCustomPages(): CustomPage[] | null {
   if (sharedStoreAvailable() && !refreshing && Date.now() >= refreshDueAt) {
     refreshDueAt = Date.now() + REFRESH_EVERY
-    refreshing = listCustomPages({ fresh: true }).catch(() => null).finally(() => { refreshing = null })
+    refreshing = readFresh()
   }
   return known
+}
+
+function readFresh() {
+  const read: Promise<unknown> = listCustomPages({ fresh: true }).catch(() => null).finally(() => { if (refreshing === read) refreshing = null })
+  return read
 }
 
 /**

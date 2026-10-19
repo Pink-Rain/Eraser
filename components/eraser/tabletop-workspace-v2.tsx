@@ -1350,7 +1350,7 @@ export function TabletopWorkspace({ canManage, pageLinked, pageName, roomKey, re
 
   return (
     <main className="flex min-h-[calc(100svh-3.5rem)] min-w-0 flex-col gap-3 p-3 md:p-4">
-      <header className="flex flex-wrap items-center gap-2 rounded-2xl border bg-card/90 p-2.5 shadow-sm backdrop-blur">
+      <header className="flex flex-wrap items-center gap-2 rounded-2xl border bg-card p-2.5 shadow-sm">
         <div className="flex min-w-0 items-center gap-2 px-1.5">
           <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground"><MapIcon className="size-4" /></span>
           <div className="min-w-0"><p className="font-display truncate text-lg font-semibold leading-tight">Tabletop</p><p className="truncate text-xs text-muted-foreground">{pageName} · Google Sheets</p></div>
@@ -1447,7 +1447,7 @@ export function TabletopWorkspace({ canManage, pageLinked, pageName, roomKey, re
       <div className="fixed bottom-4 right-4 z-[1260]">
         <Button size="icon" className="rounded-full shadow-2xl" onClick={() => setChatOpen((value) => !value)} aria-label={chatOpen ? "Fermer le chat" : "Ouvrir le chat"}><MessageCircle /></Button>
         {chatOpen && (
-          <section className="fixed bottom-16 right-4 flex h-[min(34rem,calc(100svh-5rem))] w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border bg-card/95 shadow-2xl backdrop-blur">
+          <section className="fixed bottom-16 right-4 flex h-[min(34rem,calc(100svh-5rem))] w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border bg-card shadow-2xl">
             <div className="flex items-center gap-2 border-b p-3"><MessageCircle className="size-4 text-primary" /><div><h2 className="font-display font-semibold">Direct</h2><p className="text-[10px] text-muted-foreground">Tu écris en tant que {speakerName}</p></div><Badge variant="secondary" className="ml-auto">{peerIds.length + 1}</Badge><Button variant="ghost" size="icon-sm" onClick={() => setChatOpen(false)}><X /></Button></div>
             {!canManage && ownedSpeakers.length > 1 && <div className="border-b px-3 py-2"><NativeSelect value={speaker?.id || ""} onChange={(event) => setSpeakerId(event.target.value)} aria-label="Personnage qui parle">{ownedSpeakers.map((character) => <NativeSelectOption key={character.id} value={character.id}>{character.name}</NativeSelectOption>)}</NativeSelect></div>}
             <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">

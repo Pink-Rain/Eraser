@@ -682,7 +682,7 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
 
   return <div className="w-full flex-1 px-3 pb-24 pt-3 sm:px-5 min-[960px]:pb-10">
     {/* La barre d'outils de l'atelier */}
-    <div role="toolbar" aria-label="Réglages de l’atelier" className="sticky top-0 z-30 -mx-3 mb-3.5 max-[959px]:static flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-background/90 px-3 py-2.5 backdrop-blur sm:-mx-5 sm:px-5">
+    <div role="toolbar" aria-label="Réglages de l’atelier" className="sticky top-0 z-30 -mx-3 mb-3.5 max-[959px]:static flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-background px-3 py-2.5 sm:-mx-5 sm:px-5">
       <div role="group" aria-label="Vue" className="inline-flex rounded-[11px] border bg-card p-0.5">
         <Link href="/pages" prefetch={false} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[13px] text-muted-foreground transition hover:bg-muted hover:text-foreground"><LibraryBig className="size-3.5" />Index des pages</Link>
         {(["build", "preview"] as const).map((value) => <button key={value} type="button" aria-pressed={mode === value} onClick={() => { setMode(value); setDrawer(null) }} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[13px] text-muted-foreground transition hover:bg-muted hover:text-foreground aria-pressed:bg-foreground aria-pressed:font-semibold aria-pressed:text-background">{value === "build" ? <Hammer className="size-3.5" /> : <Eye className="size-3.5" />}{value === "build" ? "Construire" : "Aperçu"}</button>)}
@@ -847,7 +847,7 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
 
     {/* Petit écran : les volets deviennent des tiroirs */}
     {drawer && <button type="button" aria-label="Fermer le tiroir" onClick={() => setDrawer(null)} className="fixed inset-0 z-[55] bg-[rgb(20_16_12/0.35)] min-[960px]:hidden" />}
-    {mode === "build" && <div className="fixed inset-x-0 bottom-0 z-50 flex justify-center gap-2 border-t bg-card/95 px-4 pb-[calc(0.6rem+env(safe-area-inset-bottom))] pt-2.5 backdrop-blur min-[960px]:hidden">
+    {mode === "build" && <div className="fixed inset-x-0 bottom-0 z-50 flex justify-center gap-2 border-t bg-card px-4 pb-[calc(0.6rem+env(safe-area-inset-bottom))] pt-2.5 min-[960px]:hidden">
       <Button type="button" variant="outline" className="max-w-56 flex-1" onClick={() => setDrawer("palette")}><Plus />Blocs</Button>
       <Button type="button" variant="outline" className="max-w-56 min-w-0 flex-1" onClick={() => setDrawer("props")}><SquareMousePointer /><span className="truncate">{selectedBlock ? `Régler : ${blockLabel(selectedBlock.type)}` : "Régler la page"}</span></Button>
     </div>}

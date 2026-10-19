@@ -31,10 +31,15 @@ export async function CustomPageRoute({ place, slug, campaignId = "" }: { place:
   if (!page) notFound()
   const view = pageForViewer(page, await viewerFor(viewAccount, page))
   if (!view) notFound()
-  const campaignName = page.place === "campagne" ? (await campaignsOf(viewAccount).catch(() => [])).find((campaign) => campaign.id === page.campaignId)?.name : undefined
+  // Le nom de la campagne et les liens vers d'autres pages se lisent en même temps.
+  const [campaigns, links] = await Promise.all([
+    page.place === "campagne" ? campaignsOf(viewAccount).catch(() => []) : Promise.resolve([]),
+    linkTargetsOf(view, viewAccount),
+  ])
+  const campaignName = page.place === "campagne" ? campaigns.find((campaign) => campaign.id === page.campaignId)?.name : undefined
   return (
     <AuthenticatedShell pageLabel={view.title}>
-      <CustomPageView key={view.id} initial={view} links={await linkTargetsOf(view, viewAccount)} campaignName={campaignName} indexPaths={indexPathsOf(view, viewAccount.role)} modules={moduleSlots(view, { account: viewAccount })} />
+      <CustomPageView key={view.id} initial={view} links={links} campaignName={campaignName} indexPaths={indexPathsOf(view, viewAccount.role)} modules={moduleSlots(view, { account: viewAccount })} />
     </AuthenticatedShell>
   )
 }

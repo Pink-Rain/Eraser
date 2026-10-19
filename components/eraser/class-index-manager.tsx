@@ -170,7 +170,7 @@ function RankRail({ counts, accent }: { counts: number[]; accent: string }) {
     for (const section of sections) observer.observe(section)
     return () => observer.disconnect()
   }, [counts])
-  return <nav aria-label="Aller à une partie de la classe" className="fixed right-2 top-1/2 z-30 hidden max-h-[80svh] -translate-y-1/2 flex-col items-center gap-0.5 overflow-y-auto rounded-full border border-border/50 bg-background/70 px-1 py-2 opacity-60 shadow-sm backdrop-blur transition-opacity hover:opacity-100 focus-within:opacity-100 md:flex">
+  return <nav aria-label="Aller à une partie de la classe" className="fixed right-2 top-1/2 z-30 hidden max-h-[80svh] -translate-y-1/2 flex-col items-center gap-0.5 overflow-y-auto rounded-full border border-border/50 bg-background/90 px-1 py-2 opacity-60 shadow-sm transition-opacity hover:opacity-100 focus-within:opacity-100 md:flex">
     {[["classe-etat", "État", "État de la classe"], ["classe-presentation", "Prés", "Présentation de la classe"], ["classe-specificites", "Spéc", "Spécificités de la classe"], ["classe-stats", "Stat", "Statistiques de la classe"]].map(([id, label, title]) => <button key={id} type="button" onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })} title={title} className="shrink-0 rounded-full px-1 py-1 text-[9px] font-bold uppercase tracking-wide text-foreground/70 hover:bg-muted">{label}</button>)}
     <span className="my-1 h-px w-4 shrink-0 bg-border" aria-hidden />
     {counts.map((count, rank) => <button

@@ -307,7 +307,7 @@ export function CharacterCreationForm({ classes, classesError = "", peoples }: {
         </section>}
 
         {error && <p className="mt-5 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive" role="alert">{error}</p>}
-        <div className="sticky bottom-4 mt-6 flex items-center justify-end gap-2 rounded-2xl border bg-background/90 p-3 shadow-lg backdrop-blur">
+        <div className="sticky bottom-4 mt-6 flex items-center justify-end gap-2 rounded-2xl border bg-background p-3 shadow-lg">
           {step === 2 && <Button type="button" variant="ghost" size="lg" className="mr-auto" onClick={() => goTo(1)} disabled={pending}><ArrowLeft />Précédent</Button>}
           {step === 1
             ? <Button type="submit" size="lg" disabled={!name.trim()}>Suivant<ArrowRight /></Button>

@@ -14,18 +14,56 @@ export type ChatAccount = { uid: string; name: string }
 // ceux des joueurs de sa campagne).
 const NAME_SCOPE = "account-names"
 
-async function knownNames(account: AuthorizedUser) {
-  const names = new Map<string, string>()
-  const shared = sharedStoreAvailable() ? await listSharedRecords(NAME_SCOPE).catch(() => []) : []
-  for (const record of shared) if (record.value.trim()) names.set(record.key, record.value.trim())
-  const publishedNames = new Map(names)
-  // Sans serveur partagé, la liste locale est lisible par tous ; sinon seulement par un MJ.
-  if (!sharedStoreAvailable() || account.accountRole === "admin" || account.accountRole === "mj") {
-    const accounts = await listAccounts(await currentAuthToken().catch(() => undefined)).catch(() => [])
-    for (const candidate of accounts) if (candidate.status === "actif" && candidate.displayName.trim()) names.set(candidate.uid, candidate.displayName.trim())
+/**
+ * L'annuaire publié, gardé en mémoire : la campagne, son dossier et l'accueil le lisaient
+ * sur le serveur partagé à chaque ouverture. Une minute après sa lecture, il est encore
+ * servi tout de suite et se relit en arrière-plan ; ce que cette installation publie y entre
+ * aussitôt.
+ */
+const NAMES_FRESH_MS = 60_000
+let publishedCopy: { names: Map<string, string>; readAt: number } | null = null
+let publishedRead: Promise<Map<string, string>> | null = null
+
+function readPublishedNames() {
+  publishedRead ??= listSharedRecords(NAME_SCOPE)
+    .then((records) => {
+      const names = new Map(records.filter((record) => record.value.trim()).map((record) => [record.key, record.value.trim()]))
+      publishedCopy = { names, readAt: Date.now() }
+      return names
+    })
+    .finally(() => { publishedRead = null })
+  return publishedRead
+}
+
+async function publishedNames(): Promise<Map<string, string>> {
+  if (!sharedStoreAvailable()) return new Map()
+  if (publishedCopy) {
+    if (Date.now() - publishedCopy.readAt >= NAMES_FRESH_MS) void readPublishedNames().catch(() => undefined)
+    return new Map(publishedCopy.names)
   }
+  return new Map(await readPublishedNames().catch(() => new Map<string, string>()))
+}
+
+/** Publie un nom dans l'annuaire partagé, sans faire attendre la page qui le découvre. */
+export function publishAccountName(uid: string, name: string) {
+  const value = name.trim()
+  if (!value || !sharedStoreAvailable()) return Promise.resolve()
+  publishedCopy?.names.set(uid, value)
+  return writeSharedRecord(NAME_SCOPE, uid, value).then(() => undefined, () => undefined)
+}
+
+async function knownNames(account: AuthorizedUser) {
+  // Sans serveur partagé, la liste locale est lisible par tous ; sinon seulement par un MJ.
+  const readsAccounts = !sharedStoreAvailable() || account.accountRole === "admin" || account.accountRole === "mj"
+  const [published, accounts] = await Promise.all([
+    publishedNames(),
+    readsAccounts ? currentAuthToken().catch(() => undefined).then((token) => listAccounts(token)).catch(() => []) : Promise.resolve([]),
+  ])
+  const names = new Map(published)
+  const publishedNamesCopy = new Map(published)
+  for (const candidate of accounts) if (candidate.status === "actif" && candidate.displayName.trim()) names.set(candidate.uid, candidate.displayName.trim())
   if (account.displayName.trim()) names.set(account.uid, account.displayName.trim())
-  return { names, publishedNames }
+  return { names, publishedNames: publishedNamesCopy }
 }
 
 /** Les comptes d'une campagne : son MJ et les propriétaires de ses personnages. */
@@ -45,7 +83,7 @@ export async function chatAccountsForCampaign(account: AuthorizedUser, pageLinke
 
   if (sharedStoreAvailable()) {
     const missing = [...relevant].filter((uid) => names.has(uid) && publishedNames.get(uid) !== names.get(uid)).slice(0, 20)
-    await Promise.all(missing.map((uid) => writeSharedRecord(NAME_SCOPE, uid, names.get(uid) || "").catch(() => undefined)))
+    for (const uid of missing) void publishAccountName(uid, names.get(uid) || "")
   }
   return [...relevant].flatMap((uid) => names.has(uid) ? [{ uid, name: names.get(uid) as string }] : [])
     .sort((left, right) => left.name.localeCompare(right.name, "fr"))
@@ -72,7 +110,7 @@ export async function playerNamesFor(account: AuthorizedUser, ownerUids: string[
   }
   if (sharedStoreAvailable()) {
     const missing = wanted.map((uid) => localUid.get(uid) ?? uid).filter((uid) => names.has(uid) && publishedNames.get(uid) !== names.get(uid)).slice(0, 20)
-    await Promise.all(missing.map((uid) => writeSharedRecord(NAME_SCOPE, uid, names.get(uid) || "").catch(() => undefined)))
+    for (const uid of missing) void publishAccountName(uid, names.get(uid) || "")
   }
   return result
 }
@@ -91,24 +129,23 @@ export type DirectoryAccount = { uid: string; name: string; role: SiteRole | nul
  * l'accueil ou le chat. Aucune adresse e-mail n'en sort.
  */
 export async function listDirectoryAccounts(account: AuthorizedUser): Promise<DirectoryAccount[]> {
-  const shared = sharedStoreAvailable() ? await listSharedRecords(NAME_SCOPE).catch(() => []) : []
-  const published = new Map(shared.filter((record) => record.value.trim()).map((record) => [record.key, record.value.trim()]))
+  const readsAccounts = !sharedStoreAvailable() || account.accountRole === "admin" || account.accountRole === "mj"
+  const [published, accounts] = await Promise.all([
+    publishedNames(),
+    readsAccounts ? currentAuthToken().catch(() => undefined).then((token) => listAccounts(token)).catch(() => null) : Promise.resolve(null),
+  ])
   const directory = new Map<string, DirectoryAccount>()
   for (const [uid, name] of published) directory.set(uid, { uid, name, role: null })
-  if (!sharedStoreAvailable() || account.accountRole === "admin" || account.accountRole === "mj") {
-    const accounts = await listAccounts(await currentAuthToken().catch(() => undefined)).catch(() => null)
-    if (accounts) {
-      // La liste du serveur fait foi : un compte désactivé ou supprimé disparaît.
-      directory.clear()
-      for (const candidate of accounts) if (candidate.status === "actif") directory.set(candidate.uid, { uid: candidate.uid, name: candidate.displayName.trim() || candidate.email.split("@")[0] || "Compte", role: candidate.role })
-    }
+  if (accounts) {
+    // La liste du serveur fait foi : un compte désactivé ou supprimé disparaît.
+    directory.clear()
+    for (const candidate of accounts) if (candidate.status === "actif") directory.set(candidate.uid, { uid: candidate.uid, name: candidate.displayName.trim() || candidate.email.split("@")[0] || "Compte", role: candidate.role })
   }
   if (sharedStoreAvailable()) {
     const own = chatAuthorName(account)
     const missing = [...directory.values()].filter((entry) => entry.role && published.get(entry.uid) !== entry.name).slice(0, 30)
-    const writes = missing.map((entry) => writeSharedRecord(NAME_SCOPE, entry.uid, entry.name).catch(() => undefined))
-    if (published.get(account.uid) !== own) writes.push(writeSharedRecord(NAME_SCOPE, account.uid, own).catch(() => undefined))
-    await Promise.all(writes)
+    for (const entry of missing) void publishAccountName(entry.uid, entry.name)
+    if (published.get(account.uid) !== own) void publishAccountName(account.uid, own)
   }
   directory.delete(account.uid)
   return [...directory.values()].sort((left, right) => left.name.localeCompare(right.name, "fr"))

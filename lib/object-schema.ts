@@ -20,9 +20,8 @@ import { foldName, isIdHeader, objectColumnSpec, type IndexColumnSpec } from "@/
 import { applyLockOverride, lockOverrideOf } from "@/lib/index-locks"
 import { listIndexLocks, tabLocksOf } from "@/lib/index-locks-store"
 import { findEntry, readSchema, upsertEntry, writeSchema } from "@/lib/index-schema"
-import { columnMoves, headerProblem, isDisplayOnlyChange, isObjectSpellingFix, objectColumnPolicy, tabProblem, type IndexEditorModel, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
+import { columnMoves, headerProblem, isDisplayOnlyChange, isObjectSpellingFix, objectColumnPolicy, tabProblem, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
 import type { IndexTrashItem } from "@/lib/world-indexes"
-import { worldRelationTargets } from "@/lib/world-indexes"
 import { OBJECT_REFERENCE_INDEX } from "@/lib/index-references"
 
 /**
@@ -34,10 +33,6 @@ async function objectIndexLocks(fileId: string) {
   const merged = { ...old }
   for (const [tab, locks] of Object.entries(current)) merged[tab] = { ...merged[tab], ...locks }
   return merged
-}
-
-function trashed(entry: SchemaEntry | undefined) {
-  return Boolean(entry && (entry.deletedAt || entry.state === "supprimé"))
 }
 
 /** Le type effectif d'une colonne d'objets : celui du schéma, sinon reconnu par son nom. */
@@ -52,34 +47,6 @@ export async function objectSchemas(tables: ObjectIndexTable[]) {
   const files = [...new Set(tables.map((table) => table.fileId))]
   const entries = await Promise.all(files.map(async (fileId) => [fileId, await readSchema(fileId).catch(() => [] as SchemaEntry[])] as const))
   return Object.fromEntries(entries)
-}
-
-export async function objectEditorModel(fileId: string): Promise<IndexEditorModel> {
-  const tables = (await listObjectIndexTables()).filter((table) => table.fileId === fileId)
-  if (!tables.length) throw new Error("OBJECT_INDEX_NOT_FOUND")
-  const schema = await readSchema(fileId)
-  const locks = await objectIndexLocks(fileId)
-  return {
-    family: "objects",
-    key: fileId,
-    title: tables[0].fileName,
-    addTabs: true,
-    relationTargets: await worldRelationTargets(),
-    deleteIndex: { allowed: false, reason: "Les items de ce classeur peuvent être dans des inventaires et des boutiques. Mets plutôt ses tableaux à la corbeille un par un : ils restent restaurables." },
-    tabs: tables.map((table) => ({
-      name: table.tabName,
-      columns: table.headers.filter((header) => header.trim() && !trashed(findEntry(schema, table.tabName, header))).map((header) => ({
-        header,
-        spec: effectiveObjectSpec(header, table.headers, schema, table.tabName),
-        policy: applyLockOverride(objectColumnPolicy(header), lockOverrideOf(tabLocksOf(locks, table.tabName), header)),
-      })),
-      remove: tables.length > 1,
-      removeReason: tables.length > 1 ? undefined : "C’est le seul tableau de ce classeur : il doit en garder au moins un.",
-      // Les objets sont retrouvés par leur identifiant, pas par le nom de leur tableau.
-      rename: true,
-      addColumns: true,
-    })),
-  }
 }
 
 /**

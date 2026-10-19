@@ -1765,7 +1765,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       <TabsContent value={activeCharacterTab.id} forceMount className="mt-2 rounded-xl p-2 sm:p-3">{renderTabContent(activeCharacterTab)}</TabsContent>
     </Tabs>
 
-    {saveState !== "idle" && <div className={`fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border px-3 py-1.5 text-xs shadow-lg backdrop-blur ${saveState === "error" || saveState === "conflict" || saveState === "too-large" ? "border-destructive/40 bg-destructive/10 text-destructive" : "bg-card/90 text-muted-foreground"}`} role="status" aria-live="polite">
+    {saveState !== "idle" && <div className={`fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border px-3 py-1.5 text-xs shadow-lg ${saveState === "error" || saveState === "conflict" || saveState === "too-large" ? "border-destructive/40 bg-[color-mix(in_oklab,var(--destructive)_10%,var(--card))] text-destructive" : "bg-card text-muted-foreground"}`} role="status" aria-live="polite">
       {saveState === "saving" && <><LoaderCircle className="size-3.5 animate-spin" />Enregistrement…</>}
       {saveState === "saved" && <><Check className="size-3.5 text-emerald-600" />Enregistré</>}
       {saveState === "error" && <><X className="size-3.5" />Pas encore enregistré : Google ne répond pas.<button type="button" className="font-semibold underline" onClick={() => { setSaveState("saving"); void flush() }}>Réessayer</button></>}

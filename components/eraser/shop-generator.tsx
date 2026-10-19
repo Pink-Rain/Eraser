@@ -521,8 +521,9 @@ export function ShopGenerator({ items, loadError = "", pageLinked = "bac-a-sable
     const generated = generateShops(cityKey, items, types)
     setShops(generated); setNotice(""); setError(""); setPending(true)
     try {
+      // Le tirage affiché est celui relu après l'enregistrement : rien d'autre de la page ne
+      // change, inutile de la relire en entier (index d'items, PNJ, campagnes).
       await persistDraw(generated)
-      router.refresh()
       setNotice("Dernier tirage sauvegardé.")
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Sauvegarde impossible.") }
     setPending(false)
@@ -556,7 +557,7 @@ export function ShopGenerator({ items, loadError = "", pageLinked = "bac-a-sable
     if (!replacement) { setNotice(""); setError(noReplacement(shop, rarity)); return }
     const nextShops = shops.map((candidate) => candidate.id === shop.id ? { ...candidate, items: candidate.items.map((candidateItem) => candidateItem.id === item.id ? replacement : candidateItem) } : candidate)
     setShops(nextShops); setPending(true); setError(""); setNotice("")
-    try { await persistDraw(nextShops); router.refresh(); setNotice("Ligne relancée et dernier tirage sauvegardé.") }
+    try { await persistDraw(nextShops); setNotice("Ligne relancée et dernier tirage sauvegardé.") }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Relance impossible.") }
     setPending(false)
   }
@@ -565,7 +566,7 @@ export function ShopGenerator({ items, loadError = "", pageLinked = "bac-a-sable
     if (!shops) return
     const nextShops = shops.map((candidate) => candidate.id === shop.id ? { ...candidate, items: candidate.items.map((candidateItem) => candidateItem.id === item.id ? replacement : candidateItem) } : candidate)
     setShops(nextShops); setPending(true); setError(""); setNotice("")
-    try { await persistDraw(nextShops); router.refresh(); setNotice(`${replacement.name} remplace ${item.name}.`); setPickTarget(null) }
+    try { await persistDraw(nextShops); setNotice(`${replacement.name} remplace ${item.name}.`); setPickTarget(null) }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Le changement n’a pas pu être enregistré.") }
     setPending(false)
   }
@@ -576,7 +577,7 @@ export function ShopGenerator({ items, loadError = "", pageLinked = "bac-a-sable
     const market = generateEventShop(items, types, eventType.key, travellingCount === "random" ? "random" : Number(travellingCount), cityKey)
     const nextShops = [...(shops || []), market]
     setShops(nextShops); setPending(true); setError(""); setNotice("")
-    try { await persistDraw(nextShops); router.refresh(); setNotice(`${market.name} de ${market.items.length} item${market.items.length > 1 ? "s" : ""} ajouté au tirage.`) }
+    try { await persistDraw(nextShops); setNotice(`${market.name} de ${market.items.length} item${market.items.length > 1 ? "s" : ""} ajouté au tirage.`) }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Sauvegarde impossible.") }
     setPending(false)
   }
@@ -586,7 +587,7 @@ export function ShopGenerator({ items, loadError = "", pageLinked = "bac-a-sable
     const updated = rerollShop(items, shop, types)
     const nextShops = shops.map((candidate) => candidate.id === shop.id ? updated : candidate)
     setShops(nextShops); setPending(true); setError(""); setNotice("")
-    try { await persistDraw(nextShops); router.refresh(); setNotice("Magasin relancé et dernier tirage sauvegardé.") }
+    try { await persistDraw(nextShops); setNotice("Magasin relancé et dernier tirage sauvegardé.") }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Relance impossible.") }
     setPending(false)
   }
@@ -607,7 +608,7 @@ export function ShopGenerator({ items, loadError = "", pageLinked = "bac-a-sable
     if (!renameTarget || !shops) return
     const nextShops = shops.map((shop) => shop.id === renameTarget.id ? { ...shop, name } : shop)
     setShops(nextShops); setPending(true); setError(""); setNotice("")
-    try { await persistDraw(nextShops); router.refresh(); setNotice("Nom du magasin enregistré."); setRenameTarget(null) }
+    try { await persistDraw(nextShops); setNotice("Nom du magasin enregistré."); setRenameTarget(null) }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Le nom n’a pas pu être enregistré.") }
     setPending(false)
   }

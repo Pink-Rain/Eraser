@@ -1,14 +1,15 @@
 "use client"
 
-import { useState, type FormEvent, type ReactNode } from "react"
+import { useEffect, useState, type FormEvent, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
-import { Check, ImagePlus, KeyRound, Link2, LoaderCircle, LogOut, Mail, UserRound } from "lucide-react"
+import { Check, Gauge, ImagePlus, KeyRound, Link2, LoaderCircle, LogOut, Mail, UserRound } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
+import { EFFECTS_EVENT, effectsAreLight, effectsChoices, effectsPreference, modestComputer, setEffectsPreference, type EffectsPreference } from "@/lib/visual-effects"
 
 export type AccountDialogUser = { uid: string; email: string; displayName: string }
 
@@ -52,6 +53,42 @@ function Section({ icon: Icon, title, children }: { icon: typeof Mail; title: st
       <h3 className="flex items-center gap-2 text-sm font-semibold"><Icon className="size-4 text-primary" />{title}</h3>
       {children}
     </section>
+  )
+}
+
+/** Effets complets ou allégés, gardés sur cet ordinateur (lib/visual-effects.ts). */
+function EffectsSection() {
+  const [preference, setPreference] = useState<EffectsPreference>("auto")
+  const [light, setLight] = useState(false)
+  const [modest, setModest] = useState(false)
+  useEffect(() => {
+    const sync = () => { setPreference(effectsPreference()); setLight(effectsAreLight()); setModest(modestComputer()) }
+    sync()
+    window.addEventListener(EFFECTS_EVENT, sync)
+    return () => window.removeEventListener(EFFECTS_EVENT, sync)
+  }, [])
+  return (
+    <Section icon={Gauge} title="Fluidité">
+      <div role="radiogroup" aria-label="Effets visuels" className="grid grid-cols-3 gap-1 rounded-lg border bg-background p-1">
+        {effectsChoices.map((choice) => (
+          <button
+            key={choice.value}
+            type="button"
+            role="radio"
+            aria-checked={preference === choice.value}
+            onClick={() => setEffectsPreference(choice.value)}
+            className={cn("rounded-md px-2 py-1.5 text-xs font-medium transition-colors", preference === choice.value ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground")}
+          >
+            {choice.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {light ? "Effets allégés : les états de la fiche restent visibles mais immobiles, sans flou ni verre dépoli." : "Effets complets : animations des états, flous et transitions."}
+        {preference === "auto" && ` Automatique : ${modest ? "allégés, cet ordinateur est modeste" : "complets, cet ordinateur est assez puissant"}.`}
+        {" "}Gardé sur cet ordinateur.
+      </p>
+    </Section>
   )
 }
 
@@ -225,6 +262,8 @@ export function AccountDialog({ open, onOpenChange, user, roleLabel, avatarVersi
           </form>
           <FeedbackLine feedback={feedback.password ?? null} />
         </Section>
+
+        <EffectsSection />
 
         <Button type="button" variant="outline" onClick={onSignOut} className="w-full text-destructive hover:bg-destructive/8 hover:text-destructive">
           <LogOut />Se déconnecter

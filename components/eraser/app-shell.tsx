@@ -835,7 +835,7 @@ export function AppShell({
           quelle que soit la page affichée, sans dépendre d’un `position: sticky` que le
           contenu d’une page pourrait neutraliser. */}
       <SidebarInset className="h-svh min-h-svh min-w-0 w-0 flex-1 overflow-hidden">
-        <header className="z-50 flex h-14 shrink-0 items-center gap-3 border-b bg-background/95 px-4 shadow-sm backdrop-blur md:px-7">
+        <header className="z-50 flex h-14 shrink-0 items-center gap-3 border-b bg-background px-4 shadow-sm md:px-7">
           <SidebarTrigger aria-label="Afficher ou masquer la navigation" />
           {/* Le fil d'Ariane suit la page qui s'ouvre dès le clic, puis celle affichée. */}
           <ShellBreadcrumb pathname={pendingPage?.to || pathname} current={pendingPage?.title || currentPageLabel} campaignName={(id) => visibleCampaigns.find((campaign) => campaign.id === id)?.name} />

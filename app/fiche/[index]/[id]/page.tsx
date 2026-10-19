@@ -31,10 +31,14 @@ export default async function RowPage({ params }: { params: Promise<{ index: str
   const player = viewAccount.role === "joueur"
   // Les brouillons des modèles : pour qui construit les pages (administrateurs).
   const manager = canBuildPages(viewAccount.role)
-  // Les modèles lisibles par le compte (brouillons compris pour qui peut les modifier).
-  const templates = (await readablePages(viewAccount, { includeDrafts: manager }).catch(() => [])).filter(({ page }) => page.rowOf?.index === key).map(({ page }) => page)
+  // Les modèles lisibles par le compte (brouillons compris pour qui peut les modifier), et
+  // l'index lu en même temps : la page n'attend plus l'un puis l'autre.
+  const [readable, source] = await Promise.all([
+    readablePages(viewAccount, { includeDrafts: manager }).catch(() => []),
+    indexSourceOf(key).catch(() => null),
+  ])
+  const templates = readable.filter(({ page }) => page.rowOf?.index === key).map(({ page }) => page)
   if (!templates.length) notFound()
-  const source = await indexSourceOf(key).catch(() => null)
   if (!source) notFound()
   const row = rowContextOf(source, decodeURIComponent(id), readOptions(key, player))
   if (!row) notFound()
@@ -48,6 +52,7 @@ export default async function RowPage({ params }: { params: Promise<{ index: str
   // Un bloc « Valeurs de la ligne » disposé comme la fiche : la fiche de l'onglet (lue seulement alors).
   // Un bloc « Valeurs de la ligne » disposé comme la fiche : le formulaire étoilé de l'onglet, et ceux que les blocs nomment.
   const formIds = rowFormIdsOf(view)
+  const links = linkTargetsOf(view, viewAccount)
   const layouts = formIds ? await listIndexLayouts(key).catch(() => ({})) : {}
   const form = formIds ? tabLayoutOrBuiltin(layouts, key, row.tab, "form") : null
   const forms = formIds ? Object.fromEntries(formIds.filter(Boolean).flatMap((formId) => { const layout = tabFormOrBuiltin(layouts, key, row.tab, formId); return layout ? [[formId, layout]] : [] })) : {}
@@ -61,7 +66,7 @@ export default async function RowPage({ params }: { params: Promise<{ index: str
         row={packRowContext(form ? { ...row, form, ...(Object.keys(forms).length ? { forms } : {}) } : row)}
         modules={moduleSlots(view, { account: viewAccount, row: { index: key, id: row.id } })}
         eyebrow={`${source.title} · ${row.tab}`}
-        links={await linkTargetsOf(view, viewAccount)}
+        links={await links}
         indexPaths={indexPathsOf(view, viewAccount.role)}
         actions={indexHref ? <Button asChild size="sm" variant="ghost"><Link href={indexHref} prefetch={false}><ExternalLink />Ouvrir dans l’index</Link></Button> : undefined}
       />
