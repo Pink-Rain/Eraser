@@ -3,13 +3,14 @@
  * « Liste d'index » s'en sert pour ses choix, les magasins, les fouilles et les événements pour
  * savoir où lire. Un index qui gagne une telle colonne y entre de lui-même.
  *
- * Lus d'après les copies gardées des index (`getWorldIndexQuick`, l'Index des objets gardé) :
+ * Lus d'après les copies gardées des index (`getWorldIndexQuick`, dont l'Index des items) :
  * pas de lecture Google de plus quand elles sont là. Jamais de classeur créé : un index du monde
  * pas encore relié dans le Drive est sauté. Le résultat est gardé cinq minutes.
  */
 import { listCustomIndexes } from "@/lib/custom-indexes"
 import { onForgetGoogleData } from "@/lib/data-refresh"
-import { listObjectIndexTablesForDisplay, resolveJdrSheet, type ObjectIndexTable } from "@/lib/google-sheets"
+import { resolveJdrSheet, type ObjectIndexTable } from "@/lib/google-sheets"
+import { objectCatalog } from "@/lib/object-catalog"
 import { choiceKey, foldName, normalizeSpec, objectColumnSpec, type IndexColumnKind, type IndexColumnSpec } from "@/lib/index-columns"
 import { OBJECT_REFERENCE_INDEX } from "@/lib/index-references"
 import type { JdrSheetKey } from "@/lib/jdr-sheets"
@@ -70,7 +71,7 @@ export function indexesWithColumnKind(kind: IndexColumnKind, options: { fresh?: 
   let objectsFailed = false
   const promise = (async () => {
     const [objects, worlds] = await Promise.all([
-      listObjectIndexTablesForDisplay().catch(() => { objectsFailed = true; return [] as ObjectIndexTable[] }),
+      objectCatalog().catch(() => { objectsFailed = true; return [] as ObjectIndexTable[] }),
       readWorldIndexes(),
     ])
     const out: IndexWithKind[] = []

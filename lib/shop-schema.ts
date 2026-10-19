@@ -1,4 +1,5 @@
-import { listObjectIndexTablesForDisplay, objectCombatFields, objectIndexPrice } from "@/lib/google-sheets"
+import { objectCombatFields, objectIndexPrice } from "@/lib/google-sheets"
+import { objectCatalog } from "@/lib/object-catalog"
 import type { ObjectCombatFields } from "@/lib/inventory-schema"
 import { objectLocationColumns } from "@/lib/object-combat"
 import { shopObjectId } from "@/lib/object-item-id"
@@ -110,7 +111,7 @@ function cell(headers: string[], values: string[], aliases: string[]) {
 }
 
 export async function loadShopGeneratorItems() {
-  const tables = await listObjectIndexTablesForDisplay()
+  const tables = await objectCatalog()
   return tables.flatMap<ShopGeneratorItem>((table) => {
     // La colonne « Rareté et emplacements » de l'onglet, si elle y est : elle seule dit où se
     // trouve un item ; sinon les anciennes colonnes (principal / secondaire).

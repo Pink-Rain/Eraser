@@ -4,7 +4,6 @@ import {
 } from "@/lib/google-service-account"
 import { driveImageFormula, isGeneratedObjectIcon, objectIconDriveFileId, suggestedObjectIconKey } from "@/lib/object-icons"
 import { ensureObjectIconsOnDrive } from "@/lib/object-icon-drive"
-import { AsyncLocalStorage } from "node:async_hooks"
 import { cache } from "react"
 import { and, desc, eq, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm"
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core"
@@ -29,7 +28,7 @@ import {
 } from "@/lib/google-apps-script"
 import { runInBackground } from "@/lib/background-work"
 import { withAsyncLock } from "@/lib/async-lock"
-import type { ObjectIndexCellRef, ObjectIndexRowRef } from "@/lib/object-index-refs"
+import type { ObjectIndexRowRef } from "@/lib/object-index-refs"
 import { objectCombatColumn, objectPriceColumn, objectTraitLooks, planObjectCombatHeaders } from "@/lib/object-combat"
 import { isEntityWorldIndexKey, worldIndexDefinitions, type BuiltinWorldIndexKey, type EntityWorldIndexKey } from "@/lib/world-index-definitions"
 import { foldName, isImageSource, type IndexColumnSpec } from "@/lib/index-columns"
@@ -484,12 +483,8 @@ function announceSpreadsheetWrite(path: string, method: string) {
   if (!spreadsheetId) return
   // Les copies partagées de ce classeur (lib/shared-reads.ts) ne servent plus, pour aucune installation.
   void markSpreadsheetChanged(spreadsheetId)
-  // Le classeur des items écrit (par le moteur des index, l'inventaire…) : l'inventaire, les
-  // magasins et l'index relisent ce classeur, et lui seul. Sauf les cases que le moteur écrit
-  // lui-même (`writeObjectIndexCells`) : elles sont recopiées dans le catalogue gardé.
-  const ownCells = objectCellWrite.getStore()
-  if (ownCells && ownCells.fileId === spreadsheetId) ownCells.wrote = true
-  else if (objectIndexTableCache?.tables.some((table) => table.fileId === spreadsheetId)) markObjectIndexFileChanged(spreadsheetId)
+  // Les index (dont celui des items) gardés par le moteur : relus après une écriture qui n'est
+  // pas la leur (lib/world-indexes.ts écoute ici).
   for (const listener of spreadsheetWriteListeners) {
     try { listener(spreadsheetId) } catch { /* un auditeur en échec n'empêche pas l'écriture */ }
   }
@@ -625,8 +620,6 @@ function forgetAfterStructureChange(path: string, init?: RequestInit) {
   characterColumnsCache = null
   // L'inventaire et le catalogue des objets gardés en mémoire portent des numéros de ligne.
   if (spreadsheetId && inventoryWorkbookCache?.workbook.spreadsheetId === spreadsheetId) clearInventoryWorkbookCache()
-  // Un classeur d'objets : lui seul sera relu, pas tout le dossier « Objets ».
-  if (spreadsheetId && objectIndexTableCache?.tables.some((table) => table.fileId === spreadsheetId)) markObjectIndexFileChanged(spreadsheetId)
 }
 
 export async function googleSheetsJson<T>(path: string, init?: RequestInit) {
@@ -775,7 +768,7 @@ async function readRangeFresh(
   return (await readRangeFreshWithOffset(spreadsheetId, range, valueRenderOption)).rows
 }
 
-async function readRanges(
+export async function readRanges(
   spreadsheetId: string,
   ranges: string[],
   valueRenderOption?: "FORMATTED_VALUE" | "UNFORMATTED_VALUE" | "FORMULA",
@@ -848,6 +841,12 @@ function gridCellValue(cell: GoogleGridCell, keepImageFormula = false) {
 const LIGHT_TEXT_FORMAT = "bold,italic,underline,strikethrough,link,foregroundColor,foregroundColorStyle"
 const LIGHT_CELL_FIELDS = `formattedValue,textFormatRuns(startIndex,format(${LIGHT_TEXT_FORMAT})),effectiveFormat.textFormat(${LIGHT_TEXT_FORMAT})`
 const FULL_CELL_FIELDS = "formattedValue,userEnteredValue,textFormatRuns,effectiveFormat(backgroundColor,backgroundColorStyle,textFormat)"
+/** Comme la lecture légère, plus la formule : une icône =IMAGE (colonne « Icône » des items) n'a pas de texte. */
+const IMAGE_CELL_FIELDS = `${LIGHT_CELL_FIELDS},userEnteredValue(formulaValue)`
+/** Ce qu'une lecture mise en forme demande : légère (texte et sa forme), complète (fond compris), ou légère avec les icônes =IMAGE. */
+type GridMode = "light" | "full" | "images"
+const gridModeOf = (options: { light?: boolean; keepImages?: boolean }): GridMode => options.keepImages ? "images" : options.light ? "light" : "full"
+const CELL_FIELDS: Record<GridMode, string> = { light: LIGHT_CELL_FIELDS, full: FULL_CELL_FIELDS, images: IMAGE_CELL_FIELDS }
 
 type FormattedGridSheet = {
   properties?: { sheetId?: number; title?: string }
@@ -855,17 +854,17 @@ type FormattedGridSheet = {
 }
 
 /** Une ou plusieurs zones lues avec leur mise en forme, en une requête. */
-function fetchFormattedGrid(spreadsheetId: string, ranges: string[], light: boolean) {
+function fetchFormattedGrid(spreadsheetId: string, ranges: string[], mode: GridMode) {
   const parameters = new URLSearchParams({
     includeGridData: "true",
-    fields: `sheets(properties(sheetId,title),data(startRow,startColumn,rowData(values(${light ? LIGHT_CELL_FIELDS : FULL_CELL_FIELDS}))))`,
+    fields: `sheets(properties(sheetId,title),data(startRow,startColumn,rowData(values(${CELL_FIELDS[mode]}))))`,
   })
   for (const range of ranges) parameters.append("ranges", range)
   return googleSheetsJson<{ sheets?: FormattedGridSheet[] }>(`spreadsheets/${spreadsheetId}?${parameters.toString()}`)
 }
 
 /** Les cases d'un onglet rendu par Google, rangées par ligne et par colonne. */
-function formattedSheetOf(sheet: FormattedGridSheet | undefined): FormattedSheet {
+function formattedSheetOf(sheet: FormattedGridSheet | undefined, mode: GridMode = "full"): FormattedSheet {
   const sheetId = sheet?.properties?.sheetId
   const tabName = sheet?.properties?.title
   if (sheetId === undefined || !tabName) throw new Error("SHEET_TAB_NOT_FOUND")
@@ -877,7 +876,7 @@ function formattedSheetOf(sheet: FormattedGridSheet | undefined): FormattedSheet
       const rowIndex = startRow + rowOffset
       rows[rowIndex] ||= []
       for (const [columnOffset, cell] of (row.values ?? []).entries()) {
-        const value = gridCellValue(cell)
+        const value = gridCellValue(cell, mode === "images")
         const textFormat = cell.effectiveFormat?.textFormat
         rows[rowIndex][startColumn + columnOffset] = {
           value,
@@ -894,9 +893,9 @@ function formattedSheetOf(sheet: FormattedGridSheet | undefined): FormattedSheet
 const quotedTab = (name: string) => `'${name.replaceAll("'", "''")}'`
 
 /** Un onglet entier, lu seul (le chemin d'avant les lectures groupées). */
-async function readWholeFormattedTab(spreadsheetId: string, tab: string, light: boolean) {
-  const payload = await fetchFormattedGrid(spreadsheetId, [quotedTab(tab)], light)
-  return formattedSheetOf(payload.sheets?.find((item) => item.properties?.title === tab) ?? payload.sheets?.[0])
+async function readWholeFormattedTab(spreadsheetId: string, tab: string, mode: GridMode) {
+  const payload = await fetchFormattedGrid(spreadsheetId, [quotedTab(tab)], mode)
+  return formattedSheetOf(payload.sheets?.find((item) => item.properties?.title === tab) ?? payload.sheets?.[0], mode)
 }
 
 type FormattedTabRequest = { tab: string; resolve: (sheet: FormattedSheet) => void; reject: (error: unknown) => void }
@@ -907,8 +906,8 @@ const formattedTabBatches = new Map<string, FormattedTabRequest[]>()
  * spécificités de classe) partent ensemble : une requête au lieu d'une par onglet. Toutes les
  * installations partagent le quota de Google ; chaque requête évitée compte.
  */
-function batchedFormattedTab(spreadsheetId: string, tab: string, light: boolean) {
-  const key = `${spreadsheetId}\u0001${light ? "light" : "full"}`
+function batchedFormattedTab(spreadsheetId: string, tab: string, mode: GridMode) {
+  const key = `${spreadsheetId}\u0001${mode}`
   return new Promise<FormattedSheet>((resolve, reject) => {
     let batch = formattedTabBatches.get(key)
     if (!batch) {
@@ -917,24 +916,24 @@ function batchedFormattedTab(spreadsheetId: string, tab: string, light: boolean)
       formattedTabBatches.set(key, created)
       setTimeout(() => {
         formattedTabBatches.delete(key)
-        void sendFormattedTabBatch(spreadsheetId, light, created)
+        void sendFormattedTabBatch(spreadsheetId, mode, created)
       }, 0)
     }
     batch.push({ tab, resolve, reject })
   })
 }
 
-async function sendFormattedTabBatch(spreadsheetId: string, light: boolean, requests: FormattedTabRequest[]) {
+async function sendFormattedTabBatch(spreadsheetId: string, mode: GridMode, requests: FormattedTabRequest[]) {
   const tabs = [...new Set(requests.map((request) => request.tab))]
-  const alone = (request: FormattedTabRequest) => readWholeFormattedTab(spreadsheetId, request.tab, light).then(request.resolve, request.reject)
+  const alone = (request: FormattedTabRequest) => readWholeFormattedTab(spreadsheetId, request.tab, mode).then(request.resolve, request.reject)
   if (tabs.length === 1) {
-    const reading = readWholeFormattedTab(spreadsheetId, tabs[0], light)
+    const reading = readWholeFormattedTab(spreadsheetId, tabs[0], mode)
     for (const request of requests) reading.then(request.resolve, request.reject)
     return
   }
   let payload: { sheets?: FormattedGridSheet[] }
   try {
-    payload = await fetchFormattedGrid(spreadsheetId, tabs.map(quotedTab), light)
+    payload = await fetchFormattedGrid(spreadsheetId, tabs.map(quotedTab), mode)
   } catch (error) {
     // Un onglet introuvable fait refuser toute la requête (400) : chacun est relu seul, et seul
     // celui qui manque échoue, comme avant. Toute autre erreur (quota, réseau) vaut pour tous.
@@ -946,7 +945,7 @@ async function sendFormattedTabBatch(spreadsheetId: string, light: boolean, requ
     const sheet = payload.sheets?.find((item) => item.properties?.title === request.tab)
     if (!sheet) { void alone(request); continue }
     try {
-      request.resolve(formattedSheetOf(sheet))
+      request.resolve(formattedSheetOf(sheet, mode))
     } catch (error) {
       request.reject(error)
     }
@@ -954,17 +953,18 @@ async function sendFormattedTabBatch(spreadsheetId: string, light: boolean, requ
 }
 
 /** `range` (sans l'onglet, ex. « A5:Z5 ») limite la lecture à une zone : une ligne se lit bien plus vite que la feuille. */
-export async function readFormattedSheet(spreadsheetId: string, candidates: string[], options: { light?: boolean; range?: string; ranges?: string[] } = {}): Promise<FormattedSheet> {
+export async function readFormattedSheet(spreadsheetId: string, candidates: string[], options: { light?: boolean; keepImages?: boolean; range?: string; ranges?: string[] } = {}): Promise<FormattedSheet> {
+  const mode = gridModeOf(options)
   // Un onglet entier, sans nom de rechange : il peut partir avec les autres onglets du classeur.
-  if (candidates.length === 1 && !options.range && !options.ranges?.length) return batchedFormattedTab(spreadsheetId, candidates[0], Boolean(options.light))
+  if (candidates.length === 1 && !options.range && !options.ranges?.length) return batchedFormattedTab(spreadsheetId, candidates[0], mode)
   let lastError: unknown = null
   for (const candidate of candidates) {
     try {
       const tab = quotedTab(candidate)
       // Plusieurs zones (« C:C », « H:H »…) : seules ces colonnes d'une feuille très large sont lues.
       const zones = options.ranges?.length ? options.ranges : [options.range ?? ""]
-      const payload = await fetchFormattedGrid(spreadsheetId, zones.map((zone) => zone ? `${tab}!${zone}` : tab), Boolean(options.light))
-      return formattedSheetOf(payload.sheets?.find((item) => item.properties?.title === candidate) ?? payload.sheets?.[0])
+      const payload = await fetchFormattedGrid(spreadsheetId, zones.map((zone) => zone ? `${tab}!${zone}` : tab), mode)
+      return formattedSheetOf(payload.sheets?.find((item) => item.properties?.title === candidate) ?? payload.sheets?.[0], mode)
     } catch (error) {
       lastError = error
     }
@@ -1454,9 +1454,6 @@ export type ObjectIndexTable = {
   columnSpecs?: Record<string, IndexColumnSpec>
 }
 
-let objectIndexTableCache: { expiresAt: number; tables: ObjectIndexTable[] } | null = null
-const OBJECT_INDEX_CACHE_MS = 5 * 60_000
-
 function normalizedHeader(value: string) {
   return value
     .normalize("NFD")
@@ -1466,7 +1463,8 @@ function normalizedHeader(value: string) {
     .toLowerCase()
 }
 
-async function objectIndexSpreadsheetFiles() {
+/** Les classeurs posés directement dans le dossier « Objets » du Drive (raccourcis compris). */
+export async function objectIndexSpreadsheetFiles() {
   const folder = await findDriveFolderByName("Objets")
   if (!folder) throw new Error("OBJECT_INDEX_FOLDER_NOT_FOUND")
   const files = await listDriveFolderFiles(folder.id)
@@ -1480,11 +1478,11 @@ async function objectIndexSpreadsheetFiles() {
 }
 
 /**
- * Les tableaux d'un classeur d'objets, lus tels qu'ils sont dans Sheets (sans les
- * en-têtes repris des autres index). Le regroupement s'en sert aussi pour vérifier
- * sa copie avant de basculer.
+ * Les tableaux d'un ancien classeur d'objets, lus tels qu'ils sont dans Sheets : pour le seul
+ * regroupement des anciens classeurs (migration), qui vérifie aussi sa copie avant de
+ * basculer. Les items ne sont servis que par le moteur des index (`objectCatalog`).
  */
-export async function readObjectIndexSpreadsheet(file: { id: string; name: string; webViewLink?: string }): Promise<ObjectIndexTable[]> {
+export async function readLegacyObjectSpreadsheet(file: { id: string; name: string; webViewLink?: string }): Promise<ObjectIndexTable[]> {
   const metadata = await googleSheetsJson<{
     sheets?: Array<{ properties?: { sheetId?: number; title?: string; gridProperties?: { columnCount?: number } } }>
   }>(`spreadsheets/${file.id}?fields=sheets.properties(sheetId,title,gridProperties.columnCount)`)
@@ -1564,218 +1562,14 @@ export async function readObjectIndexSpreadsheet(file: { id: string; name: strin
   })
 }
 
-/** Le dernier catalogue lu en entier : rendu si une relecture échoue (Google indisponible un instant). */
-let lastGoodObjectIndexTables: ObjectIndexTable[] | null = null
-/** Une seule lecture à la fois : l'inventaire, les magasins et l'index la partagent. */
-let objectIndexTablesRequest: Promise<ObjectIndexTable[]> | null = null
-
 /**
- * Les classeurs d'objets modifiés par Eraser depuis la dernière lecture (ligne ajoutée,
- * insérée, dupliquée, déplacée ou supprimée). Ces opérations vidaient tout le catalogue :
- * la lecture suivante relisait chaque classeur du dossier « Objets », grilles complètes,
- * pour une seule ligne. Désormais seuls les classeurs marqués sont relus, les autres
- * repris tels quels (voir `reloadStaleObjectIndexFiles`).
+ * Ce que l'Index des items complète de lui-même après chaque lecture du moteur, en arrière-plan
+ * et sans jamais déplacer une colonne : en-têtes vides, icônes, colonnes de combat.
  */
-const staleObjectIndexFiles = new Set<string>()
-
-export function listObjectIndexTables(): Promise<ObjectIndexTable[]> {
-  const cache = objectIndexTableCache
-  const fresh = cache && cache.expiresAt > Date.now()
-  if (fresh && !staleObjectIndexFiles.size) return Promise.resolve(cache.tables)
-  if (!objectIndexTablesRequest) {
-    const partial = fresh && !fallbackObjectIndexTables.has(cache.tables)
-    objectIndexTablesRequest = (partial ? reloadStaleObjectIndexFiles(cache) : loadObjectIndexTables()).finally(() => { objectIndexTablesRequest = null })
-  }
-  return objectIndexTablesRequest
-}
-
-/**
- * Un classeur d'objets vient d'être modifié par Eraser : lui seul sera relu. Sans catalogue
- * à jour en mémoire (expiré, de secours, ou sans ce classeur), tout est relu, comme avant.
- * L'inventaire (qui cite les objets par leur ID et en prend les colonnes) est relu aussi.
- */
-function markObjectIndexFileChanged(fileId: string) {
-  const cache = objectIndexTableCache
-  if (!cache || cache.expiresAt <= Date.now() || fallbackObjectIndexTables.has(cache.tables) || !cache.tables.some((table) => table.fileId === fileId)) {
-    clearObjectIndexTableCache()
-    return
-  }
-  staleObjectIndexFiles.add(fileId)
-  // Une lecture lancée avant l'écriture ne doit pas servir après elle.
-  objectIndexTablesRequest = null
-  objectIndexTablesVersion += 1
-  clearInventoryWorkbookCache()
-}
-
-/** Les cases d'items que le moteur des index écrit en ce moment (voir `writeObjectIndexCells`). */
-const objectCellWrite = new AsyncLocalStorage<{ fileId: string; wrote: boolean }>()
-
-/**
- * Des cases d'une ligne d'items écrites par le moteur des index (une case, une fiche) : le
- * catalogue gardé en mémoire (inventaire, magasins, fouilles) reçoit les nouvelles valeurs au
- * lieu de relire tout le classeur des items, grilles mises en forme comprises — ce qui suivait
- * chaque case modifiée. La ligne est reconnue à son numéro et à son ID ; sans elle (catalogue
- * absent, de secours, ligne déplacée), le classeur est relu comme avant.
- */
-export async function writeObjectIndexCells<T>(target: { fileId: string; tabName: string; rowNumber: number; id: string }, write: () => Promise<T>, cells: () => Array<{ header: string; html: string }>): Promise<T> {
-  const scope = { fileId: target.fileId, wrote: false }
-  const result = await objectCellWrite.run(scope, write).catch((error) => {
-    // Une écriture a pu partir avant l'erreur : le classeur est relu.
-    if (scope.wrote) markObjectIndexFileChanged(target.fileId)
-    throw error
-  })
-  if (scope.wrote && !patchObjectIndexRow(target, cells())) markObjectIndexFileChanged(target.fileId)
-  return result
-}
-
-function patchObjectIndexRow(target: { fileId: string; tabName: string; rowNumber: number; id: string }, cells: Array<{ header: string; html: string }>) {
-  const cache = objectIndexTableCache
-  if (!cache || fallbackObjectIndexTables.has(cache.tables) || staleObjectIndexFiles.has(target.fileId)) return false
-  const table = cache.tables.find((candidate) => candidate.fileId === target.fileId && candidate.tabName === target.tabName)
-  const row = table?.rows.find((candidate) => candidate.rowNumber === target.rowNumber)
-  if (!table || !row) return false
-  const idColumn = table.headers.findIndex((header) => foldName(header) === "id")
-  if (idColumn >= 0 && (row.values[idColumn] ?? "").trim() !== target.id.trim()) return false
-  const columns = cells.map((cell) => table.headers.findIndex((header) => foldName(header) === foldName(cell.header)))
-  if (columns.some((column) => column < 0)) return false
-  cells.forEach((cell, index) => {
-    const rich = /<[a-z]/i.test(cell.html)
-    row.values[columns[index]] = rich ? htmlToRichText(cell.html).text : cell.html
-    row.html[columns[index]] = rich ? cell.html : richTextHtml(cell.html)
-  })
-  // Une lecture partie avant l'écriture ne remplace pas la copie corrigée ; l'inventaire
-  // (qui reprend des colonnes des items) est relu.
-  objectIndexTablesRequest = null
-  objectIndexTablesVersion += 1
-  clearInventoryWorkbookCache()
-  return true
-}
-
-/** Un tableau tel que lu dans Sheets, avant `fillMissingObjectIndexHeaders` (en-têtes repris retirés). */
-function unfilledObjectIndexTable(table: ObjectIndexTable): ObjectIndexTable {
-  if (table.borrowedHeaders === undefined) return table
-  const borrowed = new Set(table.borrowedHeaders)
-  return { ...table, headers: table.headers.map((header, index) => borrowed.has(index) ? `Colonne ${index + 1}` : header), borrowedHeaders: undefined }
-}
-
-const objectIndexHeaderSignature = (tables: ObjectIndexTable[]) => tables.map((table) => JSON.stringify([table.sheetId, table.tabName, table.headers])).sort().join("\n")
-
-/**
- * Relit les seuls classeurs marqués et les remet dans le catalogue gardé en mémoire. Le
- * résultat est celui d'une relecture complète : les en-têtes manquants sont repris des
- * autres index sur l'ensemble, et si un classeur relu a changé d'onglets ou d'en-têtes
- * (ce qui pourrait changer les en-têtes repris par les autres), tout est relu. Une relecture
- * en échec repart aussi d'une relecture complète, jamais d'un mélange d'ancien et de neuf.
- */
-async function reloadStaleObjectIndexFiles(cache: { expiresAt: number; tables: ObjectIndexTable[] }): Promise<ObjectIndexTable[]> {
-  const version = objectIndexTablesVersion
-  const stale = new Set(staleObjectIndexFiles)
-  const files = [...stale].flatMap((fileId) => {
-    const known = cache.tables.find((table) => table.fileId === fileId)
-    return known ? [{ id: fileId, name: known.fileName, webViewLink: known.webViewLink }] : []
-  })
-  if (files.length !== stale.size) return loadObjectIndexTables()
-  let reread: ObjectIndexTable[][]
-  try {
-    reread = await Promise.all(files.map(readObjectIndexSpreadsheetWithRetry))
-  } catch (error) {
-    console.error("OBJECT_INDEX_PARTIAL_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
-    return loadObjectIndexTables()
-  }
-  const sameShape = files.every((file, index) => objectIndexHeaderSignature(reread[index]) === objectIndexHeaderSignature(cache.tables.filter((table) => table.fileId === file.id).map(unfilledObjectIndexTable)))
-  if (!sameShape) return loadObjectIndexTables()
-  const kept = cache.tables.filter((table) => !stale.has(table.fileId)).map(unfilledObjectIndexTable)
-  const tables = fillMissingObjectIndexHeaders([...kept, ...reread.flat()])
-  tables.sort((left, right) => left.fileName.localeCompare(right.fileName, "fr") || left.tabName.localeCompare(right.tabName, "fr"))
-  // Les autres classeurs ont reçu leurs ID à leur dernière lecture ; seuls ceux relus sont vérifiés.
-  await freezeObjectIndexRowIds(tables.filter((table) => stale.has(table.fileId)))
-  if (version === objectIndexTablesVersion) {
-    objectIndexTableCache = { expiresAt: cache.expiresAt, tables }
-    for (const fileId of stale) staleObjectIndexFiles.delete(fileId)
-    lastGoodObjectIndexTables = tables
-  }
+export function maintainObjectIndexTables(tables: ObjectIndexTable[]) {
   scheduleObjectIndexHeaderRepair(tables)
   scheduleObjectIndexIconSync(tables)
   if (tables.some(needsObjectCombatHeaders)) scheduleObjectCombatColumns(tables)
-  return tables
-}
-
-/** Quand le catalogue a été lu en entier pour la dernière fois. */
-let objectIndexLoadedAt = 0
-const OBJECT_INDEX_STALE_MS = 30 * 60_000
-
-/**
- * Le catalogue pour l'affichage (page de l'index, inventaires, magasins, références) :
- * un catalogue expiré depuis moins de 30 minutes est rendu tout de suite et relu en
- * arrière-plan, au lieu de faire attendre la relecture de tous les classeurs. Une écriture
- * d'Eraser vide le catalogue ou en marque le classeur : elle n'est jamais suivie d'une copie
- * périmée. Les écritures (numéros de ligne, colonnes) passent par `listObjectIndexTables`,
- * toujours exact.
- */
-export function listObjectIndexTablesForDisplay(): Promise<ObjectIndexTable[]> {
-  const cache = objectIndexTableCache
-  if (staleObjectIndexFiles.size) return listObjectIndexTables()
-  if (cache && cache.expiresAt > Date.now()) return Promise.resolve(cache.tables)
-  if (cache && Date.now() - objectIndexLoadedAt < OBJECT_INDEX_STALE_MS) {
-    listObjectIndexTables().catch(() => undefined)
-    return Promise.resolve(cache.tables)
-  }
-  return listObjectIndexTables()
-}
-
-async function readObjectIndexSpreadsheetWithRetry(file: { id: string; name: string; webViewLink?: string }) {
-  try {
-    return await readObjectIndexSpreadsheet(file)
-  } catch (error) {
-    console.error("OBJECT_INDEX_READ_FAILED", file.name, error instanceof Error ? error.message : "UNKNOWN_ERROR")
-    // Une seconde tentative : la lecture (toutes les cellules, mise en forme comprise) est lourde.
-    await new Promise((resolve) => setTimeout(resolve, 1_500))
-    return readObjectIndexSpreadsheet(file)
-  }
-}
-
-/** Les tableaux servis de secours après une lecture en échec : affichés, jamais pris pour écrire. */
-const fallbackObjectIndexTables = new WeakSet<ObjectIndexTable[]>()
-/** Change à chaque écriture : une lecture partie avant elle ne remplit pas le cache après. */
-let objectIndexTablesVersion = 0
-
-async function loadObjectIndexTables(): Promise<ObjectIndexTable[]> {
-  const version = objectIndexTablesVersion
-  let results: Array<{ tables: ObjectIndexTable[]; error: unknown }>
-  try {
-    const files = await objectIndexSpreadsheetFiles()
-    results = await Promise.all(files.map(async (file) => {
-      try {
-        return { tables: await readObjectIndexSpreadsheetWithRetry(file), error: null }
-      } catch (error) {
-        console.error("OBJECT_INDEX_READ_FAILED", file.name, error instanceof Error ? error.message : "UNKNOWN_ERROR")
-        return { tables: [] as ObjectIndexTable[], error }
-      }
-    }))
-  } catch (error) {
-    results = [{ tables: [], error }]
-  }
-  const firstError = results.find((result) => result.error)?.error
-  // Un classeur illisible à l'instant : le dernier catalogue complet plutôt qu'un catalogue
-  // vide (les objets des inventaires perdraient leurs colonnes). Relu dans une minute.
-  if (firstError && lastGoodObjectIndexTables) {
-    fallbackObjectIndexTables.add(lastGoodObjectIndexTables)
-    if (version === objectIndexTablesVersion) { objectIndexTableCache = { expiresAt: Date.now() + 60_000, tables: lastGoodObjectIndexTables }; staleObjectIndexFiles.clear() }
-    return lastGoodObjectIndexTables
-  }
-  const tables = fillMissingObjectIndexHeaders(results.flatMap((result) => result.tables))
-  if (!tables.length && firstError) throw firstError
-  tables.sort((left, right) => left.fileName.localeCompare(right.fileName, "fr") || left.tabName.localeCompare(right.tabName, "fr"))
-  // Avant d'être servi, chaque objet nommé a un vrai ID dans sa colonne ID.
-  await freezeObjectIndexRowIds(tables)
-  if (version === objectIndexTablesVersion) { objectIndexTableCache = { expiresAt: Date.now() + OBJECT_INDEX_CACHE_MS, tables }; staleObjectIndexFiles.clear() }
-  if (!firstError) { lastGoodObjectIndexTables = tables; objectIndexLoadedAt = Date.now() }
-  scheduleObjectIndexHeaderRepair(tables)
-  // Les icônes et les colonnes de combat se placent d'après la ligne 1 relue au moment
-  // d'écrire, et la réparation des en-têtes ne déplace plus aucune colonne.
-  scheduleObjectIndexIconSync(tables)
-  if (tables.some(needsObjectCombatHeaders)) scheduleObjectCombatColumns(tables)
-  return tables
 }
 
 /** Un tableau d'objets à qui il manque une colonne de combat, ou qui a encore l'ancien en-tête. */
@@ -1819,7 +1613,6 @@ async function updateObjectCombatHeaders(tables: ObjectIndexTable[]) {
     console.info("OBJECT_COMBAT_HEADERS_UPDATED", table.fileName, table.tabName, { renamed: plan.renames.map((rename) => `${firstRow[rename.index]} → ${rename.header}`), added: plan.append })
     clearSpreadsheetReadCache(table.fileId)
   }
-  clearObjectIndexTableCache()
 }
 
 /**
@@ -1890,7 +1683,7 @@ async function repairObjectIndexHeaders(tables: ObjectIndexTable[]) {
     clearSpreadsheetReadCache(table.fileId)
     repaired = true
   }
-  if (repaired) clearObjectIndexTableCache()
+  return repaired
 }
 
 const blankObjectIndexHeader = /^Colonne \d+$/
@@ -1936,13 +1729,17 @@ function isSheetErrorValue(value: string) {
  * tâche de fond) : le regroupement copie ainsi des feuilles qui ne bougent plus.
  */
 export async function objectIndexTablesForRegroup() {
-  clearObjectIndexTableCache()
   objectHeaderRepairAttemptAt = Date.now()
-  let tables = await objectIndexTablesForWrite()
+  // Chaque ancien classeur du dossier « Objets », relu à l'instant (aucune copie gardée).
+  const read = async () => {
+    const tables = fillMissingObjectIndexHeaders((await Promise.all((await objectIndexSpreadsheetFiles()).map(readLegacyObjectSpreadsheet))).flat())
+    return tables.sort((left, right) => left.fileName.localeCompare(right.fileName, "fr") || left.tabName.localeCompare(right.tabName, "fr"))
+  }
+  let tables = await read()
   const broken = tables.filter(needsObjectIndexHeaderRepair)
   if (broken.length) {
     await repairObjectIndexHeaders(broken)
-    tables = await objectIndexTablesForWrite()
+    tables = await read()
   }
   return tables
 }
@@ -1952,36 +1749,25 @@ export function objectIndexRowName(table: ObjectIndexTable, row: ObjectIndexRow)
   return objectIndexCell(table, row, ["Nom", "Nom de l'objet", "Objet", "Arme", "Équipement", "Equipement", "Ressource", "Livre", "Titre"])
 }
 
-export async function refreshObjectIndexTables() {
-  clearObjectIndexTableCache()
-  return listObjectIndexTables()
-}
-
 /** Position de la dernière ligne qui contient quelque chose. */
 function lastFilledRow(rows: Array<Array<{ value: string } | undefined> | undefined>) {
   for (let index = rows.length - 1; index >= 0; index -= 1) if (rows[index]?.some((cell) => cell?.value.trim())) return index
   return -1
 }
 
-export function clearObjectIndexTableCache() {
-  objectIndexTableCache = null
-  // Tout sera relu : les classeurs marqués n'ont plus à l'être à part.
-  staleObjectIndexFiles.clear()
-  // Une lecture lancée avant une écriture ne doit pas servir après elle.
-  objectIndexTablesRequest = null
-  objectIndexTablesVersion += 1
-  clearInventoryWorkbookCache()
+/**
+ * Les items d'après lesquels écrire (icônes, « Nombre max »…) : ceux du moteur des index, à
+ * jour, jamais une version de secours. Une écriture dans leur classeur fait relire le moteur.
+ */
+async function objectIndexTablesForWrite() {
+  const { objectCatalog } = await import("@/lib/object-catalog")
+  return objectCatalog({ forWrite: true })
 }
 
-/** Le catalogue pour écrire : jamais celui de secours gardé après une lecture en échec (relu une fois). */
-async function objectIndexTablesForWrite() {
-  let tables = await listObjectIndexTables()
-  if (fallbackObjectIndexTables.has(tables)) {
-    clearObjectIndexTableCache()
-    tables = await listObjectIndexTables()
-  }
-  if (fallbackObjectIndexTables.has(tables)) throw new Error("OBJECT_INDEX_UNAVAILABLE")
-  return tables
+/** Les items pour l'affichage : ceux que le moteur des index garde en mémoire. */
+async function objectIndexTablesForDisplay() {
+  const { objectCatalog } = await import("@/lib/object-catalog")
+  return objectCatalog()
 }
 
 async function validatedObjectIndexTable(fileId: string, tabName: string) {
@@ -2110,11 +1896,6 @@ function snapshotRowRef(table: ObjectIndexTable, row: ObjectIndexRow): ObjectInd
   return { id: objectIndexCell(table, row, objectIndexIdHeaders).trim(), rowNumber: row.rowNumber, name: objectIndexRowName(table, row).trim() }
 }
 
-function isSameObjectIndexRow(table: ObjectIndexTable, row: ObjectIndexRow, ref: ObjectIndexRowRef) {
-  const known = snapshotRowRef(table, row)
-  return ref.id.trim() ? known.id === ref.id.trim() : !known.id && row.rowNumber === ref.rowNumber && known.name === (ref.name ?? "").trim()
-}
-
 let objectIdFreezeFailedAt = 0
 
 /**
@@ -2125,7 +1906,7 @@ let objectIdFreezeFailedAt = 0
  * peut-être gardé), ou un nouvel identifiant si celui-ci est déjà pris. La case est relue
  * juste avant : écrite seulement si elle est toujours vide et que la ligne porte ce nom.
  */
-async function freezeObjectIndexRowIds(tables: ObjectIndexTable[]) {
+export async function freezeObjectIndexRowIds(tables: ObjectIndexTable[]) {
   if (Date.now() - objectIdFreezeFailedAt < 10 * 60_000) return
   for (const table of tables) {
     const idColumn = objectIndexColumn(table, objectIndexIdHeaders)
@@ -2195,201 +1976,6 @@ async function objectIndexHeaderFor(table: ObjectIndexTable, header: string, ali
   await ensureSheetColumnCount(table.fileId, table.tabName, start + 1)
   await updateRanges(table.fileId, [{ range: sheetTabRange(table.tabName, `${columnName(start + 1)}1`), values: [[header]] }], { valueInputOption: "RAW" })
   return header
-}
-
-export async function addObjectIndexRow(fileId: string, tabName: string) {
-  const table = await validatedObjectIndexTable(fileId, tabName)
-  // L'ID va dans sa colonne d'après la ligne 1 relue à l'instant.
-  const layout = await freshObjectIndexLayout(table)
-  const width = Math.max(1, layout.headers.length, table.headers.length)
-  const values = Array.from({ length: width }, (_, index) => index === layout.idColumn ? crypto.randomUUID() : "")
-  await appendRows(fileId, sheetTabRange(tabName, `A:${columnName(width)}`), [values])
-  markObjectIndexFileChanged(fileId)
-}
-
-/**
- * Enregistre une seule cellule avec sa mise en forme. L’éditeur de l’Index des objets
- * sauvegarde cellule par cellule : deux colonnes modifiées coup sur coup ne s’écrasent
- * plus l’une l’autre, et la mise en forme des autres cellules reste intacte. La ligne est
- * retrouvée par son ID et la colonne par son en-tête, dans la feuille relue à l'instant :
- * sinon, rien n'est écrit (OBJECT_INDEX_CHANGED).
- */
-export async function updateObjectIndexCell(fileId: string, tabName: string, target: ObjectIndexCellRef, html: string) {
-  const table = await validatedObjectIndexTable(fileId, tabName)
-  const layout = await freshObjectIndexLayout(table, [{ header: target.header, occurrence: target.occurrence }])
-  const rowNumber = layout.locate(target)
-  const column = layout.wanted[0]
-  if (rowNumber < 2 || column < 0) throw new Error("OBJECT_INDEX_CHANGED")
-  // Une vraie case à cocher de Sheets (TRUE/FALSE) reste une case : la valeur est écrite en booléen.
-  if (/^(true|false)$/i.test(layout.cell(rowNumber, column).trim()) && /^(true|false)$/i.test(html.trim())) {
-    await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, {
-      method: "POST",
-      body: JSON.stringify({ requests: [{ updateCells: {
-        range: { sheetId: table.sheetId, startRowIndex: rowNumber - 1, endRowIndex: rowNumber, startColumnIndex: column, endColumnIndex: column + 1 },
-        rows: [{ values: [{ userEnteredValue: { boolValue: /^true$/i.test(html.trim()) } }] }],
-        fields: "userEnteredValue",
-      } }] }),
-    })
-    clearSpreadsheetReadCache(fileId)
-  } else await updateFormattedCell({ spreadsheetId: fileId, sheetId: table.sheetId, rowNumber, column, html })
-  // Le catalogue gardé en mémoire suit (la frappe ne fait pas tout relire) : la ligne par son ID.
-  const plain = htmlToRichText(html.slice(0, 50_000)).text
-  const cached = objectIndexTableCache
-  const cachedTable = cached?.tables.find((candidate) => candidate.fileId === fileId && candidate.tabName === tabName)
-  const cachedRow = cachedTable?.rows.find((row) => isSameObjectIndexRow(cachedTable, row, target))
-  const cachedColumn = cachedTable?.headers.flatMap((header, index) => header.trim() === target.header.trim() ? [index] : [])[target.occurrence ?? 0] ?? -1
-  if (cached && !fallbackObjectIndexTables.has(cached.tables) && cachedTable && cachedRow && cachedColumn >= 0) {
-    objectIndexTableCache = {
-      expiresAt: cached.expiresAt,
-      tables: cached.tables.map((candidate) => candidate === cachedTable
-        ? { ...candidate, rows: candidate.rows.map((row) => row === cachedRow
-            ? {
-                ...row,
-                values: row.values.map((value, index) => index === cachedColumn ? plain : value),
-                html: row.html.map((value, index) => index === cachedColumn ? html : value),
-              }
-            : row) }
-        : candidate),
-    }
-    clearInventoryWorkbookCache()
-  } else markObjectIndexFileChanged(fileId)
-}
-
-/** De nouveaux identifiants dans la colonne ID de `count` lignes, à partir de la ligne `start` + 1. */
-function objectIndexIdCells(sheetId: number, start: number, count: number, idColumn: number) {
-  return { updateCells: {
-    range: { sheetId, startRowIndex: start, endRowIndex: start + count, startColumnIndex: idColumn, endColumnIndex: idColumn + 1 },
-    rows: Array.from({ length: count }, () => ({ values: [{ userEnteredValue: { stringValue: crypto.randomUUID() } }] })),
-    fields: "userEnteredValue",
-  } }
-}
-
-/**
- * Des lignes vides au-dessus ou au-dessous d'une ligne retrouvée par son ID. Contrairement
- * à `addObjectIndexRow` qui ajoute à la fin, elles apparaissent là où on les a demandées —
- * c’est ce qu’attend quelqu’un qui vient de Google Sheets. Insérées et dotées de leur ID en
- * une seule requête : rien ne peut se glisser entre les deux.
- */
-export async function insertObjectIndexRow(fileId: string, tabName: string, anchor: ObjectIndexRowRef, count = 1, before = false) {
-  const table = await validatedObjectIndexTable(fileId, tabName)
-  const layout = await freshObjectIndexLayout(table)
-  const row = layout.locate(anchor)
-  if (row < 2) throw new Error("OBJECT_INDEX_CHANGED")
-  const after = before ? row - 1 : row
-  const rows = Math.max(1, Math.min(100, Math.trunc(count) || 1))
-  const requests: unknown[] = [{ insertDimension: { range: { sheetId: table.sheetId, dimension: "ROWS", startIndex: after, endIndex: after + rows }, inheritFromBefore: after > 1 } }]
-  if (layout.idColumn >= 0) requests.push(objectIndexIdCells(table.sheetId, after, rows, layout.idColumn))
-  await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
-  markObjectIndexFileChanged(fileId)
-}
-
-/** Ce qu'envoie le formulaire « Ajouter un objet » : chaque valeur avec son en-tête, dans l'ordre des colonnes. */
-export type ObjectIndexValues = ReadonlyArray<readonly [string, string]> | Record<string, string>
-
-/**
- * Ajoute une ligne à la fin, déjà remplie : c’est le formulaire « Ajouter un objet ». Chaque
- * valeur va sous son en-tête, retrouvé dans la ligne 1 relue à l'instant (la n-ième valeur
- * d'un en-tête répété, dans sa n-ième colonne) : l'ordre des colonnes a pu changer.
- */
-export async function addObjectIndexRowWithValues(fileId: string, tabName: string, provided: ObjectIndexValues) {
-  const table = await validatedObjectIndexTable(fileId, tabName)
-  const layout = await freshObjectIndexLayout(table)
-  const width = Math.max(1, layout.headers.length, table.headers.length)
-  const values = Array.from({ length: width }, () => "")
-  const seen = new Map<string, number>()
-  for (const [header, raw] of Array.isArray(provided) ? provided : Object.entries(provided)) {
-    const value = String(raw ?? "")
-    const occurrence = seen.get(header.trim()) ?? 0
-    seen.set(header.trim(), occurrence + 1)
-    const column = freshHeaderColumn(table, layout.headers, header, occurrence)
-    // Une colonne renommée ou supprimée entre-temps : une valeur saisie n'est jamais perdue en silence.
-    if (column < 0) {
-      if (value.trim()) throw new Error("OBJECT_INDEX_CHANGED")
-      continue
-    }
-    values[column] = value
-  }
-  if (layout.idColumn >= 0 && !values[layout.idColumn]?.trim()) values[layout.idColumn] = crypto.randomUUID()
-  // Le formulaire envoie du texte enrichi : la ligne est écrite en texte, puis chaque
-  // cellule mise en forme reçoit sa mise en forme (et non ses balises).
-  const formatted = values.flatMap((value, column) => /<[a-z]/i.test(value) ? [{ column, html: value.slice(0, 50_000) }] : [])
-  const appended = await appendRows(fileId, sheetTabRange(tabName, `A:${columnName(width)}`), [values.map((value) => /<[a-z]/i.test(value) ? htmlToRichText(value).text : value)])
-  const rowNumber = Number.parseInt(appended.updatedRange?.match(/![A-Z]+(\d+)/)?.[1] || "", 10)
-  if (Number.isInteger(rowNumber) && rowNumber > 1) {
-    for (const cell of formatted) await updateFormattedCell({ spreadsheetId: fileId, sheetId: table.sheetId, rowNumber, column: cell.column, html: cell.html })
-  }
-  markObjectIndexFileChanged(fileId)
-}
-
-/**
- * Copie des lignes retrouvées par leur ID, chacune juste sous l’originale, comme dans
- * Google Sheets. Du bas vers le haut et en une requête : une copie insérée ne décale
- * aucune ligne encore à copier. Sheets recopie lui-même la ligne (valeurs, formules, mise
- * en forme), rien ne vient d'une lecture gardée en mémoire ; la copie reçoit son propre ID.
- */
-export async function duplicateObjectIndexRows(fileId: string, tabName: string, refs: ObjectIndexRowRef[]) {
-  const table = await validatedObjectIndexTable(fileId, tabName)
-  const layout = await freshObjectIndexLayout(table)
-  const rows = refs.map((ref) => layout.locate(ref))
-  if (!rows.length || rows.some((row) => row < 2)) throw new Error("OBJECT_INDEX_CHANGED")
-  const requests = [...new Set(rows)].sort((left, right) => right - left).flatMap((row) => [
-    { insertDimension: { range: { sheetId: table.sheetId, dimension: "ROWS", startIndex: row, endIndex: row + 1 }, inheritFromBefore: true } },
-    { copyPaste: { source: { sheetId: table.sheetId, startRowIndex: row - 1, endRowIndex: row }, destination: { sheetId: table.sheetId, startRowIndex: row, endRowIndex: row + 1 }, pasteType: "PASTE_NORMAL" } },
-    ...(layout.idColumn >= 0 ? [objectIndexIdCells(table.sheetId, row, 1, layout.idColumn)] : []),
-  ])
-  await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
-  markObjectIndexFileChanged(fileId)
-}
-
-/**
- * Déplace une ligne d'objet vers un autre onglet (du même classeur ou d'un autre) : elle est
- * d'abord écrite à l'arrivée, avec sa mise en forme et son ID (les inventaires et les « { »
- * qui la citent la retrouvent), puis seulement retirée au départ. Une colonne remplie que
- * l'onglet d'arrivée n'a pas y est ajoutée à droite : aucune valeur ne se perd.
- */
-export async function moveObjectIndexRow(fileId: string, tabName: string, ref: ObjectIndexRowRef, targetFileId: string, targetTabName: string) {
-  if (fileId === targetFileId && tabName === targetTabName) return
-  // Relu dans Google : la ligne déplacée est celle de la feuille, pas une copie d'il y a cinq
-  // minutes. Seul le classeur de départ est relu (l'arrivée relit sa ligne 1 elle-même).
-  markObjectIndexFileChanged(fileId)
-  const source = await validatedObjectIndexTable(fileId, tabName)
-  const target = await validatedObjectIndexTable(targetFileId, targetTabName)
-  const layout = await freshObjectIndexLayout(source)
-  const rowNumber = layout.locate(ref)
-  const row = source.rows.find((candidate) => candidate.rowNumber === rowNumber)
-  if (rowNumber < 2 || !row) throw new Error("OBJECT_INDEX_CHANGED")
-  const pairs: Array<[string, string]> = source.headers.flatMap((header, column): Array<[string, string]> => {
-    const text = row.values[column] ?? ""
-    // La mise en forme seulement quand il y en a : un texte simple est recopié tel quel (jamais ses entités HTML).
-    const html = row.html[column] ?? ""
-    return header.trim() && text.trim() ? [[header.trim(), /<[a-z]/i.test(html) ? html : text]] : []
-  })
-  const targetHeaders = await freshObjectIndexHeaderRow(target)
-  const known = new Set(targetHeaders.map((header) => normalizedHeader(header)).filter(Boolean))
-  const missing = [...new Set(pairs.map(([header]) => header).filter((header) => !known.has(normalizedHeader(header))))]
-  if (missing.length) {
-    const columns = sheetColumns(targetHeaders, [...targetHeaders.filter((header) => header.trim()), ...missing])
-    await ensureNamedColumns(targetFileId, targetTabName, columns)
-  }
-  await addObjectIndexRowWithValues(targetFileId, targetTabName, pairs)
-  await deleteObjectIndexRows(fileId, tabName, [ref])
-}
-
-/**
- * Supprime des lignes retrouvées par leur ID dans la feuille relue à l'instant (jamais
- * d'après un numéro de ligne envoyé par la page). Si l'une n'y est plus, aucune ne part.
- */
-export async function deleteObjectIndexRows(fileId: string, tabName: string, refs: ObjectIndexRowRef[]) {
-  const table = await validatedObjectIndexTable(fileId, tabName)
-  const layout = await freshObjectIndexLayout(table)
-  const rows = refs.map((ref) => layout.locate(ref))
-  if (!rows.length || rows.some((row) => row < 2)) throw new Error("OBJECT_INDEX_CHANGED")
-  // Toutes en une requête, du bas vers le haut : retirer une ligne ne décale pas celles du dessus.
-  await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, {
-    method: "POST",
-    body: JSON.stringify({ requests: [...new Set(rows)].sort((left, right) => right - left).map((row) => ({ deleteDimension: { range: { sheetId: table.sheetId, dimension: "ROWS", startIndex: row - 1, endIndex: row } } })) }),
-  })
-  markObjectIndexFileChanged(fileId)
 }
 
 const oldGeneratedDescriptions = new Set([
@@ -2493,7 +2079,6 @@ export async function enrichObjectIndexTables() {
     })
     descriptionsAdded += await fillObjectIndexCells(table, descriptionHeader, cells, (current) => !current.trim() || oldGeneratedDescriptions.has(current.trim()))
   }
-  clearObjectIndexTableCache()
   const iconsAdded = (await syncObjectIndexIcons()).iconsUpdated
   return { descriptionsAdded, iconsAdded }
 }
@@ -2536,7 +2121,6 @@ export async function syncObjectIndexIcons() {
     })
     iconsUpdated += await fillObjectIndexCells(table, table.headers[objectIndexIconColumn(table)], cells, isGeneratedObjectIcon)
   }
-  clearObjectIndexTableCache()
   return { iconsUpdated }
 }
 
@@ -2562,14 +2146,13 @@ export async function setObjectIndexIcon(fileId: string, tabName: string, target
   const column = layout.wanted[0]
   if (rowNumber < 2 || column < 0) throw new Error("OBJECT_INDEX_CHANGED")
   await updateRanges(fileId, [{ range: sheetTabRange(tabName, `${columnName(column + 1)}${rowNumber}`), values: [[driveImageFormula(driveFileId)]] }])
-  clearObjectIndexTableCache()
 }
 
 /** Images du Drive citées dans une colonne « Icône » : Eraser accepte de les afficher. */
 export async function objectIndexIconDriveFileIds() {
   const ids = new Set<string>()
   // Chaque icône affichée passe par ici : le catalogue d'affichage, sans attendre une relecture.
-  for (const table of await listObjectIndexTablesForDisplay()) {
+  for (const table of await objectIndexTablesForDisplay()) {
     const iconColumn = objectIndexIconColumn(table)
     if (iconColumn < 0) continue
     for (const row of table.rows) {
@@ -2610,7 +2193,6 @@ export async function ensureObjectIndexStackLimits() {
     })
     stackLimitsAdded += await fillObjectIndexCells(table, header, cells, (current) => !current.trim())
   }
-  clearObjectIndexTableCache()
   return { stackLimitsAdded, columnsAdded }
 }
 
@@ -6783,7 +6365,7 @@ function cacheInventoryWorkbook(workbook: InventoryWorkbook, includesCatalog: bo
 }
 
 /** Après une écriture : la lecture suivante relit la feuille (le cache n'est jamais prolongé). */
-function clearInventoryWorkbookCache() {
+export function clearInventoryWorkbookCache() {
   inventoryWorkbookCache = null
   inventoryTabsRead = null
   inventoryWorkbookVersion += 1
@@ -7044,11 +6626,11 @@ async function readInventoryWorkbook(includeCatalog = true, options: InventoryRe
   const ranges = tabs.map(sheetTabAll)
   const [grids, objectIndexTables] = await Promise.all([
     options.fresh ? readInventoryTabsFresh(sheet.spreadsheetId, ranges) : sharedInventoryTabs(sheet.spreadsheetId, ranges),
-    // Sans le catalogue (lecture rapide), les objets prennent quand même ses colonnes
-    // s'il est déjà en mémoire : rien de plus à lire dans Google Sheets.
-    includeCatalog
-      ? (options.currentCatalog ? listObjectIndexTables() : listObjectIndexTablesForDisplay()).catch(() => { catalogFailed = true; return [] })
-      : Promise.resolve(objectIndexTableCache && objectIndexTableCache.expiresAt > Date.now() ? objectIndexTableCache.tables : lastGoodObjectIndexTables ?? []),
+    // Les items : ceux de l'Index des items, tels que le moteur des index les garde. Sans le
+    // catalogue (lecture rapide), ceux déjà en mémoire : rien de plus à lire dans Google Sheets.
+    import("@/lib/object-catalog").then(({ objectCatalog, objectCatalogInMemory }) => includeCatalog
+      ? objectCatalog({ current: options.currentCatalog }).catch(() => { catalogFailed = true; return [] as ObjectIndexTable[] })
+      : objectCatalogInMemory()),
   ])
   const columns: Record<string, SheetColumns> = {}
   const [typeRows, containerRows, itemRows, contentRows] = tabs.map((tab, index) => {
@@ -8539,7 +8121,6 @@ onForgetGoogleData(async () => {
   // Ce que la page affiche est relu par lib/request-freshness.ts ; ici, les règles et la
   // structure des classeurs (onglets, catalogue des objets, classes).
   tabsCache.clear()
-  clearObjectIndexTableCache()
   // Les classes : relues dans Google à la prochaine demande, sans vider la liste connue.
   await forgetClassIndexSync()
 })

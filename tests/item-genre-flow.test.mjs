@@ -93,6 +93,19 @@ test("Un seul onglet d'items : le Genre range dans l'inventaire, les magasins li
   const armory = { ...shopTypes.builtinShopTypes[0], types: ["Armes"], subtypes: [] };
   assert.equal(shopTypes.shopTypeAllows(armory, lame), true);
   assert.equal(shopTypes.shopTypeAllows(armory, forShops.find((entry) => entry.name === "Bijou d'Harrite")), false);
+
+  // Les fouilles et les événements : un item tiré dans un lieu (« Donjon »), puis donné à un
+  // personnage, arrive dans l'inventaire que dit son genre.
+  const draws = await vite.ssrLoadModule("/lib/environment-draws.ts");
+  const pool = draws.encounterPool(forShops, "Donjon", ["objects"], ["Donjon", "Armurerie", "Librairie", "Antiquaire", "Marché noir"]);
+  assert.deepEqual(pool.map((candidate) => candidate.item.name), ["Parchemin de feu"]);
+  const found = draws.drawEncounter(pool, () => 0);
+  const given = await sheets.addCharacterInventoryItem("PERSO-FOUILLE", found.item.id);
+  assert.equal(familyOf(given, "Parchemin de feu"), "Inventaire");
+  // La « Liste d'index » (fouilles, événements) trouve la colonne des items par le moteur.
+  const kinds = await vite.ssrLoadModule("/lib/index-kinds-server.ts");
+  const withPlaces = await kinds.indexesWithColumnKind("rarity-places", { fresh: true });
+  assert.deepEqual(withPlaces.find((entry) => entry.key === "objects")?.tabs, [{ tab: "Items", column: "Rareté et emplacements" }]);
   void inventorySchema;
 });
 

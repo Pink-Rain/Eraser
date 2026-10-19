@@ -1,42 +1,17 @@
 import { NextResponse } from "next/server"
 
 import { googleFailureMessage } from "@/lib/google-failures"
-import {
-  addObjectIndexRow,
-  addObjectIndexRowWithValues,
-  insertObjectIndexRow,
-  deleteObjectIndexRows,
-  moveObjectIndexRow,
-  duplicateObjectIndexRows,
-  enrichObjectIndexTables,
-  ensureObjectIndexStackLimits,
-  listObjectIndexTables,
-  listObjectIndexTablesForDisplay,
-  refreshObjectIndexTables,
-  syncObjectIndexIcons,
-  updateObjectIndexCell,
-} from "@/lib/google-sheets"
-import { OBJECT_INDEX_CHANGED_MESSAGE, parseObjectIndexRowRef, type ObjectIndexRowRef } from "@/lib/object-index-refs"
+import { enrichObjectIndexTables, ensureObjectIndexStackLimits, syncObjectIndexIcons } from "@/lib/google-sheets"
 import { objectIndexRegroupStatus, regroupObjectIndexes, revertObjectIndexRegroup } from "@/lib/object-index-regroup-server"
-import { objectSchemas } from "@/lib/object-schema"
 import { authorizedAccount } from "@/lib/server-auth"
 
+/**
+ * Le regroupement des anciens classeurs d'items, et l'entretien de l'Index des items
+ * (descriptions, icônes, « Nombre max »). Les items eux-mêmes se lisent et s'écrivent par le
+ * moteur des index (/api/resources/world-indexes), comme tout index.
+ */
 async function authorized() {
   return authorizedAccount(["admin", "mj"])
-}
-
-export async function GET(request: Request) {
-  if (!await authorized()) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
-  try {
-    const refresh = new URL(request.url).searchParams.get("refresh") === "1"
-    const tables = refresh ? await refreshObjectIndexTables() : await listObjectIndexTablesForDisplay()
-    return NextResponse.json({ tables, schemas: await objectSchemas(tables) })
-  } catch (error) {
-    const code = error instanceof Error ? error.message : ""
-    return NextResponse.json({ error: code === "OBJECT_INDEX_FOLDER_NOT_FOUND"
-      ? "Le dossier « Objets » est introuvable dans le Drive connecté."
-      : `Les index d’items n’ont pas pu être chargés${code ? ` (${code.slice(0, 160)})` : ""}.` }, { status: 400 })
-  }
 }
 
 const regroupMessages: Record<string, string> = {
@@ -70,58 +45,15 @@ async function regroupAction(action: string) {
 export async function POST(request: Request) {
   if (!await authorized()) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
-    const body = (await request.json()) as { action?: string; fileId?: string; tabName?: string; row?: unknown; rows?: unknown; before?: unknown; count?: number; header?: unknown; occurrence?: unknown; html?: string; values?: unknown; targetFileId?: unknown; targetTabName?: unknown }
+    const body = (await request.json()) as { action?: string }
     if (body.action === "regroup-status" || body.action === "regroup" || body.action === "regroup-revert") return regroupAction(body.action)
-    if (body.action === "enrich") {
-      const result = await enrichObjectIndexTables()
-      return NextResponse.json({ ok: true, result, tables: await listObjectIndexTables() })
-    }
-    if (body.action === "sync-icons") {
-      const result = await syncObjectIndexIcons()
-      return NextResponse.json({ ok: true, result, tables: await listObjectIndexTables() })
-    }
-    if (body.action === "ensure-stack-limits") {
-      const result = await ensureObjectIndexStackLimits()
-      return NextResponse.json({ ok: true, result, tables: await listObjectIndexTables() })
-    }
-    if (!body.fileId || !body.tabName) throw new Error("INVALID_OBJECT_INDEX")
-    // Chaque ligne est désignée par son ID (son numéro n'est qu'un indice) et chaque case
-    // par son en-tête : le serveur les retrouve dans la feuille relue au moment d'écrire.
-    const row = parseObjectIndexRowRef(body.row)
-    const rows = Array.isArray(body.rows) ? body.rows.map(parseObjectIndexRowRef) : []
-    // L’éditeur enregistre cellule par cellule : la réponse ne renvoie alors pas tout
-    // le classeur, pour que la frappe reste fluide.
-    if (body.action === "update-cell" && row && typeof body.header === "string" && typeof body.html === "string") {
-      await updateObjectIndexCell(body.fileId, body.tabName, { ...row, header: body.header, occurrence: typeof body.occurrence === "number" ? body.occurrence : 0 }, body.html)
-      return NextResponse.json({ ok: true })
-    }
-    if (body.action === "add") {
-      if (body.values === undefined) await addObjectIndexRow(body.fileId, body.tabName)
-      else await addObjectIndexRowWithValues(body.fileId, body.tabName, objectIndexValues(body.values))
-    } else if (body.action === "insert" && row) {
-      await insertObjectIndexRow(body.fileId, body.tabName, row, typeof body.count === "number" ? body.count : 1, body.before === true)
-    } else if (body.action === "delete" && rows.length && rows.every(Boolean)) {
-      await deleteObjectIndexRows(body.fileId, body.tabName, rows as ObjectIndexRowRef[])
-    } else if (body.action === "move" && row && typeof body.targetFileId === "string" && typeof body.targetTabName === "string" && body.targetTabName.trim()) {
-      await moveObjectIndexRow(body.fileId, body.tabName, row, body.targetFileId, body.targetTabName)
-    } else if (body.action === "duplicate" && rows.length && rows.every(Boolean)) {
-      await duplicateObjectIndexRows(body.fileId, body.tabName, rows as ObjectIndexRowRef[])
-    } else throw new Error("INVALID_OBJECT_INDEX_ACTION")
-    return NextResponse.json({ ok: true, tables: await listObjectIndexTables() })
+    if (body.action === "enrich") return NextResponse.json({ ok: true, result: await enrichObjectIndexTables() })
+    if (body.action === "sync-icons") return NextResponse.json({ ok: true, result: await syncObjectIndexIcons() })
+    if (body.action === "ensure-stack-limits") return NextResponse.json({ ok: true, result: await ensureObjectIndexStackLimits() })
+    throw new Error("INVALID_OBJECT_INDEX_ACTION")
   } catch (error) {
-    // La ligne ou la colonne n'est plus là où la page la voyait : rien n'a été écrit.
-    if (error instanceof Error && error.message === "OBJECT_INDEX_CHANGED") return NextResponse.json({ error: OBJECT_INDEX_CHANGED_MESSAGE }, { status: 409 })
     const code = error instanceof Error ? error.message : ""
     console.error("OBJECT_INDEX_WRITE_FAILED", code || "UNKNOWN_ERROR")
     return NextResponse.json({ error: googleFailureMessage(code) || "Cette modification n’a pas pu être enregistrée dans Google Sheets." }, { status: 400 })
   }
-}
-
-/** Les valeurs du formulaire : des paires [en-tête, valeur] dans l'ordre des colonnes (jamais des places). */
-function objectIndexValues(value: unknown): Array<[string, string]> {
-  if (!Array.isArray(value)) throw new Error("INVALID_OBJECT_INDEX_VALUES")
-  return value.map((pair) => {
-    if (!Array.isArray(pair) || typeof pair[0] !== "string") throw new Error("INVALID_OBJECT_INDEX_VALUES")
-    return [pair[0], String(pair[1] ?? "")]
-  })
 }

@@ -107,6 +107,11 @@
   comme côté serveur (`lib/world-indexes.ts`), y compris l’Index des items (clé `objects`).
   Ne jamais recréer une page, une passerelle ou un code d’index à part : une possibilité
   ajoutée au moteur vaut pour tous les index.
+- Les items n’ont qu’un lecteur, le moteur : l’inventaire, les magasins, les fouilles, les
+  événements, les références et les dons lisent `objectCatalog` (`lib/object-catalog.ts`).
+  Ne jamais rajouter de lecture ni de copie en mémoire des items à part (l’ancien
+  `listObjectIndexTables` a été retiré à l’alpha 240) ; ne jamais annoncer « branché sur le
+  moteur » tant qu’un consommateur lit ailleurs.
 - Le chantier en cours suit la roadmap « Eraser · Vues des index » (document
   partagé du propriétaire) : la relire et la mettre à jour à chaque étape.
 

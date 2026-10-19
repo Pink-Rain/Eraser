@@ -10,7 +10,7 @@ const fake = `${root}tests/fakes/regroup-google.ts`;
 const vite = await createServer({
   appType: "custom", configFile: false, root, server: { middlewareMode: true },
   resolve: { alias: [
-    { find: /^@\/lib\/(google-drive|google-sheets|index-schema|index-settings)$/, replacement: fake },
+    { find: /^@\/lib\/(google-drive|google-sheets|index-schema|index-settings|object-catalog)$/, replacement: fake },
     // Les vues enregistrées suivent aussi le regroupement : un serveur partagé en mémoire, vide.
     { find: /^@\/lib\/shared-store$/, replacement: `${root}tests/fakes/shared-store.ts` },
     { find: "@", replacement: root },

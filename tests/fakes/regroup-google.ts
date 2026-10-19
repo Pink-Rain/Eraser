@@ -108,7 +108,8 @@ function write(spreadsheetId: string, range: string, values: string[][]) {
 export async function updateRange(spreadsheetId: string, range: string, values: string[][]) { write(spreadsheetId, range, values) }
 export async function updateRanges(spreadsheetId: string, data: Array<{ range: string; values: string[][] }>) { for (const item of data) write(spreadsheetId, item.range, item.values) }
 export function clearSpreadsheetReadCache() {}
-export function clearObjectIndexTableCache() {}
+/** Le moteur des index (lib/object-catalog.ts) : rien à oublier ici. */
+export async function forgetObjectCatalog() {}
 
 export async function googleSheetsJson(path: string, init?: { body?: string }) {
   const body = init?.body ? JSON.parse(init.body) : {}
@@ -151,7 +152,7 @@ export async function googleSheetsJson(path: string, init?: { body?: string }) {
 
 type Table = { fileId: string; fileName: string; webViewLink: string; sheetId: number; tabName: string; headers: string[]; rows: Array<{ rowNumber: number; values: string[]; html: string[] }> }
 
-export async function readObjectIndexSpreadsheet(file: { id: string; name: string }): Promise<Table[]> {
+export async function readLegacyObjectSpreadsheet(file: { id: string; name: string }): Promise<Table[]> {
   return sheet(file.id).tabs.filter((tab) => !tab.title.startsWith("Eraser ·")).map((tab) => {
     const width = Math.max(1, ...tab.grid.map((row) => row.length))
     const headers = Array.from({ length: width }, (_, index) => tab.grid[0]?.[index]?.trim() || `Colonne ${index + 1}`)
@@ -163,7 +164,7 @@ export async function readObjectIndexSpreadsheet(file: { id: string; name: strin
 }
 export async function objectIndexTablesForRegroup() {
   const entries = await listDriveFolderFiles("objets")
-  const tables = await Promise.all(entries.filter((entry) => entry.mimeType !== "application/vnd.google-apps.folder").map((entry) => readObjectIndexSpreadsheet({ id: "shortcutDetails" in entry && entry.shortcutDetails ? entry.shortcutDetails.targetId : entry.id, name: entry.name })))
+  const tables = await Promise.all(entries.filter((entry) => entry.mimeType !== "application/vnd.google-apps.folder").map((entry) => readLegacyObjectSpreadsheet({ id: "shortcutDetails" in entry && entry.shortcutDetails ? entry.shortcutDetails.targetId : entry.id, name: entry.name })))
   return tables.flat()
 }
 export function objectIndexRowName(table: Table, row: { values: string[] }) {

@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks"
 
 import {
   appendRows,
-  clearObjectIndexTableCache,
+  clearInventoryWorkbookCache,
   clearSpreadsheetReadCache,
   columnName,
   configureStructuredSheet,
@@ -14,10 +14,13 @@ import {
   getCampaignForMj,
   getCharacterForMj,
   googleSheetsJson,
+  freezeObjectIndexRowIds,
   listClassOptions,
-  listObjectIndexTables,
-  writeObjectIndexCells,
+  maintainObjectIndexTables,
+  objectIndexSpreadsheetFiles,
   onSpreadsheetWrite,
+  readRanges,
+  type ObjectIndexTable,
   readFormattedSheet,
   readNamedColumns,
   readRange,
@@ -254,18 +257,25 @@ async function loadEffectiveIndex(key: WorldIndexKey, options: { strict?: boolea
   // tels qu'ils y sont. Lus par le lecteur des items (ID figés, en-têtes réparés), que suivent
   // aussi l'inventaire et les magasins.
   if (key === OBJECTS_INDEX_KEY) {
-    const tables = await listObjectIndexTables()
-    const files = [...new Set(tables.map((table) => table.fileId))]
+    // Le classeur des items : le seul du dossier « Objets » (sous-dossiers exclus), sous le nom
+    // qu'il a dans le Drive. Ses onglets et leur ligne 1, lus ici comme ceux de tout index.
+    const files = await objectIndexSpreadsheetFiles()
     if (!files.length) throw new Error("OBJECT_INDEX_NOT_FOUND")
     if (files.length > 1) throw new Error("OBJECT_INDEX_NOT_REGROUPED")
-    const { all: schema, degraded } = await schemaFor(key, files[0], strict)
-    const base = tables.map((table): WorldIndexTabDefinition => ({ name: table.tabName, itemLabel: "un item", headers: table.headers.filter((header) => header.trim()), widths: [], idPrefix: "OBJ" }))
+    const file = files[0]
+    const { all: schema, degraded } = await schemaFor(key, file.id, strict)
+    const tabs = (await spreadsheetTabs(file.id)).filter((tab) => isObjectItemsTab(tab.title))
+    const firstRows = tabs.length ? await readRanges(file.id, tabs.map((tab) => sheetTabRange(tab.title, "1:1"))) : []
+    const base = tabs.map((tab, index): WorldIndexTabDefinition => {
+      const firstRow = (firstRows[index]?.[0] ?? []).map((value) => String(value ?? "").trim())
+      return { name: tab.title, itemLabel: "un item", headers: firstRow.map((header, column) => header || `Colonne ${column + 1}`), widths: [], idPrefix: "OBJ" }
+    })
     return {
-      spreadsheetId: files[0],
-      webViewLink: tables[0].webViewLink,
+      spreadsheetId: file.id,
+      webViewLink: file.webViewLink || `https://docs.google.com/spreadsheets/d/${file.id}/edit`,
       schema,
       foreign: [],
-      definition: { key, sheetName: tables[0].fileName, title: "Items", path: "/ressources/index-des-objets", itemLabel: "un item", tabs: effectiveTabs(base, schema), tabColumn: tabColumnOf(schema) },
+      definition: { key, sheetName: file.name, title: "Items", path: "/ressources/index-des-objets", itemLabel: "un item", tabs: effectiveTabs(base, schema), tabColumn: tabColumnOf(schema) },
       degraded,
     }
   }
@@ -426,7 +436,8 @@ async function readTable(spreadsheetId: string, key: WorldIndexKey, tabName: str
   const tab = tabDefinition(key, tabName)
   const entity = isBuiltinWorldIndexKey(key) ? worldIndexDefinitions[key].entity : undefined
   if (entity?.readHeaders) return withHtmlTextColumns(key, await readPartialTable(spreadsheetId, key, tab, entity.readHeaders))
-  const sheet = await readFormattedSheet(spreadsheetId, [tab.name], { light: true })
+  // Les items gardent leurs icônes =IMAGE (la formule dit où est l'image) ; les autres index, le texte.
+  const sheet = await readFormattedSheet(spreadsheetId, [tab.name], key === OBJECTS_INDEX_KEY ? { keepImages: true } : { light: true })
   const width = Math.max(0, ...sheet.rows.map((row) => row?.length ?? 0))
   const headers = headersOf((sheet.rows[0] ?? []).map((cell) => cell?.value ?? ""), tab, width, Boolean(entity))
   const body = sheet.rows.slice(1)
@@ -624,28 +635,56 @@ async function addMissingRows(key: WorldIndexKey, sheet: Awaited<ReturnType<type
   return wrote
 }
 
+/** Un onglet du classeur des items qui porte des items : pas ceux d'Eraser (« Eraser · colonnes »…). */
+function isObjectItemsTab(title: string) {
+  return !title.startsWith("Eraser ·")
+}
+
 /**
- * L'Index des items, lu par le lecteur des items : ses ID déjà figés (ceux que citent les
- * inventaires), ses icônes, ses en-têtes réparés. Rien n'y est ajouté au chargement : ni lignes
- * de départ, ni identifiants (le lecteur des items les donne).
+ * Le catalogue des items de chaque lecture de l'index : les mêmes lignes que l'index (une
+ * case écrite par le moteur y est donc aussitôt), sous la forme qu'attendent l'inventaire,
+ * les magasins, les fouilles, les événements et les références.
+ */
+const objectCatalogs = new WeakMap<WorldIndexData, ObjectIndexTable[]>()
+
+/** Les réglages de colonnes enregistrés dans « Modifier » pour un onglet, par en-tête replié. */
+function storedColumnSpecs(schema: SchemaEntry[], tabName: string) {
+  const specs: Record<string, IndexColumnSpec> = {}
+  for (const entry of schema) if (entry.tab === tabName && entry.column && entry.spec && !trashed(entry)) specs[foldName(entry.column)] = entry.spec
+  return Object.keys(specs).length ? specs : undefined
+}
+
+/**
+ * L'Index des items, lu par le moteur comme tout index : ses onglets tels qu'ils sont dans
+ * Sheets, chacun par la lecture du moteur (les icônes =IMAGE gardées). Avant d'être servi,
+ * chaque item nommé a un vrai ID dans sa colonne ID — celui que les inventaires connaissent.
  */
 async function loadObjectsIndex(sheet: Awaited<ReturnType<typeof workbook>>, reread = false): Promise<WorldIndexData> {
-  const all = await listObjectIndexTables()
-  const read = all.filter((table) => table.fileId === sheet.spreadsheetId)
-  // Un onglet ajouté, renommé ou réuni dans Sheets (ou un autre classeur d'items) : la liste des
-  // onglets gardée en mémoire est relue, sinon l'index ne montrerait plus ces items (jusqu'au
-  // redémarrage d'Eraser).
-  if (!reread && all.some((table) => table.fileId !== sheet.spreadsheetId || !sheet.definition.tabs.some((tab) => tab.name === table.tabName))) {
+  // Un onglet ajouté, renommé ou réuni dans Sheets : la définition est relue (sinon l'index ne
+  // montrerait plus ces items jusqu'au redémarrage d'Eraser). Un onglet disparu est sauté.
+  const live = (await cachedSpreadsheetTabs(sheet.spreadsheetId, sheet.definition.tabs.map((tab) => tab.name))).filter((tab) => isObjectItemsTab(tab.title))
+  const known = new Set(sheet.definition.tabs.map((tab) => tab.name))
+  if (!reread && live.some((tab) => !known.has(tab.title) && !trashed(findEntry(sheet.schema, tab.title, "")))) {
     effectiveIndexes.delete(OBJECTS_INDEX_KEY)
     return loadObjectsIndex(await workbook(OBJECTS_INDEX_KEY), true)
   }
-  const tables = sheet.definition.tabs.flatMap((tab): WorldIndexTable[] => {
-    const table = read.find((candidate) => candidate.tabName === tab.name)
-    if (!table) return []
-    rememberSheetId(sheet.spreadsheetId, table.tabName, table.sheetId)
-    return [{ tabName: table.tabName, sheetId: table.sheetId, headers: [...table.headers], rows: table.rows.map((row) => ({ rowNumber: row.rowNumber, values: [...row.values], html: [...row.html] })) }]
-  })
-  return {
+  const present = new Set(live.map((tab) => tab.title))
+  const tables = await Promise.all(sheet.definition.tabs.filter((tab) => present.has(tab.name)).map((tab) => readTable(sheet.spreadsheetId, OBJECTS_INDEX_KEY, tab.name)))
+  const catalog = tables.map((table): ObjectIndexTable => ({
+    fileId: sheet.spreadsheetId,
+    fileName: sheet.definition.sheetName,
+    webViewLink: sheet.webViewLink,
+    sheetId: table.sheetId,
+    tabName: table.tabName,
+    headers: table.headers,
+    rows: table.rows,
+    columnSpecs: storedColumnSpecs(sheet.schema, table.tabName),
+  }))
+  // Écrits par le moteur lui-même : l'index en cours de lecture reste valable (les lignes sont corrigées en mémoire).
+  if (!sheet.degraded) await engineTask.run(true, () => freezeObjectIndexRowIds(catalog))
+  // Icônes, colonnes de combat, en-têtes : complétés en arrière-plan, sans faire attendre.
+  if (!sheet.degraded) maintainObjectIndexTables(catalog)
+  const data: WorldIndexData = {
     key: OBJECTS_INDEX_KEY,
     webViewLink: sheet.webViewLink,
     tables,
@@ -653,6 +692,33 @@ async function loadObjectsIndex(sheet: Awaited<ReturnType<typeof workbook>>, rer
     columns: Object.fromEntries(tables.map((table) => [table.tabName, columnsOf(OBJECTS_INDEX_KEY, table, sheet.schema)])),
     links: linksOf(OBJECTS_INDEX_KEY),
   }
+  objectCatalogs.set(data, catalog)
+  return data
+}
+
+/**
+ * Les items pour l'inventaire, les magasins, les fouilles, les événements, les références et
+ * les dons : l'Index des items tel que le moteur le garde — une seule copie, à jour de ses
+ * écritures. `current` attend la version à jour (pour écrire d'après elle) ; sinon la dernière
+ * lue est rendue tout de suite et relue en arrière-plan quand elle a vieilli. Google
+ * indisponible un instant : la dernière version lue, sauf `forWrite`.
+ */
+export async function objectCatalog(options: { current?: boolean; forWrite?: boolean } = {}): Promise<ObjectIndexTable[]> {
+  try {
+    const data = options.current || options.forWrite ? await getWorldIndex(OBJECTS_INDEX_KEY, { awaitFresh: true }) : await getWorldIndexQuick(OBJECTS_INDEX_KEY)
+    return objectCatalogs.get(data) ?? []
+  } catch (error) {
+    const previous = lastLoaded.get(OBJECTS_INDEX_KEY)
+    if (options.forWrite || !previous) throw error
+    console.error("OBJECT_CATALOG_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    return objectCatalogs.get(previous) ?? []
+  }
+}
+
+/** Les items déjà en mémoire, sans rien lire dans Google Sheets (vide s'ils n'ont jamais été lus). */
+export function objectCatalogInMemory(): ObjectIndexTable[] {
+  const data = lastLoaded.get(OBJECTS_INDEX_KEY)
+  return data ? objectCatalogs.get(data) ?? [] : []
 }
 
 async function loadWorldIndex(key: WorldIndexKey): Promise<WorldIndexData> {
@@ -773,19 +839,22 @@ const worldIndexCache = new Map<WorldIndexKey, WorldIndexCacheEntry>()
 
 const lastLoaded = new Map<WorldIndexKey, WorldIndexData>()
 
-export async function getWorldIndex(key: WorldIndexKey, options: { refresh?: boolean } = {}): Promise<WorldIndexData> {
+/**
+ * Un index lu. `awaitFresh` : passé ses cinq minutes, l'index est relu avant d'être rendu, au
+ * lieu d'être rendu tout de suite et relu en arrière-plan (pour écrire d'après lui).
+ */
+export async function getWorldIndex(key: WorldIndexKey, options: { refresh?: boolean; awaitFresh?: boolean } = {}): Promise<WorldIndexData> {
   // « Actualiser » : un index de personnages, campagnes ou PNJ (il change pendant la partie)
   // lu avant le clic est relu pour la page rechargée. Les autres index sont des règles : ils
   // sont relus quand l'administrateur ou le MJ actualise (lib/data-refresh.ts).
   if (!options.refresh && isEntityWorldIndexKey(key) && await mustReread(worldIndexCache.get(key)?.loadedAt ?? Date.now())) options = { ...options, refresh: true }
-  // « Actualiser » des items : leur catalogue (gardé cinq minutes pour l'inventaire et les
-  // magasins) est relu aussi, sinon le bouton rendait la même copie.
-  if (options.refresh && key === OBJECTS_INDEX_KEY) clearObjectIndexTableCache()
+  // « Actualiser » des items : leurs onglets sont relus aussi (un onglet ajouté dans Sheets).
+  if (options.refresh && key === OBJECTS_INDEX_KEY) effectiveIndexes.delete(key)
   const cached = worldIndexCache.get(key)
   if (!options.refresh && cached && cached.expiresAt > Date.now()) return cached.promise
   // Passé quelques minutes, l'index gardé est rendu tout de suite et relu en arrière-plan
   // (pour voir ce qui a été changé directement dans Sheets) : la page n'attend plus.
-  if (!options.refresh && cached?.loadedAt && !cached.refreshFailed && Date.now() - cached.loadedAt < WORLD_INDEX_STALE_MS) {
+  if (!options.refresh && !options.awaitFresh && cached?.loadedAt && !cached.refreshFailed && Date.now() - cached.loadedAt < WORLD_INDEX_STALE_MS) {
     if (!cached.refreshing) {
       cached.refreshing = true
       const startedAt = Date.now()
@@ -949,7 +1018,15 @@ onSpreadsheetWrite((spreadsheetId) => {
   const own = engineTask.getStore() === true
   for (const [key, effective] of effectiveIndexes) {
     if (effective.spreadsheetId !== spreadsheetId) continue
-    if (!own) { worldIndexCache.delete(key); continue }
+    // L'inventaire reprend des colonnes des items : il est relu après toute écriture dans leur classeur.
+    if (key === OBJECTS_INDEX_KEY) clearInventoryWorkbookCache()
+    if (!own) {
+      worldIndexCache.delete(key)
+      // Les items : une ligne 1 ou un schéma écrits ailleurs (en-têtes de combat, corbeille des
+      // colonnes) changent leurs onglets tels que le moteur les décrit : relus aussi.
+      if (key === OBJECTS_INDEX_KEY) effectiveIndexes.delete(key)
+      continue
+    }
     // Les bonus de rang sont dans le classeur des sorts : la fiche de personnage les relit aussi.
     if (key === "classes" || key === "class-spells" || key === "creature-spells" || key === "rank-bonuses") invalidateClassContentCaches()
     if (key === "classes") void forgetClassIndexSync().catch(() => undefined)
@@ -1396,9 +1473,7 @@ export function updateWorldIndexCell(key: WorldIndexKey, tabName: string, row: W
       if (isHtmlTextColumn(key, tabName, target)) await writeCell(before, tabName, rowIndex, column, html)
       else await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId: await sheetIdOf(sheet.spreadsheetId, tabName), rowNumber: rowIndex + 1, column, html })
     }
-    // Les items : le catalogue gardé (inventaire, magasins) reçoit la case, sans tout relire.
-    if (key === OBJECTS_INDEX_KEY) await writeObjectIndexCells({ fileId: sheet.spreadsheetId, tabName, rowNumber: rowIndex + 1, id: rowId(before, rowIndex) }, write, () => [{ header: target, html }])
-    else await write()
+    await write()
     await patchCachedRow(key, tabName, cachedIdentityOf(before, rowIndex), [{ header: target, html }])
     // La case est écrite. Ce qui suit (les liens vers d'autres index) peut échouer sans que
     // l'écriture soit annoncée comme refusée : la page croirait la case non enregistrée, et
@@ -1691,8 +1766,7 @@ export function updateWorldIndexFields(key: WorldIndexKey, tabName: string, row:
         for (const cell of formatted) await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId, rowNumber, column: cell.column, html: cell.html })
       }
     }
-    if (key === OBJECTS_INDEX_KEY) await writeObjectIndexCells({ fileId: sheet.spreadsheetId, tabName, rowNumber, id: rowId(table, rowIndex) }, write, () => written)
-    else await write()
+    await write()
     await patchCachedRow(key, tabName, cachedIdentityOf(table, rowIndex), written)
     const nameField = Object.entries(fields).find(([header]) => columnOf(table.headers, header) === nameColumn)?.[1]
     const newName = nameField === undefined ? "" : htmlToRichText(String(nameField)).text.replace(/\s+/g, " ").trim()
@@ -2277,4 +2351,8 @@ export function purgeWorldIndexTrash(key: WorldIndexKey, tab: string, column: st
 
 // « Actualiser » (administrateur, MJ) : les index sont relus dans Google (le dernier lu reste le
 // repli en cas d'échec).
-onForgetGoogleData(() => { worldIndexCache.clear() })
+onForgetGoogleData(() => {
+  worldIndexCache.clear()
+  // Les items : leurs onglets sont relus aussi (ceux des autres index sont fixés par Eraser).
+  effectiveIndexes.delete(OBJECTS_INDEX_KEY)
+})

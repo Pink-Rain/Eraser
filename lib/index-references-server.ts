@@ -5,7 +5,8 @@
  * reste la même ligne. Lire ne crée jamais de classeur.
  */
 import { onForgetGoogleData } from "@/lib/data-refresh"
-import { listObjectIndexTablesForDisplay, resolveJdrSheet, type ObjectIndexTable } from "@/lib/google-sheets"
+import { resolveJdrSheet, type ObjectIndexTable } from "@/lib/google-sheets"
+import { objectCatalog } from "@/lib/object-catalog"
 import { listCustomIndexes } from "@/lib/custom-indexes"
 import { foldName, isIdHeader, normalizeSpec, objectColumnSpec } from "@/lib/index-columns"
 import { citedCell, columnAt, hoverOf, objectNameHeaders, rowDetails, type SourceRow, type SourceTable } from "@/lib/index-references-cells"
@@ -85,7 +86,7 @@ export function objectReferenceId(table: Pick<ObjectIndexTable, "fileId" | "shee
 }
 
 async function objectSource(): Promise<Source> {
-  const tables = await listObjectIndexTablesForDisplay()
+  const tables = await objectCatalog()
   return {
     key: OBJECT_REFERENCE_INDEX,
     title: "Items",

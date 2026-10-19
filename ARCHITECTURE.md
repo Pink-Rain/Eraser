@@ -146,17 +146,26 @@ du Worker, colonnes de la feuille, préfixe de version `vue:`, élément `@vue`.
 L’Index des items est l’index `objects` du moteur (`OBJECTS_INDEX_KEY`,
 `lib/world-index-definitions.ts`) : `lib/world-indexes.ts` le lit, l’écrit, gère ses relations
 (colonnes liées, listes liées, recherches, agrégats), son « Modifier » et sa corbeille, comme
-pour tout index. Sa page est `WorldIndexPage`. Particularités :
-- ses onglets sont ceux du classeur « Index des objets » (dossier « Objets ») ; il est lu par
-  le lecteur des items (`listObjectIndexTables` : ID figés, icônes, en-têtes réparés), que
-  suivent aussi l’inventaire et les magasins ;
+pour tout index. Sa page est `WorldIndexPage`. Il n’a **pas d’autre lecteur** :
+- le moteur trouve son classeur (le seul du dossier « Objets », sous son nom du Drive), en lit
+  les onglets et la ligne 1, puis chaque onglet par sa lecture habituelle (`readTable`), qui
+  garde ici les icônes `=IMAGE` (`readFormattedSheet(…, { keepImages: true })`). Un onglet
+  ajouté, renommé ou réuni dans Sheets fait relire ses onglets ; « Actualiser » aussi ;
+- avant d’être servi, un item nommé sans ID reçoit le sien (`freezeObjectIndexRowIds`, écrit
+  par le moteur lui-même) ; icônes, colonnes de combat et en-têtes vides sont complétés en
+  arrière-plan (`maintainObjectIndexTables`) ;
+- l’inventaire, les magasins, les fouilles, les événements, les références, les dons et la
+  corbeille des colonnes lisent **le catalogue du moteur** (`objectCatalog`, par
+  `lib/object-catalog.ts`) : les mêmes lignes que l’index, donc à jour de ses écritures sans
+  relecture. `current` attend une version de moins de cinq minutes (pour écrire d’après elle) ;
+  sinon la copie gardée est rendue tout de suite et relue en arrière-plan ;
+- une écriture d’ailleurs dans son classeur (icônes, « Nombre max », corbeille) fait relire
+  l’index et l’inventaire (`onSpreadsheetWrite`) ;
 - ses colonnes prennent le type et les verrous des items (`objectColumnSpec`,
   `objectColumnPolicy`) : l’inventaire, les magasins et la table les lisent par leur nom ;
-- toute écriture dans son classeur fait relire les items à l’inventaire et aux magasins
-  (`announceSpreadsheetWrite`), sauf les cases que le moteur écrit lui-même (case, fiche) :
-  `writeObjectIndexCells` les recopie dans le catalogue gardé, reconnu par numéro et ID de ligne,
-  et ne fait relire le classeur que si la ligne n’y est pas telle quelle.
-- « Actualiser » (`refresh=1`) relit aussi le catalogue des items.
+- le regroupement des anciens classeurs séparés (`lib/object-index-regroup-server.ts`) lit ces
+  anciens classeurs à part (`readLegacyObjectSpreadsheet`) : une migration, qui ne sert les
+  items à personne ;
 - tous les items peuvent tenir dans un seul onglet : la colonne « Genre » range chaque item
   dans l’inventaire (`genreInventoryCategory`, `inventoryKindOf`, `lib/inventory-schema.ts`) :
   Arme → Armes, Équipement → Équipement, tout autre genre → Inventaire (qui peut aussi aller au

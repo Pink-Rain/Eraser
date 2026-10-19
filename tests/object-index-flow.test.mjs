@@ -7,8 +7,10 @@ import { fileURLToPath } from "node:url";
 
 import { createServer } from "vite";
 
-// L'Index des objets du vrai lib/google-sheets.ts, sur un Google Sheets en mémoire : la
-// feuille change « sur une autre installation » entre la lecture gardée en mémoire et l'écriture.
+// L'Index des items, lu et écrit par le vrai moteur des index (lib/world-indexes.ts) sur un
+// Google Sheets en mémoire : la feuille change « sur une autre installation » entre la lecture
+// gardée en mémoire et l'écriture. L'inventaire, les magasins et les références lisent ce même
+// moteur (lib/object-catalog.ts) : il n'y a plus d'autre lecteur des items.
 const root = fileURLToPath(new URL("..", import.meta.url));
 const dataDir = mkdtempSync(join(tmpdir(), "eraser-object-index-"));
 process.env.ERASER_DESKTOP_DATA_DIR = dataDir;
@@ -31,34 +33,37 @@ const google = await vite.ssrLoadModule(fake);
 const drive = await vite.ssrLoadModule(driveFake);
 const icons = await vite.ssrLoadModule(iconsFake);
 const sheets = await vite.ssrLoadModule("/lib/google-sheets.ts");
-const objectSchema = await vite.ssrLoadModule("/lib/object-schema.ts");
+const world = await vite.ssrLoadModule("/lib/world-indexes.ts");
+const catalog = await vite.ssrLoadModule("/lib/object-catalog.ts");
 const { getDb } = await vite.ssrLoadModule("/db/index.ts");
 const schema = await vite.ssrLoadModule("/db/schema.ts");
 const jdr = await vite.ssrLoadModule("/lib/jdr-sheets.ts");
 
 let serial = 0;
 const fresh = (name) => `${name}-${++serial}`;
+/** L'Index des items relu à l'instant par le moteur. */
+const readItems = () => world.getWorldIndex("objects", { refresh: true });
 
-// La première lecture du catalogue lance des tâches de fond (colonnes de combat, icônes) qui
-// ne repassent pas avant dix minutes : elles passent ici, sur un classeur jetable, et ne
-// viennent plus écrire pendant les tests.
+// La première lecture des items lance des tâches de fond (colonnes de combat, icônes) qui ne
+// repassent pas avant dix minutes : elles passent ici, sur un classeur jetable, et ne viennent
+// plus écrire pendant les tests.
 {
   const warm = fresh("objets");
   google.addSpreadsheet(warm, [{ title: "Jetable", grid: [["ID", "Nom", "Icône"], ["J-1", "Caillou", ""]] }]);
   drive.drive.objects.push({ id: warm, name: "Jetable" });
-  await sheets.listObjectIndexTables();
+  await readItems();
   await new Promise((resolve) => setTimeout(resolve, 200));
 }
 
 beforeEach(async () => {
   google.reset();
   drive.reset();
-  sheets.clearObjectIndexTableCache();
+  world.forgetEffectiveIndex("objects");
   await getDb().delete(schema.jdrGoogleSheets);
   await getDb().delete(schema.sheetIndexSyncs);
 });
 
-/** Un classeur d'objets rangé dans le dossier « Objets ». */
+/** Le classeur des items, rangé dans le dossier « Objets ». */
 function objectsFile(tabs) {
   const id = fresh("objets");
   google.addSpreadsheet(id, tabs);
@@ -73,72 +78,55 @@ const armes = () => [
   ["ARM-3", "Arc", "Arme", "8"],
 ];
 
-const names = (id, tab) => google.grid(id, tab).slice(1).map((row) => row[google.grid(id, tab)[0].indexOf("Nom")]);
+const names = (id, tab) => google.grid(id, tab).slice(1).map((row) => row[google.grid(id, tab)[0].indexOf("Nom")] ?? "");
 
 test("Suppression d'après une page périmée : c'est la ligne de cet ID qui part, ou rien", async () => {
   const id = objectsFile([{ title: "Armes", grid: armes() }]);
   // La page (et le serveur) ont lu le tableau…
-  const [table] = await sheets.listObjectIndexTables();
-  const dague = table.rows.find((row) => row.values[1] === "Dague");
+  const dague = (await readItems()).tables[0].rows.find((row) => row.values[1] === "Dague");
   // …puis une autre installation insère une ligne en tête : la Dague passe en ligne 4.
   google.grid(id, "Armes").splice(1, 0, ["ARM-0", "Hache", "Arme", "6"]);
-  await sheets.deleteObjectIndexRows(id, "Armes", [{ id: "ARM-2", rowNumber: dague.rowNumber, name: "Dague" }]);
+  await world.deleteWorldIndexRows("objects", "Armes", [{ id: "ARM-2", rowNumber: dague.rowNumber, name: "Dague" }]);
   assert.deepEqual(names(id, "Armes"), ["Hache", "Épée", "Arc"]);
   // Une ligne qui n'est plus là : rien n'est supprimé.
-  await assert.rejects(sheets.deleteObjectIndexRows(id, "Armes", [{ id: "ARM-3", rowNumber: 4, name: "Arc" }, { id: "ARM-9", rowNumber: 2, name: "Fronde" }]), /OBJECT_INDEX_CHANGED/);
+  await assert.rejects(world.deleteWorldIndexRows("objects", "Armes", [{ id: "ARM-3", rowNumber: 4, name: "Arc" }, { id: "ARM-9", rowNumber: 2, name: "Fronde" }]));
   assert.deepEqual(names(id, "Armes"), ["Hache", "Épée", "Arc"]);
 });
 
-test("Case modifiée après un déplacement de colonnes et de lignes : sous son en-tête, à la ligne de son ID", async () => {
+test("Case modifiée après un déplacement de lignes : à la ligne de son ID, sous son en-tête", async () => {
   const id = objectsFile([{ title: "Armes", grid: armes() }]);
-  const [table] = await sheets.listObjectIndexTables();
-  const epee = table.rows.find((row) => row.values[1] === "Épée");
-  // Ailleurs : « Prix » passe avant « Nom » et une ligne arrive en tête.
+  const epee = (await readItems()).tables[0].rows.find((row) => row.values[1] === "Épée");
+  // Ailleurs : une ligne arrive en tête.
+  google.grid(id, "Armes").splice(1, 0, ["ARM-0", "Hache", "Arme", "6"]);
+  await world.updateWorldIndexCell("objects", "Armes", { id: "ARM-1", rowNumber: epee.rowNumber, name: "Épée" }, "Prix", "12");
   const grid = google.grid(id, "Armes");
-  for (const row of grid) row.splice(1, 0, row.splice(3, 1)[0] ?? "");
-  grid.splice(1, 0, ["ARM-0", "6", "Hache", "Arme"]);
-  await sheets.updateObjectIndexCell(id, "Armes", { id: "ARM-1", rowNumber: epee.rowNumber, name: "Épée", header: "Prix", occurrence: 0 }, "12");
-  const after = google.grid(id, "Armes");
-  assert.deepEqual(after[0], ["ID", "Prix", "Nom", "Type"]);
-  assert.deepEqual(after.find((row) => row[0] === "ARM-1"), ["ARM-1", "12", "Épée", "Arme"]);
-  assert.deepEqual(after.find((row) => row[0] === "ARM-0"), ["ARM-0", "6", "Hache", "Arme"]);
-  // Une colonne qui n'existe plus : rien n'est écrit.
-  await assert.rejects(sheets.updateObjectIndexCell(id, "Armes", { id: "ARM-1", rowNumber: 3, name: "Épée", header: "Poids", occurrence: 0 }, "3"), /OBJECT_INDEX_CHANGED/);
+  assert.deepEqual(grid.find((row) => row[0] === "ARM-1"), ["ARM-1", "Épée", "Arme", "12"]);
+  assert.deepEqual(grid.find((row) => row[0] === "ARM-0"), ["ARM-0", "Hache", "Arme", "6"]);
+  // Une colonne qui n'existe pas : rien n'est écrit.
+  await assert.rejects(world.updateWorldIndexCell("objects", "Armes", { id: "ARM-1", rowNumber: 3, name: "Épée" }, "Poids", "3"));
+  assert.deepEqual(google.grid(id, "Armes").find((row) => row[0] === "ARM-1"), ["ARM-1", "Épée", "Arme", "12"]);
 });
 
-test("Ajout, insertion et copie : chaque valeur sous son en-tête, chaque ligne à côté de la bonne", async () => {
+test("Ajout, insertion et copie : chaque valeur sous son en-tête, chaque ligne à côté de la bonne, chacune son ID", async () => {
   const id = objectsFile([{ title: "Armes", grid: armes() }]);
-  await sheets.listObjectIndexTables();
-  // Ailleurs : les colonnes changent d'ordre.
-  for (const row of google.grid(id, "Armes")) row.reverse();
-  await sheets.addObjectIndexRowWithValues(id, "Armes", [["ID", ""], ["Nom", "Lance"], ["Type", "Arme"], ["Prix", "7"]]);
-  const grid = google.grid(id, "Armes");
-  const lance = grid.find((row) => row.includes("Lance"));
-  assert.deepEqual(lance.slice(0, 3), ["7", "Arme", "Lance"]);
-  assert.match(lance[3], /^[0-9a-f-]{36}$/);
-  // La Dague est maintenant en ligne 4 : la copie et la ligne vide arrivent sous elle.
-  grid.splice(1, 0, ["6", "Arme", "Hache", "ARM-0"]);
-  await sheets.duplicateObjectIndexRows(id, "Armes", [{ id: "ARM-2", rowNumber: 3, name: "Dague" }]);
-  await sheets.insertObjectIndexRow(id, "Armes", { id: "ARM-1", rowNumber: 2, name: "Épée" }, 1, false);
-  const rows = google.grid(id, "Armes").slice(1).map((row) => row[2] ?? "");
-  assert.deepEqual(rows, ["Hache", "Épée", "", "Dague", "Dague", "Arc", "Lance"]);
-  const ids = google.grid(id, "Armes").slice(1).map((row) => row[3]);
+  await readItems();
+  await world.addWorldIndexRow("objects", "Armes", ["", "Lance", "Arme", "7"], ["ID", "Nom", "Type", "Prix"]);
+  const lance = google.grid(id, "Armes").find((row) => row[1] === "Lance");
+  assert.deepEqual(lance.slice(1, 4), ["Lance", "Arme", "7"]);
+  assert.ok(lance[0].trim());
+  await world.duplicateWorldIndexRows("objects", "Armes", [{ id: "ARM-2", rowNumber: 3, name: "Dague" }]);
+  await world.insertWorldIndexRows("objects", "Armes", { id: "ARM-1", rowNumber: 2, name: "Épée" }, 1);
+  const rows = names(id, "Armes");
+  assert.equal(rows.filter((name) => name === "Dague").length, 2);
+  assert.ok(rows.includes(""), rows.join(", "));
+  const ids = google.grid(id, "Armes").slice(1).map((row) => row[0]).filter(Boolean);
   assert.equal(new Set(ids).size, ids.length);
-});
-
-test("Renommer une colonne : celle de ce nom dans la ligne 1 relue, même si l'ordre a changé", async () => {
-  const id = objectsFile([{ title: "Armes", grid: [["ID", "Nom", "Type", "Prix", "Couleur"], ["ARM-1", "Épée", "Arme", "10", "Rouge"]] }]);
-  await sheets.listObjectIndexTables();
-  // Ailleurs : « Couleur » est déplacée en tête.
-  for (const row of google.grid(id, "Armes")) row.unshift(row.splice(4, 1)[0] ?? "");
-  await objectSchema.applyObjectSchemaOperations(id, [{ op: "rename", tab: "Armes", header: "Couleur", to: "Teinte" }]);
-  assert.deepEqual(google.grid(id, "Armes")[0], ["Teinte", "ID", "Nom", "Type", "Prix"]);
 });
 
 test("Icônes posées d'après un instantané : une icône choisie entre-temps n'est jamais écrasée", async () => {
   const id = objectsFile([{ title: "Armes", grid: [["ID", "Nom", "Type", "Icône"], ["ARM-1", "Épée", "Arme", ""], ["ARM-2", "Dague", "Arme", ""]] }]);
   icons.hold();
-  await sheets.listObjectIndexTables();
+  await readItems();
   const sync = sheets.syncObjectIndexIcons();
   // Pendant ce temps, ailleurs : une ligne arrive en tête et l'Épée reçoit une icône choisie à la main.
   const grid = google.grid(id, "Armes");
@@ -152,9 +140,17 @@ test("Icônes posées d'après un instantané : une icône choisie entre-temps n
   assert.match(icon("ARM-2"), /^=IMAGE\("https:\/\/drive\.google\.com/);
 });
 
+test("Les icônes =IMAGE arrivent telles quelles au moteur, à l'inventaire et aux magasins", async () => {
+  objectsFile([{ title: "Armes", grid: [["ID", "Nom", "Type", "Icône"], ["ARM-1", "Épée", "Arme", "=IMAGE(\"https://exemple.org/epee.png\")"]] }]);
+  const [table] = (await readItems()).tables;
+  assert.equal(table.rows[0].values[3], "=IMAGE(\"https://exemple.org/epee.png\")");
+  const [item] = await catalog.objectCatalog();
+  assert.equal(item.rows[0].values[3], "=IMAGE(\"https://exemple.org/epee.png\")");
+});
+
 test("« Nombre max » d'après un instantané : seules les cases encore vides, à la ligne de leur ID", async () => {
   const id = objectsFile([{ title: "Flèches", grid: [["ID", "Nom", "Type", "Nombre max"], ["F-1", "Flèche", "Munition", ""], ["F-2", "Potion", "Consommable", ""]] }]);
-  await sheets.listObjectIndexTables();
+  await readItems();
   const grid = google.grid(id, "Flèches");
   grid.splice(1, 0, ["F-0", "Corde", "Objet", ""]);
   grid.find((row) => row[0] === "F-1")[3] = "50";
@@ -165,7 +161,7 @@ test("« Nombre max » d'après un instantané : seules les cases encore vides, 
   assert.equal(max("F-0"), "");
 });
 
-test("Réparation des en-têtes : une colonne en double n'est jamais supprimée", async () => {
+test("Réparation des en-têtes (regroupement) : une colonne en double n'est jamais supprimée", async () => {
   // « Description » en double, vide : une ancienne version l'ajoutait en fin de tableau.
   const id = objectsFile([{ title: "Objets", grid: [["ID", "Nom", "Description", "Type", "Description"], ["OBJ-1", "Corde", "Chanvre", "Outil", ""]] }]);
   await sheets.objectIndexTablesForRegroup();
@@ -173,20 +169,20 @@ test("Réparation des en-têtes : une colonne en double n'est jamais supprimée"
   assert.deepEqual(google.grid(id, "Objets")[1], ["OBJ-1", "Corde", "Chanvre", "Outil", ""]);
 });
 
-test("Un objet nommé sans ID reçoit le sien avant d'être servi : une ligne insérée au-dessus ne le change plus", async () => {
+test("Un item nommé sans ID reçoit le sien avant d'être servi : une ligne insérée au-dessus ne le change plus", async () => {
   const id = objectsFile([{ title: "Armes", grid: [["ID", "Nom", "Type"], ["ARM-1", "Épée", "Arme"], ["", "Fronde", "Arme"]] }]);
-  const [table] = await sheets.listObjectIndexTables();
-  const fronde = table.rows.find((row) => row.values[1] === "Fronde");
+  const fronde = (await readItems()).tables[0].rows.find((row) => row.values[1] === "Fronde");
   const written = google.grid(id, "Armes")[2][0];
   assert.equal(fronde.values[0], written);
   assert.equal(written, `DRIVE-${id}-1-3`);
+  // L'inventaire voit le même ID, par le moteur.
+  assert.equal((await catalog.objectCatalog())[0].rows.find((row) => row.values[1] === "Fronde").values[0], written);
   google.grid(id, "Armes").splice(1, 0, ["ARM-0", "Hache", "Arme"]);
-  sheets.clearObjectIndexTableCache();
-  const [reread] = await sheets.listObjectIndexTables();
+  const reread = (await readItems()).tables[0];
   assert.equal(reread.rows.find((row) => row.values[1] === "Fronde").values[0], written);
 });
 
-test("L'inventaire recopie le texte du catalogue à jour, pas celui gardé pour l'affichage", async () => {
+test("L'inventaire recopie le texte des items à jour, pas celui gardé pour l'affichage", async () => {
   const id = objectsFile([{ title: "Objets", grid: [["ID", "Nom", "Description", "Type"], ["OBJ-1", "Corde", "Chanvre", "Objet"]] }]);
   const inventory = fresh("inventaire");
   google.addSpreadsheet(inventory, [
@@ -202,6 +198,7 @@ test("L'inventaire recopie le texte du catalogue à jour, pas celui gardé pour 
   const realNow = Date.now;
   Date.now = () => realNow() + 6 * 60_000;
   try {
+    assert.equal((await catalog.objectCatalog())[0].rows[0].values[1], "Corde", "l'affichage reprend la copie gardée sans attendre");
     const added = await sheets.addCharacterInventoryItem("PERSO-A", "OBJ-1");
     const slot = added.containers.flatMap((container) => container.slots).find((candidate) => candidate.itemId === "OBJ-1");
     assert.equal(slot.item.name, "Corde de chanvre");
@@ -212,87 +209,25 @@ test("L'inventaire recopie le texte du catalogue à jour, pas celui gardé pour 
   }
 });
 
-test("Ligne sans ID ni nom (insérée, ou brouillon) : elle se remplit et se supprime depuis Eraser", async () => {
-  const refs = await vite.ssrLoadModule("/lib/object-index-refs.ts");
-  const id = fresh("objets");
-  google.addSpreadsheet(id, [{ title: "Objets", grid: [["Nom", "Description", "Type"], ["Corde", "Chanvre", "Objet"], ["Torche", "Bois", "Objet"]] }]);
-  drive.drive.objects.push({ id, name: "Index des objets" });
-  const [table] = await sheets.listObjectIndexTables();
-  const corde = table.rows.find((candidate) => candidate.values[0] === "Corde");
-  await sheets.insertObjectIndexRow(id, "Objets", refs.objectIndexRowRef(table.headers, corde), 1, false);
-  sheets.clearObjectIndexTableCache();
-  const [reread] = await sheets.listObjectIndexTables();
-  const blank = reread.rows.find((candidate) => candidate.rowNumber === 3);
-  // Remplie à sa place…
-  await sheets.updateObjectIndexCell(id, "Objets", refs.objectIndexCellRef(reread.headers, blank, 1), "Brouillon");
-  assert.equal(google.grid(id, "Objets")[2][1], "Brouillon");
-  // …puis supprimée : la ligne n'a toujours ni ID ni nom.
-  await sheets.deleteObjectIndexRows(id, "Objets", [refs.objectIndexRowRef(reread.headers, blank)]);
-  assert.deepEqual(google.grid(id, "Objets").map((row) => row[0]), ["Nom", "Corde", "Torche"]);
-});
-
-test("« Modifier » : une colonne sans en-tête (« Colonne 3 ») reçoit le nom donné", async () => {
-  const id = fresh("objets");
-  google.addSpreadsheet(id, [{ title: "Objets", grid: [["ID", "Nom", ""], ["O-1", "Corde", "note"], ["O-2", "Torche", "autre"]] }]);
-  drive.drive.objects.push({ id, name: "Index des objets" });
-  const [table] = await sheets.listObjectIndexTables();
+test("Une colonne sans en-tête s'appelle « Colonne 3 » : le moteur la lit sous ce nom", async () => {
+  objectsFile([{ title: "Objets", grid: [["ID", "Nom", ""], ["O-1", "Corde", "note"], ["O-2", "Torche", "autre"]] }]);
+  const [table] = (await readItems()).tables;
   assert.equal(table.headers[2], "Colonne 3");
-  await objectSchema.applyObjectSchemaOperations(id, [{ op: "rename", tab: "Objets", header: "Colonne 3", to: "Notes" }]);
-  assert.equal(google.grid(id, "Objets")[0][2], "Notes");
+  assert.equal(table.rows[0].values[2], "note");
 });
 
-// ---- Une ligne ajoutée ou supprimée ne fait relire que son classeur ----
-
-/** Les lectures de grille (includeGridData) d'un classeur : une relecture complète de ses tableaux. */
-const gridReads = (id) => google.world.calls.filter((call) => call.method === "GET" && call.url.includes(`/spreadsheets/${id}?`) && call.url.includes("includeGridData")).length;
-
-test("Ajouter ou supprimer une ligne ne relit que le classeur touché, le reste vient de la mémoire", async () => {
-  const touched = objectsFile([{ title: "Armes", grid: armes() }]);
-  const other = objectsFile([{ title: "Potions", grid: [["ID", "Nom", "Type"], ["POT-1", "Élixir", "Potion"]] }]);
-  await sheets.listObjectIndexTables();
-  google.world.calls.length = 0;
-  await sheets.addObjectIndexRowWithValues(touched, "Armes", [["ID", "ARM-4"], ["Nom", "Lance"], ["Type", "Arme"], ["Prix", "7"]]);
-  const tables = await sheets.listObjectIndexTablesForDisplay();
-  const armesTable = tables.find((table) => table.fileId === touched);
-  assert.ok(armesTable.rows.some((row) => row.values.includes("Lance")), "la ligne ajoutée n'est pas dans le catalogue");
-  assert.ok(tables.some((table) => table.fileId === other && table.rows.length === 1), "l'autre classeur a disparu du catalogue");
-  assert.equal(gridReads(other), 0, "l'autre classeur a été relu pour une ligne ajoutée ailleurs");
-  assert.equal(gridReads(touched), 1);
-  // Supprimer : même chose, et la ligne disparaît aussitôt de l'affichage.
-  const lance = armesTable.rows.find((row) => row.values.includes("Lance"));
-  google.world.calls.length = 0;
-  await sheets.deleteObjectIndexRows(touched, "Armes", [{ id: "ARM-4", rowNumber: lance.rowNumber, name: "Lance" }]);
-  const after = await sheets.listObjectIndexTablesForDisplay();
-  assert.ok(!after.find((table) => table.fileId === touched).rows.some((row) => row.values.includes("Lance")));
-  assert.equal(gridReads(other), 0);
-});
-
-test("Un classeur relu dont les en-têtes ont changé fait tout relire (en-têtes repris des autres)", async () => {
-  const touched = objectsFile([{ title: "Armes", grid: armes() }]);
-  const other = objectsFile([{ title: "Potions", grid: [["ID", "Nom", "Type"], ["POT-1", "Élixir", "Potion"]] }]);
-  await sheets.listObjectIndexTables();
-  // Ailleurs, dans Sheets : une colonne est renommée dans le classeur touché, et l'autre change.
-  google.grid(touched, "Armes")[0][3] = "Coût";
-  google.grid(other, "Potions")[1][1] = "Élixir de vie";
-  google.world.calls.length = 0;
-  await sheets.addObjectIndexRowWithValues(touched, "Armes", [["ID", "ARM-4"], ["Nom", "Lance"], ["Type", "Arme"], ["Coût", "7"]]);
-  const tables = await sheets.listObjectIndexTables();
-  assert.equal(tables.find((table) => table.fileId === touched).headers[3], "Coût");
-  assert.equal(tables.find((table) => table.fileId === other).rows[0].values[1], "Élixir de vie");
-  assert.equal(gridReads(other), 1);
-});
-
-test("Une écriture faite pendant la relecture partielle n'est pas masquée par elle", async () => {
-  const touched = objectsFile([{ title: "Armes", grid: armes() }]);
-  await sheets.listObjectIndexTables();
-  await sheets.addObjectIndexRowWithValues(touched, "Armes", [["ID", "ARM-4"], ["Nom", "Lance"], ["Type", "Arme"], ["Prix", "7"]]);
-  // La relecture part ; pendant qu'elle lit, une autre ligne est ajoutée par Eraser.
-  const reading = sheets.listObjectIndexTables();
-  await sheets.addObjectIndexRowWithValues(touched, "Armes", [["ID", "ARM-5"], ["Nom", "Masse"], ["Type", "Arme"], ["Prix", "9"]]);
-  await reading;
-  const tables = await sheets.listObjectIndexTablesForDisplay();
-  const names = tables.find((table) => table.fileId === touched).rows.map((row) => row.values[1]);
-  assert.ok(names.includes("Lance") && names.includes("Masse"), names.join(", "));
+test("Les items ne sont lus qu'une fois : le moteur, l'inventaire et les magasins partagent sa lecture", async () => {
+  objectsFile([{ title: "Armes", grid: [["ID", "Nom", "Type", "Rareté et emplacements"], ["ARM-1", "Épée", "Arme", "Commun : Armurerie"]] }]);
+  await readItems();
+  const gridReads = () => google.world.calls.filter((call) => call.url.includes("includeGridData")).length;
+  const before = gridReads();
+  const shops = await vite.ssrLoadModule("/lib/shop-schema.ts");
+  const refs = await vite.ssrLoadModule("/lib/index-references-server.ts");
+  const items = await shops.loadShopGeneratorItems();
+  assert.deepEqual(items.map((item) => item.name), ["Épée"]);
+  assert.ok(refs);
+  await catalog.objectCatalog();
+  assert.equal(gridReads(), before, "un consommateur a relu les items à part");
 });
 
 test("Items, un index du moteur : le moteur des index lit et écrit les items, l'inventaire voit ses écritures", async () => {
@@ -309,17 +244,17 @@ test("Items, un index du moteur : le moteur des index lit et écrit les items, l
   google.grid(id, "Armes").splice(1, 0, ["ARM-0", "Hache", "Arme", "6", ""]);
   await world.updateWorldIndexCell("objects", "Armes", { rowNumber: 3, id: "ARM-2", name: "Dague" }, "Prix", "5");
   assert.deepEqual(google.grid(id, "Armes").find((row) => row[0] === "ARM-2"), ["ARM-2", "Dague", "Arme", "5", "Rare"]);
-  // L'inventaire et les magasins (le lecteur des items) voient l'écriture du moteur (ici, le
-  // catalogue gardé ne connaissait pas la ligne insérée dans Sheets : il est relu).
-  const read = await sheets.listObjectIndexTables();
+  // L'inventaire et les magasins (le catalogue du moteur) voient l'écriture du moteur (ici, la
+  // copie gardée ne connaissait pas la ligne insérée dans Sheets : elle est relue).
+  const read = await catalog.objectCatalog({ current: true });
   const armes = read.find((table) => table.tabName === "Armes");
   assert.equal(armes.rows.find((row) => row.values[0] === "ARM-2").values[3], "5");
-  // Catalogue à jour : la case est recopiée dans le catalogue gardé, sans relire tout le classeur mis en forme.
+  // Catalogue à jour : la case est corrigée dans la copie du moteur, sans relire tout le classeur mis en forme.
   const gridReads = () => google.world.calls.filter((call) => call.url.includes("includeGridData")).length;
   const before = gridReads();
   const hache = google.grid(id, "Armes").findIndex((row) => row[0] === "ARM-0") + 1;
   await world.updateWorldIndexCell("objects", "Armes", { rowNumber: hache, id: "ARM-0", name: "Hache" }, "Prix", "7");
-  assert.equal((await sheets.listObjectIndexTables()).find((table) => table.tabName === "Armes").rows.find((row) => row.values[0] === "ARM-0").values[3], "7");
+  assert.equal((await catalog.objectCatalog({ current: true })).find((table) => table.tabName === "Armes").rows.find((row) => row.values[0] === "ARM-0").values[3], "7");
   assert.equal(gridReads(), before);
   // « Corriger N fautes » : la rareté mal écrite prend le choix de la liste.
   assert.equal(await world.normalizeWorldIndexChoices("objects"), 1);

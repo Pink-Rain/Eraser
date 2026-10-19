@@ -1,52 +1,27 @@
 /**
- * « Modifier » pour l'Index des objets : chaque classeur du dossier « Objets » a son
- * propre onglet « Eraser · colonnes ». Les colonnes que l'inventaire, les boutiques et
- * la table lisent par leur nom sont verrouillées (on peut changer leur affichage).
+ * Les colonnes de l'Index des items : leur type effectif et leur corbeille (Administration ›
+ * Corbeille). Le classeur des items a son onglet « Eraser · colonnes » ; « Modifier » passe
+ * par le moteur des index, comme pour tout index (lib/world-indexes.ts).
  */
 import {
-  clearObjectIndexTableCache,
   clearSpreadsheetReadCache,
-  columnName,
-  ensureSheetColumnCount,
   googleSheetsJson,
-  listObjectIndexTables,
   readRangeFreshWithOffset,
   sheetTabRange,
   spreadsheetTabs,
-  updateRange,
   type ObjectIndexTable,
 } from "@/lib/google-sheets"
-import { foldName, isIdHeader, objectColumnSpec, type IndexColumnSpec } from "@/lib/index-columns"
-import { applyLockOverride, lockOverrideOf } from "@/lib/index-locks"
-import { listIndexLocks, tabLocksOf } from "@/lib/index-locks-store"
-import { findEntry, readSchema, upsertEntry, writeSchema } from "@/lib/index-schema"
-import { columnMoves, headerProblem, isDisplayOnlyChange, isObjectSpellingFix, objectColumnPolicy, tabProblem, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
+import { foldName, objectColumnSpec, type IndexColumnSpec } from "@/lib/index-columns"
+import { findEntry, readSchema, writeSchema } from "@/lib/index-schema"
+import type { SchemaEntry } from "@/lib/index-schema-shared"
+import { objectCatalog } from "@/lib/object-catalog"
 import type { IndexTrashItem } from "@/lib/world-indexes"
-import { OBJECT_REFERENCE_INDEX } from "@/lib/index-references"
-
-/**
- * Les cadenas des colonnes d'items : ceux que la page enregistre (index « objects ») et, pour
- * les anciens, ceux gardés sous l'identifiant du classeur. Ceux de la page l'emportent.
- */
-async function objectIndexLocks(fileId: string) {
-  const [old, current] = await Promise.all([listIndexLocks(fileId), listIndexLocks(OBJECT_REFERENCE_INDEX)])
-  const merged = { ...old }
-  for (const [tab, locks] of Object.entries(current)) merged[tab] = { ...merged[tab], ...locks }
-  return merged
-}
 
 /** Le type effectif d'une colonne d'objets : celui du schéma, sinon reconnu par son nom. */
 export function effectiveObjectSpec(header: string, headers: string[], schema: SchemaEntry[], tab: string): IndexColumnSpec {
   const base = objectColumnSpec(header, headers)
   const entry = findEntry(schema, tab, header)
   return entry?.spec ? { ...base, ...entry.spec } : base
-}
-
-/** Les schémas des classeurs d'objets, pour l'affichage de l'index. */
-export async function objectSchemas(tables: ObjectIndexTable[]) {
-  const files = [...new Set(tables.map((table) => table.fileId))]
-  const entries = await Promise.all(files.map(async (fileId) => [fileId, await readSchema(fileId).catch(() => [] as SchemaEntry[])] as const))
-  return Object.fromEntries(entries)
 }
 
 /**
@@ -59,140 +34,8 @@ async function freshFirstRow(fileId: string, tabName: string) {
   return read.startRow === 1 ? (read.rows[0] ?? []).map((value) => String(value ?? "")) : []
 }
 
-async function appendHeader(fileId: string, tabName: string, header: string) {
-  const firstRow = await freshFirstRow(fileId, tabName)
-  let used = firstRow.length
-  while (used > 0 && !firstRow[used - 1]?.trim()) used -= 1
-  if (firstRow.slice(0, used).some((existing) => foldName(existing) === foldName(header))) return
-  await ensureSheetColumnCount(fileId, tabName, used + 1)
-  const cell = `${columnName(used + 1)}1`
-  await updateRange(fileId, sheetTabRange(tabName, `${cell}:${cell}`), [[header]], { valueInputOption: "RAW" })
-}
-
-// Une « Liste liée » reste permise : elle écrit un simple nom dans la case, comme le rangement
-// en onglets (une valeur, que la page du moteur montre en onglets).
-const relationKinds = ["linked", "lookup", "rollup"]
-function assertNoRelation(spec: IndexColumnSpec) {
-  if (relationKinds.includes(spec.kind)) throw new Error("INDEX_SCHEMA_INVALID:Les relations entre index ne sont pas encore proposées pour les items : les cases d’items sont lues comme du texte par l’inventaire et les boutiques.")
-}
-
-function locked(allowed: boolean, reasons: string[]) {
-  if (!allowed) throw new Error(`INDEX_SCHEMA_LOCKED:${reasons.join(" ")}`)
-}
-
-export async function applyObjectSchemaOperations(fileId: string, operations: SchemaOperation[]) {
-  // Des copies : un renommage met à jour leurs en-têtes sans toucher à la liste gardée en mémoire.
-  const tables = (await listObjectIndexTables()).filter((table) => table.fileId === fileId).map((table) => ({ ...table, headers: [...table.headers] }))
-  if (!tables.length) throw new Error("OBJECT_INDEX_NOT_FOUND")
-  const schema = [...await readSchema(fileId, { refresh: true })]
-  const locks = await objectIndexLocks(fileId)
-  const now = new Date().toISOString()
-  for (const operation of operations) {
-    if (operation.op === "add-tab") {
-      operation.columns.forEach((column) => assertNoRelation(column.spec))
-      const problem = tabProblem(operation.name, (await spreadsheetTabs(fileId)).map((tab) => tab.title))
-      if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
-      const name = operation.name.replace(/\s+/g, " ").trim()
-      const headers = ["ID", "Nom", ...operation.columns.map((column) => column.header.trim()).filter((header) => !["nom", "id"].includes(foldName(header)))]
-      await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ addSheet: { properties: { title: name, gridProperties: { rowCount: 1000, columnCount: Math.max(26, headers.length), frozenRowCount: 1 } } } }] }) })
-      await updateRange(fileId, sheetTabRange(name, `A1:${columnName(headers.length)}1`), [headers], { valueInputOption: "RAW" })
-      upsertEntry(schema, name, "", { state: "ajouté", deletedAt: "" })
-      for (const column of operation.columns) if (!["nom", "id"].includes(foldName(column.header))) upsertEntry(schema, name, column.header.trim(), { spec: column.spec, state: "ajouté", deletedAt: "" })
-      continue
-    }
-    if (operation.op === "order-tabs") {
-      const existing = await spreadsheetTabs(fileId)
-      const requests = operation.tabs.flatMap((name, position) => {
-        const sheetId = existing.find((candidate) => candidate.title === name)?.sheetId
-        return sheetId === undefined ? [] : [{ updateSheetProperties: { properties: { sheetId, index: position }, fields: "index" } }]
-      })
-      if (requests.length) await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
-      continue
-    }
-    // La colonne « Onglet » des objets est celle du regroupement : « Modifier » ne la propose pas ici.
-    if (operation.op === "tab-column") throw new Error("INDEX_SCHEMA_LOCKED:La colonne « Onglet » des items se règle avec le regroupement des classeurs.")
-    const table = tables.find((candidate) => candidate.tabName === operation.tab)
-    if (!table) throw new Error("OBJECT_INDEX_NOT_FOUND")
-    if (operation.op === "rename-tab") {
-      const existing = await spreadsheetTabs(fileId)
-      const problem = tabProblem(operation.to, existing.map((candidate) => candidate.title).filter((title) => title !== table.tabName))
-      if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
-      const to = operation.to.replace(/\s+/g, " ").trim()
-      await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ updateSheetProperties: { properties: { sheetId: table.sheetId, title: to }, fields: "title" } }] }) })
-      for (const entry of schema) if (entry.tab === table.tabName) entry.tab = to
-      clearSpreadsheetReadCache(fileId)
-      continue
-    }
-    if (operation.op === "order-columns") {
-      const firstRow = await freshFirstRow(fileId, table.tabName)
-      const moves = columnMoves(firstRow, operation.headers)
-      if (moves.length) {
-        await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: moves.map((move) => ({ moveDimension: { source: { sheetId: table.sheetId, dimension: "COLUMNS", startIndex: move.from, endIndex: move.from + 1 }, destinationIndex: move.to } })) }) })
-        clearSpreadsheetReadCache(fileId)
-      }
-      continue
-    }
-    // Le nom d'une ligne vient des onglets d'objets eux-mêmes : « Modifier » ne le propose pas ici.
-    if (operation.op === "tab-label") throw new Error("INDEX_SCHEMA_LOCKED:Le nom d’une ligne ne se règle pas dans l’index des items.")
-    if (operation.op === "remove-tab") {
-      locked(tables.length > 1, ["C’est le seul tableau de ce classeur : il doit en garder au moins un."])
-      upsertEntry(schema, table.tabName, "", { deletedAt: now })
-      continue
-    }
-    if (operation.op === "add-column") {
-      assertNoRelation(operation.spec)
-      const problem = headerProblem(operation.header, table.headers)
-      if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
-      const header = operation.header.replace(/\s+/g, " ").trim()
-      await appendHeader(fileId, table.tabName, header)
-      upsertEntry(schema, table.tabName, header, { spec: operation.spec, state: "ajouté", deletedAt: "" })
-      continue
-    }
-    const column = table.headers.findIndex((header) => foldName(header) === foldName(operation.header))
-    if (column < 0) throw new Error("OBJECT_INDEX_COLUMN_NOT_FOUND")
-    const policy = applyLockOverride(objectColumnPolicy(operation.header), lockOverrideOf(tabLocksOf(locks, table.tabName), operation.header))
-    if (operation.op === "rename") {
-      // Corriger l'orthographe d'une colonne lue sous ses deux noms (« Cout » → « Prix ») ne perd rien.
-      locked(policy.rename || Boolean(operation.force) || isObjectSpellingFix(operation.header, operation.to), policy.reasons)
-      // La colonne par son nom dans la ligne 1 relue à l'instant : l'ordre a pu changer depuis la
-      // dernière lecture (ailleurs, ou par une opération précédente de cette liste).
-      const firstRow = await freshFirstRow(fileId, table.tabName)
-      let at = firstRow.findIndex((header) => foldName(header) === foldName(operation.header))
-      // « Colonne N » (case d'en-tête vide) ou un en-tête repris d'un autre tableau : sa place,
-      // tant que la case de la ligne 1 y est encore vide (on lui donne alors un nom).
-      if (at < 0 && !(firstRow[column] ?? "").trim()) at = column
-      if (at < 0) throw new Error("OBJECT_INDEX_COLUMN_NOT_FOUND")
-      const problem = headerProblem(operation.to, firstRow.map((header) => header.trim()).filter(Boolean), operation.header)
-      if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
-      const to = operation.to.replace(/\s+/g, " ").trim()
-      const cell = `${columnName(at + 1)}1`
-      await updateRange(fileId, sheetTabRange(table.tabName, `${cell}:${cell}`), [[to]], { valueInputOption: "RAW" })
-      const entry = findEntry(schema, table.tabName, operation.header)
-      if (entry) entry.column = to
-      // Les opérations suivantes (son type, par exemple) la désignent par son nouveau nom.
-      table.headers = table.headers.map((header, index) => index === column ? to : header)
-      continue
-    }
-    if (operation.op === "spec") {
-      const current = effectiveObjectSpec(operation.header, table.headers, schema, table.tabName)
-      if (!isDisplayOnlyChange(current, operation.spec)) locked(policy.type || Boolean(operation.force), policy.reasons)
-      // Une colonne d'objets reste du texte dans Sheets : les relations entre index n'y sont pas proposées.
-      assertNoRelation(operation.spec)
-      upsertEntry(schema, table.tabName, operation.header, { spec: operation.spec })
-      continue
-    }
-    if (operation.op === "remove-column") {
-      locked((policy.remove || Boolean(operation.force)) && !isIdHeader(operation.header), policy.reasons)
-      upsertEntry(schema, table.tabName, operation.header, { deletedAt: now })
-    }
-  }
-  await writeSchema(fileId, schema)
-  clearObjectIndexTableCache()
-  return listObjectIndexTables()
-}
-
 export async function listObjectIndexTrash(): Promise<IndexTrashItem[]> {
-  const tables = await listObjectIndexTables().catch(() => [] as ObjectIndexTable[])
+  const tables = await objectCatalog().catch(() => [] as ObjectIndexTable[])
   const files = new Map(tables.map((table) => [table.fileId, table.fileName]))
   const items = await Promise.all([...files].map(async ([fileId, fileName]) => (await readSchema(fileId).catch(() => [] as SchemaEntry[]))
     .filter((entry) => entry.deletedAt && entry.state !== "supprimé")
@@ -206,7 +49,6 @@ export async function restoreObjectIndexTrash(fileId: string, tab: string, colum
   if (!entry) throw new Error("INDEX_TRASH_NOT_FOUND")
   entry.deletedAt = ""
   await writeSchema(fileId, schema)
-  clearObjectIndexTableCache()
 }
 
 export async function purgeObjectIndexTrash(fileId: string, tab: string, column: string) {
@@ -224,5 +66,4 @@ export async function purgeObjectIndexTrash(fileId: string, tab: string, column:
   }
   await writeSchema(fileId, schema.filter((candidate) => candidate !== entry && !(column === "" && candidate.tab === tab)))
   clearSpreadsheetReadCache(fileId)
-  clearObjectIndexTableCache()
 }

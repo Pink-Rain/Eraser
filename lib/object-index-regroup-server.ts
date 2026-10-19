@@ -25,13 +25,12 @@ import {
   renameDriveFile,
 } from "@/lib/google-drive"
 import {
-  clearObjectIndexTableCache,
   clearSpreadsheetReadCache,
   columnName,
   googleSheetsJson,
   objectIndexRowName,
   objectIndexTablesForRegroup,
-  readObjectIndexSpreadsheet,
+  readLegacyObjectSpreadsheet,
   readRange,
   sheetTabRange,
   spreadsheetTabs,
@@ -40,6 +39,7 @@ import {
   type ObjectIndexTable,
 } from "@/lib/google-sheets"
 import { appendRawSchemaRows, readRawSchemaRows } from "@/lib/index-schema"
+import { forgetObjectCatalog } from "@/lib/object-catalog"
 import { remapIndexViewSources } from "@/lib/index-settings"
 import { remapIndexSavedViewSources } from "@/lib/index-saved-views-store"
 import {
@@ -155,7 +155,7 @@ export async function regroupObjectIndexes() {
   // Les tableaux tels qu'ils sont dans Sheets, pour comparer la copie à l'identique.
   const raw = new Map((await Promise.all(fileIds.map(async (fileId) => {
     const entry = entries.find((candidate) => candidate.fileId === fileId)
-    return readObjectIndexSpreadsheet({ id: fileId, name: entry?.name ?? fileId })
+    return readLegacyObjectSpreadsheet({ id: fileId, name: entry?.name ?? fileId })
   }))).flat().map((table) => [objectTableSource(table.fileId, table.sheetId), table]))
 
   const { names, order } = regroupedTabNames(tables.map((table) => ({ key: objectTableSource(table.fileId, table.sheetId), fileName: table.fileName, tabName: table.tabName })))
@@ -216,7 +216,7 @@ export async function regroupObjectIndexes() {
 
     // 5. Relire la copie et la comparer à l'original, tableau par tableau.
     clearSpreadsheetReadCache(created.id)
-    const copiedTables = await readObjectIndexSpreadsheet({ id: created.id, name: MERGED_OBJECT_INDEX_NAME })
+    const copiedTables = await readLegacyObjectSpreadsheet({ id: created.id, name: MERGED_OBJECT_INDEX_NAME })
     const problems: string[] = []
     for (const copy of copies) {
       const source = raw.get(objectTableSource(copy.table.fileId, copy.table.sheetId))
@@ -253,7 +253,7 @@ export async function regroupObjectIndexes() {
     }
     const warnings: string[] = []
     const views = await remapViews(new Map(copies.map((copy) => [objectTableSource(copy.table.fileId, copy.table.sheetId), objectTableSource(created.id, copy.sheetId)])), warnings)
-    clearObjectIndexTableCache()
+    await forgetObjectCatalog()
     return {
       fileId: created.id,
       url: created.webViewLink || `https://docs.google.com/spreadsheets/d/${created.id}/edit`,
@@ -266,7 +266,7 @@ export async function regroupObjectIndexes() {
     // Rien n'a basculé : la copie reste dans la sauvegarde, renommée, pour qu'on puisse
     // la regarder et relancer le regroupement.
     await renameDriveFile(created.id, `${MERGED_OBJECT_INDEX_NAME} · essai interrompu ${today()}`).catch(() => undefined)
-    clearObjectIndexTableCache()
+    await forgetObjectCatalog()
     throw error
   }
 }
@@ -309,6 +309,6 @@ export async function revertObjectIndexRegroup() {
     warnings.push(`« ${MERGED_OBJECT_INDEX_NAME} », rangé dans « ${OBJECT_INDEX_BACKUP_FOLDER} », n’a pas pu être renommé : renomme-le à la main avant de regrouper de nouveau.`)
   })
   const views = await remapViews(new Map(log.map((row) => [objectTableSource(merged.fileId, Number(row[5])), objectTableSource(row[0], Number(row[3]))])), warnings)
-  clearObjectIndexTableCache()
+  await forgetObjectCatalog()
   return { restored: [...new Set(log.map((row) => row[1]))], views, warnings }
 }
