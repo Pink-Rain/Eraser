@@ -2,6 +2,8 @@
  * Ce qu'une référence affiche d'une ligne d'index : la valeur d'une case citée (comme
  * dans le tableau) ou le détail montré au survol du nom. Sans dépendance au serveur.
  */
+import { parseSections } from "@/lib/index-sections"
+import { parseRarityPlaces } from "@/lib/rarity-places"
 import { foldName, isIdHeader, rowColumnStyle, type IndexColumnSpec } from "@/lib/index-columns"
 import { arrangeLayout, blockColumns, resolveLayoutColor, subtitleColumnsOf, type IndexLayout } from "@/lib/index-layouts"
 import type { ResolvedLayout, ResolvedLayoutField } from "@/lib/index-references"
@@ -38,7 +40,7 @@ function displayedValue(value: string, spec: IndexColumnSpec) {
   }).join(" | ")
 }
 
-const textKinds = new Set(["rich", "name-form", "text", "linked"])
+const textKinds = new Set(["rich", "name-form", "text", "linked", "sections", "rarity-places"])
 
 /** La case demandée, par son nom ; « Valeur 2 » sans colonne de ce nom : la 2e valeur de « Valeur ». */
 export function citedCell(table: SourceTable, row: SourceRow, column: string) {
@@ -58,7 +60,10 @@ export function citedCell(table: SourceTable, row: SourceRow, column: string) {
   const value = mode ? (raw.split("|")[mode - 1] ?? "").trim() : raw.trim()
   const shown = displayedValue(value, spec)
   // Un texte mis en forme garde sa mise en forme ; le reste s'affiche comme dans le tableau.
-  const html = !mode && textKinds.has(spec.kind) && /<[a-z]/i.test(row.html[index] ?? "") ? row.html[index] : escapeHtml(shown)
+  // Sections : chaque partie sous son titre ; Rareté et emplacements : une rareté (en gras) par ligne, avec ses lieux.
+  const html = spec.kind === "sections" ? parseSections(row.html[index] || raw).map((section) => `${section.title ? `<h3>${escapeHtml(section.title)}</h3>` : ""}${section.html}`).join("")
+    : spec.kind === "rarity-places" ? parseRarityPlaces(raw).map((entry) => `<strong>${escapeHtml(entry.rarity || "Sans rareté")}</strong>${entry.places.length ? ` : ${escapeHtml(entry.places.join(", "))}` : ""}`).join("<br>")
+    : !mode && textKinds.has(spec.kind) && /<[a-z]/i.test(row.html[index] ?? "") ? row.html[index] : escapeHtml(shown)
   // Un style imposé dont la couleur vient d'une colonne Couleur prend celle de cette ligne.
   const style = spec.style && !spec.style.keepCellFormatting ? rowColumnStyle(spec.style, (name) => { const at = columnAt(table.headers, [name]); return at >= 0 ? row.values[at] ?? "" : "" }) : undefined
   const options = spec.kind === "choice" ? spec.options?.filter((option) => option.color).map((option) => ({ value: option.value, color: option.color })) : undefined

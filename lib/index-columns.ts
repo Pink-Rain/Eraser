@@ -36,6 +36,9 @@ export type IndexColumnKind =
   | "gauge"
   | "glyph"
   | "number"
+  | "rarity-places"
+  | "sections"
+  | "index-list"
   | "archived"
 
 /** Les familles de types, dans l'ordre où l'éditeur les propose. */
@@ -82,6 +85,9 @@ export const indexColumnKinds: Record<IndexColumnKind, KindInfo> = {
   "gauge": { label: "Jauge", short: "Un nombre en icônes, barre ou anneau.", group: "Saisie", creatable: true, description: "Un nombre affiché en icônes à cliquer, en barre ou en anneau. La jauge peut avoir le même maximum pour toute la colonne, être propre à chaque case, ou prendre son maximum dans une autre colonne.", settings: ["Affichage : icônes, barre, anneau.", "Maximum : le même pour la colonne, propre à chaque case, ou lu dans une autre colonne.", "Icône (une centaine au choix, ou un émoji) et couleur.", "Couleur selon le niveau (rouge quand c'est bas)."], example: "Charges d'un sort (propre à chaque case), Note sur 5 (même maximum), PV sur « PV max » (autre colonne)." },
   "glyph": { label: "Icône", short: "Une icône (plus de 1 700) ou un émoji.", group: "Saisie", creatable: true, description: "Une icône choisie parmi plus de 1 700, avec une recherche en français ou en anglais (œil, personne, skull…), ou un émoji. La feuille garde le nom de l'icône.", settings: ["Couleur de l'icône (facultative : sinon, celle du texte).", "Pleine ou en contour."], example: "L'icône d'un état, d'une faction, d'un type d'objet." },
   "number": { label: "Nombre", short: "Un nombre : unité, monnaie, plage, pourcentage.", group: "Saisie", creatable: true, description: "Un nombre, trié sur sa vraie valeur : unité (monnaie PO/PC/PN, distance, poids), décimales, texte avant/après, pourcentage, plage « 2–5 ».", settings: ["Unité et unité par défaut.", "Décimales.", "Texte avant / après.", "Pourcentage.", "Plage."], example: "Prix « 1,5 PO », Portée « 2–5 m », Poids « 12 kg »." },
+  "rarity-places": { label: "Rareté et emplacements", short: "Des raretés, chacune avec ses lieux : lue par les magasins, les fouilles et les événements.", group: "Jeu", creatable: true, description: "Une ou plusieurs raretés (Très commun, Commun, Rare, Très rare, Ultime…), chacune avec un ou plusieurs lieux : les environnements et les magasins de l'Index des lieux. Les magasins, les fouilles et les événements lisent cette colonne dans tous les index qui l'ont : une ligne y devient trouvable, à sa rareté. Dans Sheets : une ligne par rareté, « Rare : Forêt - Ville ».", settings: ["Les raretés proposées (et leurs couleurs).", "D'où viennent les lieux (d'office : Lieux › Environnement et Lieux › Magasin)."], example: "Une épée « Commun : Armurerie » et « Très rare : Donjon - Forêt noire » ; une créature « Rare : Forêt »." },
+  "sections": { label: "Sections", short: "Des paragraphes avec leurs titres : parties d’un wiki, tomes d’un livre.", group: "Saisie", creatable: true, description: "Des parties, chacune avec son titre et son texte mis en forme, qu'on ajoute, renomme et réordonne. Le tableau montre leurs titres ; la fiche, les cartes et les pages montrent chaque partie sous son titre.", example: "Les tomes d'un livre (« Tome 1 », « Tome 2 »…), les parties d'une page de wiki (Histoire, Géographie, Culture)." },
+  "index-list": { label: "Liste d’index", short: "Des index choisis parmi ceux qui ont une colonne d’un type donné.", group: "Listes et relations", creatable: true, description: "Un ou plusieurs index, choisis dans une liste qui se tient à jour toute seule : tous les index qui ont une colonne du type choisi (par exemple « Rareté et emplacements »). Un index qui gagne cette colonne y apparaît, sans rien régler.", settings: ["Le type de colonne qui fait entrer un index dans la liste."], example: "Dans Lieux › Environnement, « Fouille » et « Événement » : les index trouvables en fouillant cet environnement, ou au cours d'un événement." },
   "archived": { label: "Archivée", group: "Système", creatable: false, description: "Ancienne colonne gardée dans Sheets, jamais affichée ni modifiée." },
 }
 
@@ -464,6 +470,10 @@ export type IndexColumnSpec = {
    * dans Sheets et reçue avec son identifiant) : « Non », « index-des-pnjs »…
    */
   defaultValue?: string
+  /** Rareté et emplacements : d'où viennent les lieux (d'office : Lieux › Environnement et Lieux › Magasin). Les raretés sont les `options`. */
+  rarityPlaces?: { sources?: ChoiceSource[] }
+  /** Liste d'index : le type de colonne qui fait entrer un index dans la liste (« rarity-places »). */
+  indexList?: { kind: IndexColumnKind }
   /** Ligne d'onglet du schéma : comment s'appelle une ligne (« un sort » : « Ajouter un sort »). */
   itemLabel?: string
   /** Ligne « * › Onglet » du schéma : la colonne « Onglet » des vues qui couvrent plusieurs onglets. */
@@ -578,6 +588,7 @@ export function columnTypeLabel(input: IndexColumnSpec) {
   if (spec.kind === "formula" && spec.formula?.result && spec.formula.result !== "auto") details.push(formulaResultLabels[spec.formula.result].toLocaleLowerCase("fr"))
   if (spec.kind === "random" && spec.random) details.push(spec.random.mode === "fixed" ? "figé" : "relançable")
   if (spec.kind === "actions") details.push(`${spec.actions?.length ?? 0} bouton${(spec.actions?.length ?? 0) > 1 ? "s" : ""}`)
+  if (spec.kind === "index-list") details.push(`index avec une colonne ${indexColumnKinds[spec.indexList?.kind ?? "rarity-places"]?.label ?? "?"}`.toLocaleLowerCase("fr"))
   const labels = [`${indexColumnKinds[spec.kind].label}${details.length ? ` (${details.join(", ")})` : ""}`]
   // Types doubles : « Jauge (icônes) · Nombre », « Nom · Style imposé », « Liste · Formulaire ».
   for (const kind of spec.also ?? []) if (kind !== "rich") labels.push(indexColumnKinds[kind].label)
@@ -591,7 +602,8 @@ export function columnTypeLabel(input: IndexColumnSpec) {
 export function isRichSpec(input: IndexColumnSpec) {
   const spec = normalizeSpec(input)
   if (spec.style && !spec.style.keepCellFormatting) return false
-  return spec.kind === "rich" || spec.kind === "linked" || spec.kind === "name" || spec.kind === "name-form"
+  // Sections : leurs textes gardent leur mise en forme (les titres sont des lignes « ## … »).
+  return spec.kind === "rich" || spec.kind === "linked" || spec.kind === "name" || spec.kind === "name-form" || spec.kind === "sections"
 }
 
 /** La colonne apparaît-elle dans le tableau ? */
@@ -762,6 +774,8 @@ export function objectColumnSpec(header: string, headers: string[]): IndexColumn
     ? { kind: "rich", description: OBJECT_VALUE_HELP }
     : { kind: "number", number: { unit: "money", defaultUnit: "PO" } }
   if (["actif", "active", "disponible"].includes(folded)) return { kind: "checkbox", emptyChecked: true }
+  // « Rareté et emplacements » : une rareté par ligne, avec ses lieux (environnements, magasins).
+  if (["rarete et emplacements", "rarete et emplacement", "raretes et emplacements", "rarete/emplacement", "rarete / emplacement", "rarete/emplacements"].includes(folded)) return { kind: "rarity-places", options: objectRarityOptions, description: "Une rareté par ligne, avec ses lieux (environnements, magasins). Les magasins, les fouilles et les événements la lisent." }
   // Rareté principale et secondaire : une liste, la même pour les deux ; « Ajout libre » pour en créer une autre.
   if (["rarete", "raretes", "rarete principale", "rarete principal", "rarete secondaire"].includes(folded)) return { kind: "choice", allowCustom: true, options: objectRarityOptions, description: "Très commun, Commun, Rare, Très rare ou Ultime. Une autre rareté se tape dans la case : elle rejoint la liste." }
   // Type et sous-type : une liste, nourrie des valeurs déjà écrites ; une valeur nouvelle se tape dans la case.

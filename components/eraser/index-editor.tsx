@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useRef, useState, type DragEvent, type ReactNode } from "react"
-import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X, PanelLeftClose, PanelLeftOpen } from "lucide-react"
+import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X, PanelLeftClose, PanelLeftOpen, MapPinned, ScrollText, LibraryBig } from "lucide-react"
 
 import { useContainedWheel, useDockArea } from "@/components/eraser/editor-dock"
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
@@ -12,6 +12,8 @@ import { CardsPanel, IndexCardEditor, duplicateCard } from "@/components/eraser/
 import { ColumnDescriptionButton, ColumnLockButton, ColumnTypeMenu } from "@/components/eraser/index-column-toolbar"
 import { IndexPresentationsEditor, LIST_FAMILY, MAIN_PRESENTATION_ID, PresentationsPanel } from "@/components/eraser/index-presentations-editor"
 import { columnStyleCss, pillStyle, stylePalette } from "@/components/eraser/index-style"
+import { creatableKinds } from "@/lib/index-schema-shared"
+import { defaultRarityOptions, placeSourcesOf } from "@/lib/rarity-places"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -219,6 +221,9 @@ function defaultSpec(kind: IndexColumnKind, targets: RelationTarget[], relations
     case "random": return { kind: "random", random: { source: "dice", dice: "1d20", mode: "reroll" } }
     case "actions": return { kind: "actions", actions: [{ id: nextId(), label: "Bouton", icon: "zap", steps: [] }] }
     case "spells": return { kind: "spells", spells: { source: "all" } }
+    case "rarity-places": return { kind: "rarity-places", options: defaultRarityOptions }
+    case "sections": return { kind: "sections" }
+    case "index-list": return { kind: "index-list", multiple: true, indexList: { kind: "rarity-places" } }
     default: return { kind }
   }
 }
@@ -280,17 +285,17 @@ function NumberFormatSettings({ spec, onChange, disabled }: Pick<SettingsProps, 
   </div>
 }
 
-function ListSettings({ spec, onChange, disabled, lookDisabled = disabled }: Pick<SettingsProps, "spec" | "onChange" | "disabled" | "lookDisabled">) {
+function ListSettings({ spec, onChange, disabled, lookDisabled = disabled, optionsOnly = false }: Pick<SettingsProps, "spec" | "onChange" | "disabled" | "lookDisabled"> & { /** Seulement les options (pas « Choix multiple » ni « Ajout libre ») : les raretés. */ optionsOnly?: boolean }) {
   const options = spec.options ?? []
   const groups = spec.groups ?? []
   const [bulk, setBulk] = useState(false)
   const setOptions = (next: NonNullable<IndexColumnSpec["options"]>) => onChange({ ...spec, options: next })
   const move = (index: number, delta: number) => { const next = [...options]; const [item] = next.splice(index, 1); next.splice(Math.max(0, Math.min(next.length, index + delta)), 0, item); setOptions(next) }
   return <>
-    <div className="flex flex-wrap gap-x-5 gap-y-2">
+    {!optionsOnly && <div className="flex flex-wrap gap-x-5 gap-y-2">
       <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(spec.multiple)} onCheckedChange={(checked) => onChange({ ...spec, multiple: checked === true })} /><span><b>Choix multiple</b> : plusieurs valeurs par case (étiquettes)</span></label>
       <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(spec.allowCustom)} onCheckedChange={(checked) => onChange({ ...spec, allowCustom: checked === true })} /><span><b>Ajout libre</b> : accepter une valeur hors liste</span></label>
-    </div>
+    </div>}
     <div className="grid gap-1.5">
       <div className="flex items-center justify-between"><p className={smallLabel}>Options ({options.length})</p><Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={() => setBulk(!bulk)}><ListChecks />{bulk ? "Éditer une par une" : "Coller une liste"}</Button></div>
       {bulk
@@ -556,6 +561,19 @@ function TypeSettings(props: SettingsProps) {
     </div>
     case "tab-sort": return <p className="text-xs text-muted-foreground">Chaque valeur devient un onglet qui porte son nom et montre les lignes qui l’ont. La ligne reste dans son onglet et apparaît en plus dans celui de sa valeur : rien n’est déplacé dans Sheets. La liste propose les valeurs déjà utilisées ; une valeur nouvelle crée son onglet.</p>
     case "choice": return <ListSettings spec={spec} onChange={onChange} disabled={disabled} lookDisabled={props.lookDisabled ?? disabled} />
+    case "rarity-places": return <div className="grid gap-3">
+      <p className="text-xs text-muted-foreground">Chaque case tient autant de raretés qu’on veut, chacune avec ses lieux : les environnements et les magasins de l’Index des lieux ({placeSourcesOf(spec).map((source) => `${source.index === "places" ? "Lieux" : source.index} › ${source.tab}`).join(", ")}). Les magasins, les fouilles et les événements lisent cette colonne dans <b>tous</b> les index qui l’ont. Dans Sheets : une ligne par rareté, « Rare : Forêt - Ville ».</p>
+      <p className={smallLabel}>Les raretés proposées</p>
+      <ListSettings spec={{ ...spec, options: spec.options?.length ? spec.options : defaultRarityOptions }} onChange={onChange} disabled={disabled} lookDisabled={props.lookDisabled ?? disabled} optionsOnly />
+    </div>
+    case "sections": return <p className="text-xs text-muted-foreground">Des parties, chacune avec son titre et son texte mis en forme : on les ajoute, les renomme et les réordonne dans la fiche (ou d’un clic sur la case). Le tableau montre leurs titres. Dans Sheets, chaque partie commence par une ligne « ## Titre ».</p>
+    case "index-list": {
+      const watched = spec.indexList?.kind ?? "rarity-places"
+      return <div className="grid gap-2">
+        <label className={smallLabel}>Les index proposés : ceux qui ont une colonne du type<NativeSelect disabled={disabled} value={watched} onChange={(event) => set({ indexList: { kind: event.target.value as IndexColumnKind } })}>{creatableKinds.filter((kind) => kind !== "index-list").map((kind) => <NativeSelectOption key={kind} value={kind}>{indexColumnKinds[kind].label}</NativeSelectOption>)}</NativeSelect></label>
+        <p className="text-xs text-muted-foreground">La liste se tient à jour toute seule : un index qui gagne une colonne de ce type y apparaît. Plusieurs index par case, séparés par « - » dans Sheets (« Items - Créatures »).</p>
+      </div>
+    }
     case "linked-choice": {
       const source = spec.source ?? { index: targets[0]?.index ?? "peoples", tab: "" }
       const target = targetOf(source.index)
@@ -697,6 +715,7 @@ const kindIcons: Partial<Record<IndexColumnKind, LucideIcon>> = {
   "choice": List, "linked-choice": ListTree, "linked": ArrowLeftRight, "tab-sort": FolderTree,
   "lookup": SearchIcon, "rollup": Sigma, "formula": FunctionSquare, "random": Dices,
   "actions": MousePointerClick, "file": Paperclip, "spells": Sparkles,
+  "rarity-places": MapPinned, "sections": ScrollText, "index-list": LibraryBig,
 }
 
 // ---------------------------------------------------------------------------

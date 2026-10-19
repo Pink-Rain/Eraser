@@ -14,6 +14,9 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { GaugeCell, GaugeView, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexImage } from "@/components/eraser/index-image"
 import { IndexRichText, RowHover } from "@/components/eraser/index-references"
+import { IndexListView, RarityPlacesView, SectionsView } from "@/components/eraser/index-cells-extra"
+import { sectionTitles } from "@/lib/index-sections"
+import { parseRarityPlaces } from "@/lib/rarity-places"
 import { columnStyleCss, pillStyle } from "@/components/eraser/index-style"
 import { useRolesOf } from "@/components/eraser/view-roles"
 import { characteristicShort, type CharacteristicName } from "@/lib/characteristics"
@@ -82,6 +85,9 @@ function cellText(row: CardRowSource, column: string) {
   const kind = spec ? normalizeSpec(spec).kind : "rich"
   if (kind === "checkbox") return isCheckedValue(raw, spec?.emptyChecked) ? "Oui" : "Non"
   if (kind === "gauge") return parseGaugeCell(raw).count.trim()
+  // Rareté et emplacements : « Commun : Forêt, Ville · Rare : Donjon » ; Sections : leurs titres.
+  if (kind === "rarity-places") return parseRarityPlaces(raw).map((entry) => entry.places.length ? `${entry.rarity} : ${entry.places.join(", ")}` : entry.rarity).join(" · ")
+  if (kind === "sections") return sectionTitles(raw).join(" · ")
   if (kind === "number" && spec?.number) {
     const parsed = parseIndexNumber(plainCardText(raw), spec.number)
     if (parsed) return formatIndexNumber(parsed, spec.number)
@@ -134,6 +140,9 @@ export function TypedValue({ row, column, accent, compact = false, className }: 
     const files = raw.split(/\n+/).map((item) => item.trim()).filter(Boolean)
     return <span className={cn("flex flex-wrap gap-1.5", className)}>{files.slice(0, compact ? 4 : 8).map((file) => <IndexImage key={file} value={file} alt={column} className={cn("rounded-lg border object-cover", compact ? "size-8" : "size-14")} fallback={<span className="truncate text-xs underline">{file.split("/").pop()}</span>} />)}</span>
   }
+  if (kind === "rarity-places") return <RarityPlacesView value={raw} spec={spec} compact={compact} className={className} />
+  if (kind === "sections") return <SectionsView value={raw} className={cn(compact && "gap-2 [&_h4]:text-sm", className)} />
+  if (kind === "index-list") return <span className={className}><IndexListView value={plainCardText(raw)} /></span>
   if (["choice", "linked-choice", "tab-sort", "spells", "lookup"].includes(kind)) {
     return <span className={cn("inline-flex flex-wrap gap-1", className)}>{cardListValues(cellText(row, column)).map((value) => <Pill key={value} value={value} color={choiceColor(row, column, value)} icon={<ChoiceIcon row={row} column={column} value={value} className="size-3" />} />)}</span>
   }

@@ -581,7 +581,6 @@ test("les pages d'Eraser dessinées par le moteur : un plan aux identifiants sta
   assert.equal(blueprints.enginePageOf("/"), "/");
 });
 
-<<<<<<< HEAD
 test("le bloc Image : un lien du Drive passe par Eraser, son allure se relit sans les défauts", () => {
   assert.equal(pages.pageImageUrl("https://drive.google.com/file/d/1VX_xEkd_3xheAbCdEf/view?usp=sharing"), "/api/pages/images/1VX_xEkd_3xheAbCdEf");
   assert.equal(pages.pageImageUrl("https://drive.google.com/open?id=1VX_xEkd_3xheAbCdEf"), "/api/pages/images/1VX_xEkd_3xheAbCdEf");
@@ -619,7 +618,8 @@ test("les modules de l'accueil d'origine : mes personnages, mes campagnes", asyn
   assert.ok(modules.eraserModuleKeys.includes("accueil-campagnes"));
   const block = pages.cleanBlock({ id: "m1", type: "module", module: "accueil-campagnes" });
   assert.equal(block.module, "accueil-campagnes");
-=======
+});
+
 test("Versions brouillon : enregistrer, relire (la plus récente d'abord), supprimer ; elles partent avec la page", async () => {
   const author = { uid: "admin-1", name: "Admin" };
   const created = await store.createCustomPage({ title: "Guide", place: "regles", sections: [{ id: "s-1", layout: "1", cols: [[{ id: "b-1", type: "text", vis: "tous", html: "<p>Première version</p>" }]] }] }, author);
@@ -639,5 +639,4 @@ test("Versions brouillon : enregistrer, relire (la plus récente d'abord), suppr
   await store.trashCustomPage(created.id, author);
   await store.deleteCustomPage(created.id);
   assert.deepEqual(await store.listPageSnapshots(created.id), []);
->>>>>>> a4980ae (Pages : l'accueil et le menu justes dès l'ouverture, versions brouillon dans l'atelier [skip ci])
 });

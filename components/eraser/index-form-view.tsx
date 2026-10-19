@@ -3,6 +3,7 @@
 import type { ReactNode } from "react"
 
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
+import { IndexListView, RarityPlacesView, SectionsView } from "@/components/eraser/index-cells-extra"
 import { IndexImage } from "@/components/eraser/index-image"
 import { LayoutBlockView } from "@/components/eraser/index-layout-blocks"
 import { DEFAULT_LAYOUT_ACCENT, FieldLabel, IndexLayoutView, layoutBackgroundOf } from "@/components/eraser/index-layout-view"
@@ -48,6 +49,10 @@ export function IndexFormView({ layout, columns, valueOf, accent, compact = fals
     const label = <FieldLabel field={field} fallback={item.header} accent={color} readColumn={plain} look={layout.look} className={cn("text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground")} />
     if (picture && text) return <div className="grid gap-1">{label}<span className={cn("block overflow-hidden rounded-xl", field.imageWidth ? "" : compact ? "max-w-40" : "max-w-64")} style={field.imageWidth ? { width: `${field.imageWidth}%` } : undefined}><IndexImage value={text.split(/\s+/)[0]} alt={item.header} className="h-auto w-full" /></span></div>
     if (glyph && (glyph.icon || glyph.emoji)) return <div className="grid gap-1">{label}<span style={{ color }}><IndexIconGlyph icon={glyph.icon} emoji={glyph.emoji} className="size-6" filled={Boolean(glyph.emoji)} /></span></div>
+    // Rareté et emplacements, Sections, Liste d'index : lus comme ils s'écrivent (raretés en pastilles, parties sous leur titre).
+    if (kind === "rarity-places" && text) return <div className="grid gap-1">{label}<RarityPlacesView value={html} spec={spec} compact={compact} /></div>
+    if (kind === "sections" && text) return <div className="grid gap-1">{label}<SectionsView value={html} className={compact ? "gap-2 [&_h4]:text-sm" : undefined} /></div>
+    if (kind === "index-list" && text) return <div className="grid gap-1">{label}<IndexListView value={text} /></div>
     return <div className="grid gap-0.5">
       {label}
       <div className={cn(field.large ? "font-display text-lg font-semibold leading-snug" : field.size === "sm" ? compact ? "text-[11px] leading-4" : "text-xs leading-5" : compact ? "text-xs leading-5" : "text-sm leading-6", field.align === "center" ? "text-center" : field.align === "right" ? "text-right" : "", "[&_a]:underline")}>{text ? <IndexRichText html={html} /> : <span className="text-muted-foreground/60">—</span>}</div>

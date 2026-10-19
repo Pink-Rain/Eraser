@@ -7,6 +7,7 @@ import { foldName, isIdHeader, type ChoiceOption, type IndexColumnSpec, type Tab
 import { CALENDAR_COLOR_HEADER, CALENDAR_DAYS_HEADER, CALENDAR_DESCRIPTION_HEADER, CALENDAR_ERA_HEADER, CALENDAR_HEADER, CALENDAR_MONTHS_TAB, CALENDAR_ORDER_HEADER, CALENDAR_SEASON_HEADER, CALENDAR_SEASONS_TAB, CALENDAR_WEEKDAYS_TAB, CALENDARS_TAB } from "@/lib/calendars"
 import type { ColumnPolicy } from "@/lib/index-schema-shared"
 import { stateFxList } from "@/lib/state-fx"
+import { isRarityPlacesHeader, rarityPlacesSpec } from "@/lib/rarity-places"
 import {
   CATALOG_CHARACTERISTIC_HEADER,
   CATALOG_COLOR_HEADER,
@@ -738,6 +739,17 @@ export const creatureArchivedHeaders = ["Environnement", "Climat", "Sous-type se
 /** Les champs de la fiche d'une créature qui ne sont que du texte enrichi. */
 const creatureFormTexts = ["Taille", "Poids", creatureNoteHeader]
 
+/** Lieux › Environnement (ou Environnements) : les lieux où l'on fouille et où surviennent les événements. */
+export function isEnvironmentTab(tab: string) {
+  return ["environnement", "environnements"].includes(foldName(tab))
+}
+
+/** Lieux › Environnement : les colonnes qui disent quels index on y trouve, en fouillant ou au cours d'un événement. */
+export const ENVIRONMENT_SEARCH_HEADERS = ["Fouille", "Fouilles"] as const
+export const ENVIRONMENT_EVENT_HEADERS = ["Événement", "Événements", "Evenement", "Evenements"] as const
+const ENVIRONMENT_SEARCH_DESCRIPTION = "Les index où l’on trouve quelque chose en fouillant cet environnement (ceux qui ont une colonne « Rareté et emplacements »). Vide : les items."
+const ENVIRONMENT_EVENT_DESCRIPTION = "Les index qui peuvent surgir au cours d’un événement dans cet environnement (ceux qui ont une colonne « Rareté et emplacements »)."
+
 function isHeader(header: string, candidates: string[]) {
   const folded = foldName(header)
   return candidates.some((candidate) => foldName(candidate) === folded)
@@ -753,6 +765,13 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
   // Tous les noms ouvrent la fiche de leur ligne (Nom formulaire).
   if (isNameColumn(header)) return { kind: "name-form", also: ["fixed"] }
   if (isEntityWorldIndexKey(index)) return entityColumnSpec(index, header)
+  // « Rareté et emplacements », dans n'importe quel index : lue par les magasins, les fouilles et les événements.
+  if (isRarityPlacesHeader(header)) return rarityPlacesSpec()
+  // Lieux › Environnement : ce qu'on trouve en fouillant l'environnement, ou au cours d'un événement.
+  if (index === "places" && isEnvironmentTab(tab)) {
+    if (isHeader(header, [...ENVIRONMENT_SEARCH_HEADERS])) return { kind: "index-list", multiple: true, indexList: { kind: "rarity-places" }, description: ENVIRONMENT_SEARCH_DESCRIPTION }
+    if (isHeader(header, [...ENVIRONMENT_EVENT_HEADERS])) return { kind: "index-list", multiple: true, indexList: { kind: "rarity-places" }, description: ENVIRONMENT_EVENT_DESCRIPTION }
+  }
   // Une colonne liée de départ : son lien est un réglage comme un autre (« Modifier » le montre).
   const link = defaultLinkOf(index, tab, header)
   if (link) return { kind: "linked", also: ["rich"], link: { ...link } }

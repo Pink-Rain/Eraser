@@ -45,6 +45,7 @@ import {
   isImageSource,
 } from "@/lib/index-columns"
 import { creatureTokenId, uploadCreaturePortrait } from "@/components/eraser/creature-portrait"
+import { IndexListPicker, RarityPlacesCell, RarityPlacesEditor, SectionsCell, SectionsEditor } from "@/components/eraser/index-cells-extra"
 import { TokenButton } from "@/components/eraser/token-editor"
 import type { FormulaDisplay } from "@/lib/index-formula"
 import { arrangeLayout, resolveLayoutColor, type IndexLayout, type LayoutBlock, type LayoutField } from "@/lib/index-layouts"
@@ -64,7 +65,7 @@ export { isCheckedValue as isChecked, IndexImage, GaugeCell }
  * Valeur affichée tout de suite après un choix, sans attendre que le tableau entier se
  * redessine. Elle s'efface dès que la ligne reçoit la valeur enregistrée.
  */
-function useOptimistic(value: string) {
+export function useOptimistic(value: string) {
   const [state, setState] = useState({ source: value, local: null as string | null })
   if (state.source !== value) setState({ source: value, local: null })
   const shown = state.source === value ? state.local ?? value : value
@@ -344,7 +345,7 @@ export function useWorldIndexVersion(index: string) {
 }
 
 /** Les choix d'une liste liée : ceux de chaque source, réunis (un même nom une seule fois). */
-function useWorldIndexOptions(sources: ChoiceSource[]) {
+export function useWorldIndexOptions(sources: ChoiceSource[]) {
   const [options, setOptions] = useState<ChoiceOption[] | null>(null)
   const versions = sources.map((source) => source.index)
   const version = useWorldIndexVersion(versions[0] ?? "")
@@ -1106,6 +1107,15 @@ export function indexGridColumn(key: string, label: string, input: IndexColumnSp
       column.sortKey = (value) => { const number = Number.parseFloat(value.replace(",", ".")); return Number.isFinite(number) ? number : Number.POSITIVE_INFINITY }
       break
     }
+    case "rarity-places":
+      column.control = (rowKey) => <RarityPlacesCell label={label} value={valueOf(rowKey, key)} spec={spec} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
+      break
+    case "sections":
+      column.control = (rowKey) => <SectionsCell label={label} value={valueOf(rowKey, key)} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
+      break
+    case "index-list":
+      column.control = (rowKey) => <IndexListPicker label={label} value={valueOf(rowKey, key)} spec={spec} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
+      break
     case "ranked-links":
     case "tab":
       // Contrôles propres à la page : la grille les dessine par `renderCustomCell`.
@@ -1234,6 +1244,12 @@ function IndexFieldOfType({ label, spec: input, value, onChange, long = false, a
       return <div className={fieldLabel}>{title}<span className={`rounded-lg border bg-background/50 ${look.className}`} style={look.style}><RandomCell label={label} value={value} settings={spec.random ?? { source: "number" }} disabled={disabled || !row?.draw} onDraw={() => row?.draw ? row.draw(spec) : Promise.resolve()} /></span></div>
     case "actions":
       return row?.runButton ? <div className={`${fieldLabel} md:col-span-2`}>{title}<ActionsCell buttons={spec.actions ?? []} disabled={disabled} visible={(button) => row.buttonVisible ? row.buttonVisible(button) : true} onRun={(button) => row.runButton!(button)} /></div> : null
+    case "rarity-places":
+      return <div className={`${fieldLabel} md:col-span-2`}>{title}<span className="rounded-lg border bg-background/50 p-2"><RarityPlacesEditor value={value} spec={spec} disabled={disabled} onChange={onChange} /></span></div>
+    case "sections":
+      return <div className={`${fieldLabel} md:col-span-2`}>{title}<SectionsEditor value={value} disabled={disabled} onChange={onChange} /></div>
+    case "index-list":
+      return <div className={fieldLabel}>{title}{styled(<IndexListPicker compact={false} label={label} value={value} spec={spec} disabled={disabled} onChange={onChange} />)}</div>
     case "auto-links":
     case "ranked-links":
     case "tab":
