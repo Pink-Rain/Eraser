@@ -23,6 +23,18 @@ import { findEntry, readSchema, upsertEntry, writeSchema } from "@/lib/index-sch
 import { columnMoves, headerProblem, isDisplayOnlyChange, isObjectSpellingFix, objectColumnPolicy, tabProblem, type IndexEditorModel, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
 import type { IndexTrashItem } from "@/lib/world-indexes"
 import { worldRelationTargets } from "@/lib/world-indexes"
+import { OBJECT_REFERENCE_INDEX } from "@/lib/index-references"
+
+/**
+ * Les cadenas des colonnes d'items : ceux que la page enregistre (index « objects ») et, pour
+ * les anciens, ceux gardés sous l'identifiant du classeur. Ceux de la page l'emportent.
+ */
+async function objectIndexLocks(fileId: string) {
+  const [old, current] = await Promise.all([listIndexLocks(fileId), listIndexLocks(OBJECT_REFERENCE_INDEX)])
+  const merged = { ...old }
+  for (const [tab, locks] of Object.entries(current)) merged[tab] = { ...merged[tab], ...locks }
+  return merged
+}
 
 function trashed(entry: SchemaEntry | undefined) {
   return Boolean(entry && (entry.deletedAt || entry.state === "supprimé"))
@@ -46,7 +58,7 @@ export async function objectEditorModel(fileId: string): Promise<IndexEditorMode
   const tables = (await listObjectIndexTables()).filter((table) => table.fileId === fileId)
   if (!tables.length) throw new Error("OBJECT_INDEX_NOT_FOUND")
   const schema = await readSchema(fileId)
-  const locks = await listIndexLocks(fileId)
+  const locks = await objectIndexLocks(fileId)
   return {
     family: "objects",
     key: fileId,
@@ -90,9 +102,9 @@ async function appendHeader(fileId: string, tabName: string, header: string) {
   await updateRange(fileId, sheetTabRange(tabName, `${cell}:${cell}`), [[header]], { valueInputOption: "RAW" })
 }
 
-// Une « Liste liée » reste permise : elle écrit un simple nom dans la case. Le rangement en
-// onglets n'existe pas encore dans l'index des objets (l'éditeur ne le propose pas non plus).
-const relationKinds = ["linked", "lookup", "rollup", "tab-sort"]
+// Une « Liste liée » reste permise : elle écrit un simple nom dans la case, comme le rangement
+// en onglets (une valeur, que la page du moteur montre en onglets).
+const relationKinds = ["linked", "lookup", "rollup"]
 function assertNoRelation(spec: IndexColumnSpec) {
   if (relationKinds.includes(spec.kind)) throw new Error("INDEX_SCHEMA_INVALID:Les relations entre index ne sont pas encore proposées pour les items : les cases d’items sont lues comme du texte par l’inventaire et les boutiques.")
 }
@@ -106,7 +118,7 @@ export async function applyObjectSchemaOperations(fileId: string, operations: Sc
   const tables = (await listObjectIndexTables()).filter((table) => table.fileId === fileId).map((table) => ({ ...table, headers: [...table.headers] }))
   if (!tables.length) throw new Error("OBJECT_INDEX_NOT_FOUND")
   const schema = [...await readSchema(fileId, { refresh: true })]
-  const locks = await listIndexLocks(fileId)
+  const locks = await objectIndexLocks(fileId)
   const now = new Date().toISOString()
   for (const operation of operations) {
     if (operation.op === "add-tab") {

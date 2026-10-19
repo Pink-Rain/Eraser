@@ -1,16 +1,18 @@
 /**
- * Migration de l'Index des items vers le moteur commun des index — étape 1 : l'adaptateur,
- * en lecture seule. Il présente les tableaux du dossier « Objets » comme les données d'un
- * index du moteur (onglets, colonnes et leur type, lignes), sans rien lire de plus dans
- * Google ni rien écrire : il part des tableaux déjà chargés par la page des items.
+ * L'Index des items dans le moteur commun des index : l'adaptateur présente les tableaux du
+ * dossier « Objets » comme les données d'un index du moteur (onglets, colonnes et leur type,
+ * lignes), sans rien lire de plus dans Google ni rien écrire. La page des items est celle du
+ * moteur (WorldIndexManager, clé « objects ») ; le serveur traduit ses écritures pour les
+ * fonctions des items (lib/object-index-engine-server.ts).
  *
  * Chaque onglet du moteur garde son fichier et son onglet d'origine (`origins`) : les
- * écritures passeront par l'API des items, inchangée (`/api/resources/object-indexes`).
+ * écritures retrouvent la ligne par son ID, comme l'inventaire et les magasins.
  * Règles pures : la page, le serveur et les tests s'en servent.
  */
 import type { ObjectIndexTable } from "@/lib/google-sheets"
 import { foldName, objectColumnSpec, type IndexColumnSpec } from "@/lib/index-columns"
 import { headerOccurrence, objectIndexRowRef } from "@/lib/object-index-refs"
+import { findEntry, isTrashedEntry, type SchemaEntry } from "@/lib/index-schema-shared"
 import type { WorldIndexTabDefinition } from "@/lib/world-index-definitions"
 import type { WorldIndexColumn, WorldIndexTable } from "@/lib/world-indexes"
 
@@ -48,8 +50,8 @@ export function objectEngineColumnSpec(table: Pick<ObjectIndexTable, "headers" |
   return saved ? { ...base, ...saved } : base
 }
 
-/** Les tableaux d'items vus comme un index du moteur. */
-export function objectIndexEngineData(tables: ObjectIndexTable[]): ObjectEngineData {
+/** Les tableaux d'items vus comme un index du moteur. `schemas` (par classeur) : les colonnes à la corbeille n'y sont pas. */
+export function objectIndexEngineData(tables: ObjectIndexTable[], schemas: Record<string, SchemaEntry[]> = {}): ObjectEngineData {
   const origins: Record<string, ObjectEngineOrigin> = {}
   const columns: Record<string, WorldIndexColumn[]> = {}
   const engineTables: WorldIndexTable[] = []
@@ -62,8 +64,8 @@ export function objectIndexEngineData(tables: ObjectIndexTable[]): ObjectEngineD
     origins[name] = { fileId: table.fileId, fileName: table.fileName, tabName: table.tabName, sheetId: table.sheetId, webViewLink: table.webViewLink }
     engineTables.push({ tabName: name, sheetId: table.sheetId, headers: [...table.headers], rows: table.rows.map((row) => ({ rowNumber: row.rowNumber, values: [...row.values], html: [...row.html] })) })
     // Une colonne sans en-tête n'a ni type ni réglage : elle reste dans la feuille, hors du moteur.
-    columns[name] = table.headers.flatMap((header) => header.trim() ? [{ header, spec: objectEngineColumnSpec(table, header) }] : [])
-    tabs.push({ name, itemLabel: "un item", headers: [...table.headers], widths: table.headers.map(() => 180), idPrefix: "OBJ" })
+    columns[name] = table.headers.flatMap((header) => header.trim() && !isTrashedEntry(findEntry(schemas[table.fileId] ?? [], table.tabName, header)) ? [{ header, spec: objectEngineColumnSpec(table, header) }] : [])
+    tabs.push({ name, itemLabel: "un item", headers: [...table.headers], widths: table.headers.map(() => 0), idPrefix: "OBJ" })
   }
   return {
     key: OBJECTS_ENGINE_KEY,

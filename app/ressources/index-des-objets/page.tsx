@@ -3,28 +3,27 @@ import { redirect } from "next/navigation"
 
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
-import { ObjectIndexManager } from "@/components/eraser/object-index-manager"
-import { listObjectIndexTablesForDisplay } from "@/lib/google-sheets"
+import { WorldIndexManager } from "@/components/eraser/world-index-manager"
 import { packTableRows } from "@/lib/index-rows-wire"
-import { objectSchemas } from "@/lib/object-schema"
+import { objectEngineData, OBJECTS_ENGINE_KEY } from "@/lib/object-index-engine-server"
 import { authorizedAccount } from "@/lib/server-auth"
+import type { WorldIndexData } from "@/lib/world-indexes"
 
 export const dynamic = "force-dynamic"
 
+/** Les items, sur le moteur des index : la même page que les autres index, avec leurs outils (icônes, inventaires). */
 async function ObjectIndexesData() {
-  let initialTables: Awaited<ReturnType<typeof listObjectIndexTablesForDisplay>> = []
-  let initialError = ""
-  let initialSchemas: Awaited<ReturnType<typeof objectSchemas>> = {}
+  let data: WorldIndexData | null = null
+  let error = ""
   try {
-    initialTables = await listObjectIndexTablesForDisplay()
-    initialSchemas = await objectSchemas(initialTables).catch(() => ({}))
-  } catch (error) {
-    initialError = error instanceof Error && error.message === "OBJECT_INDEX_FOLDER_NOT_FOUND"
+    data = await objectEngineData()
+  } catch (reason) {
+    error = reason instanceof Error && reason.message === "OBJECT_INDEX_FOLDER_NOT_FOUND"
       ? "Le dossier « Objets » est introuvable dans le Drive connecté."
       // Le code de Google (quota, délai…) aide à comprendre un échec qui se répète.
-      : `Les tableaux du dossier « Objets » n’ont pas pu être chargés${error instanceof Error && error.message ? ` (${error.message.slice(0, 160)})` : ""}. Réessaie avec « Actualiser ».`
+      : `Les tableaux du dossier « Objets » n’ont pas pu être chargés${reason instanceof Error && reason.message ? ` (${reason.message.slice(0, 160)})` : ""}. Réessaie avec « Actualiser ».`
   }
-  return <ObjectIndexManager initialTables={initialTables.map(packTableRows)} initialSchemas={initialSchemas} initialError={initialError} />
+  return <WorldIndexManager indexKey={OBJECTS_ENGINE_KEY} initialData={data ? { ...data, tables: data.tables.map(packTableRows) } : data} initialError={error} />
 }
 
 export default async function ObjectIndexesPage() {
@@ -32,14 +31,12 @@ export default async function ObjectIndexesPage() {
   if (!account) redirect("/")
   return (
     <AuthenticatedShell pageLabel="Items" roles={["admin", "mj"]}>
-      {/* La page défile normalement ; le tableau se fige sous l’en-tête dès que le
-          titre et la recherche sont passés, et occupe alors tout l’écran. */}
       <div className="w-full px-4 pt-4 sm:px-6">
         <div className="shrink-0">
           <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary/75">Index</p>
           <h1 className="font-display text-2xl font-semibold sm:text-3xl">Items</h1>
         </div>
-        <Suspense fallback={<DeferredContentLoading label="Chargement des index d’items…" />}>
+        <Suspense fallback={<DeferredContentLoading variant="table" label="Chargement des items…" />}>
           <ObjectIndexesData />
         </Suspense>
       </div>

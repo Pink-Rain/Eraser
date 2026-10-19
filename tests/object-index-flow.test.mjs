@@ -294,3 +294,35 @@ test("Une écriture faite pendant la relecture partielle n'est pas masquée par 
   const names = tables.find((table) => table.fileId === touched).rows.map((row) => row.values[1]);
   assert.ok(names.includes("Lance") && names.includes("Masse"), names.join(", "));
 });
+
+test("Items sur le moteur des index : la page du moteur lit et écrit les tableaux d'items par leur ID", async () => {
+  const engine = await vite.ssrLoadModule("/lib/object-index-engine-server.ts");
+  const id = objectsFile([
+    { title: "Armes", grid: [["ID", "Nom", "Type", "Prix", "Rareté principale"], ["ARM-1", "Épée", "Arme", "10", "commun"], ["ARM-2", "Dague", "Arme", "4", "Rare"]] },
+    { title: "Livres", grid: [["ID", "Nom", "Type"], ["LIV-1", "Grimoire", "Livre"]] },
+  ]);
+  const data = await engine.objectEngineData();
+  assert.deepEqual(data.tables.map((table) => table.tabName).sort(), ["Armes", "Livres"]);
+  assert.equal(data.origins.Armes.fileId, id);
+  // Une case : sous son en-tête, à la ligne de son ID (même si la page la voyait ailleurs).
+  google.grid(id, "Armes").splice(1, 0, ["ARM-0", "Hache", "Arme", "6", ""]);
+  await engine.objectEngineWrite({ action: "update-cell", tabName: "Armes", row: { rowNumber: 3, id: "ARM-2", name: "Dague" }, rows: [], header: "Prix", html: "5" });
+  assert.deepEqual(google.grid(id, "Armes").find((row) => row[0] === "ARM-2"), ["ARM-2", "Dague", "Arme", "5", "Rare"]);
+  // « Corriger N fautes » : la rareté mal écrite prend le choix de la liste, rien d'autre ne bouge.
+  sheets.clearObjectIndexTableCache();
+  const corrected = await engine.objectEngineWrite({ action: "normalize-choices", tabName: "Armes", row: null, rows: [] });
+  assert.equal(corrected.corrected, 1);
+  assert.equal(google.grid(id, "Armes").find((row) => row[0] === "ARM-1")[4], "Commun");
+  // Changer d'onglet : l'item garde son ID ; ajouter : chaque valeur sous son en-tête.
+  sheets.clearObjectIndexTableCache();
+  await engine.objectEngineData({ refresh: true });
+  const moved = await engine.objectEngineWrite({ action: "move", tabName: "Armes", row: null, rows: [{ rowNumber: 3, id: "ARM-1", name: "Épée" }], toTab: "Livres" });
+  assert.ok(google.grid(id, "Livres").some((row) => row[0] === "ARM-1" && row.includes("Épée")));
+  assert.ok(!google.grid(id, "Armes").some((row) => row[0] === "ARM-1"));
+  assert.ok(moved.data.tables.find((table) => table.tabName === "Livres").rows.some((row) => row.values.includes("ARM-1")));
+  await engine.objectEngineWrite({ action: "add", tabName: "Armes", row: null, rows: [], headers: ["ID", "Nom", "Type", "Prix", "Rareté principale"], values: ["", "Lance", "Arme", "7", ""] });
+  const lance = google.grid(id, "Armes").find((row) => row[1] === "Lance");
+  assert.deepEqual(lance.slice(1, 4), ["Lance", "Arme", "7"]);
+  // Un onglet que la page ne connaît plus : rien n'est écrit.
+  await assert.rejects(engine.objectEngineWrite({ action: "update-cell", tabName: "Inconnu", row: { rowNumber: 2, id: "ARM-2" }, rows: [], header: "Prix", html: "1" }), /OBJECT_INDEX_CHANGED/);
+});

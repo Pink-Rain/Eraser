@@ -124,7 +124,7 @@ export function ColumnTypeMenu({ spec, onPick, policy, disabled, family, icons }
   const blocked = (kind: IndexColumnKind) => {
     if (kind === spec.kind) return ""
     if (!policy.type && !(["name", "name-form"].includes(kind) && ["name", "name-form"].includes(spec.kind))) return "Type verrouillé : voir le cadenas."
-    if (objects && ["linked", "linked-choice", "lookup", "rollup", "tab-sort"].includes(kind)) return "Pas encore dans l’index des items : l’inventaire et les boutiques lisent leurs cases comme du texte."
+    if (objects && ["linked", "linked-choice", "lookup", "rollup"].includes(kind)) return "Pas encore dans l’index des items : l’inventaire et les boutiques lisent leurs cases comme du texte."
     return ""
   }
   const current = indexColumnKinds[spec.kind]

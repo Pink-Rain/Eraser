@@ -5,6 +5,7 @@ import { authorizedAccount } from "@/lib/server-auth"
 import type { SchemaOperation } from "@/lib/index-schema-shared"
 import { applyWorldSchemaOperations, knownWorldIndexKey, worldEditorModel } from "@/lib/world-indexes"
 import { forgetIndexKinds } from "@/lib/index-kinds-server"
+import { applyObjectEngineSchema, isObjectsEngineKey, objectEngineEditorModel } from "@/lib/object-index-engine-server"
 
 async function authorized() {
   return authorizedAccount(["admin", "mj"])
@@ -14,6 +15,7 @@ function errorMessage(error: unknown) {
   const code = error instanceof Error ? error.message : ""
   if (code.startsWith("INDEX_SCHEMA_LOCKED:")) return `Colonne verrouillée : ${code.slice("INDEX_SCHEMA_LOCKED:".length)}`
   if (code.startsWith("INDEX_SCHEMA_INVALID:")) return code.slice("INDEX_SCHEMA_INVALID:".length)
+  if (code === "OBJECT_INDEX_CHANGED") return "Le tableau a changé entre-temps dans Google Sheets : actualise puis recommence."
   if (code === "WORLD_INDEX_TAB_NOT_FOUND" || code === "OBJECT_INDEX_NOT_FOUND") return "Cet onglet n’existe plus dans Google Sheets. Actualise puis recommence."
   if (code === "WORLD_INDEX_COLUMN_NOT_FOUND" || code === "OBJECT_INDEX_COLUMN_NOT_FOUND") return "Cette colonne n’existe plus dans Google Sheets. Actualise puis recommence."
   return "Les changements n’ont pas pu être écrits dans Google Sheets."
@@ -27,6 +29,8 @@ export async function GET(request: Request) {
   const parameters = new URL(request.url).searchParams
   try {
     if (parameters.get("family") === "objects") return NextResponse.json({ model: await objectEditorModel(parameters.get("key") ?? "") })
+    // L'Index des items dans la page du moteur.
+    if (isObjectsEngineKey(parameters.get("key"))) return NextResponse.json({ model: await objectEngineEditorModel() })
     const key = await knownWorldIndexKey(parameters.get("key"))
     if (!key) return NextResponse.json({ error: "Index inconnu." }, { status: 400 })
     return NextResponse.json({ model: await worldEditorModel(key) })
@@ -48,6 +52,11 @@ export async function POST(request: Request) {
       // Une colonne ajoutée, retirée ou retypée : les « Listes d'index » se recomptent.
       forgetIndexKinds()
       return NextResponse.json({ ok: true, tables, schemas: await objectSchemas(tables) })
+    }
+    if (isObjectsEngineKey(body.key)) {
+      const data = await applyObjectEngineSchema(operations)
+      forgetIndexKinds()
+      return NextResponse.json({ ok: true, data })
     }
     const key = await knownWorldIndexKey(body.key)
     if (!key) throw new Error("INDEX_SCHEMA_INVALID:Index inconnu.")

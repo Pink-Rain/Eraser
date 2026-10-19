@@ -104,6 +104,8 @@ export type WorldIndexData = {
   links: WorldIndexLink[]
   /** Personnages et campagnes : propriétaire et liens de chaque ligne (par identifiant), lus à chaque requête. */
   extras?: EntityIndexExtras
+  /** L'Index des items (lib/object-index-engine.ts) : le classeur et l'onglet Google de chaque onglet. */
+  origins?: Record<string, { fileId: string; fileName: string; tabName: string; sheetId: number; webViewLink: string }>
   /** Sorts des classes : la colonne « Classes et rangs », tirée des colonnes de rang (une par classe). */
   classRanks?: ClassRanksExtra
 }

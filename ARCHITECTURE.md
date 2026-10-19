@@ -124,6 +124,18 @@ noms et ne se renomment jamais : actions `save-view`, `delete-view`,
 `save-view-preset`, clés `views` et `viewPresets` de l’API des réglages, portées
 du Worker, colonnes de la feuille, préfixe de version `vue:`, élément `@vue`.
 
+## L’Index des items sur le moteur des index
+
+La page des items est celle du moteur (`WorldIndexManager`, clé `objects`) : mêmes
+présentations, cartes, vues, « Modifier », stats et rangement en onglets que les autres index.
+`lib/object-index-engine.ts` présente les tableaux du dossier « Objets » comme un index du
+moteur (`origins` : le classeur et l’onglet Google de chaque onglet) ;
+`lib/object-index-engine-server.ts` sert ces données sous `/api/resources/world-indexes?key=objects`
+et traduit les écritures pour les fonctions des items (ligne retrouvée par son ID, case par son
+en-tête). Les inventaires, magasins et fouilles lisent toujours les items par leurs colonnes.
+Les vues d’avant désignaient un onglet par « fichier:sheetId » : la page les lit sous le nom de
+l’onglet. Les relations (colonne liée, recherche, agrégat) ne sont pas encore proposées aux items.
+
 ## Rareté et emplacements, sections, listes d’index, index des pages
 
 - **« Rareté et emplacements »** (type `rarity-places`, `lib/rarity-places.ts`) :
