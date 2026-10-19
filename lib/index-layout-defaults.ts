@@ -129,8 +129,21 @@ const modifierHover: IndexLayout = {
   width: "sm",
 }
 
+/** Le survol d'une page (index des pages) : son icône devant son titre, sa description, sa section et son adresse. */
+const pageHover: IndexLayout = {
+  aside: [],
+  sections: [{ id: "detail", rows: [
+    row("description", { column: "Description", span: 12, hideLabel: true }),
+    row("place", { column: "Section", span: 6 }, { column: "Adresse", span: 6 }),
+  ] }],
+  rest: "hide",
+  icon: "Icône",
+  width: "sm",
+}
+
 /** La mise en page d'office d'un onglet ; `null` : l'affichage automatique. */
 export function builtinLayoutFor(index: string, tab: string, kind: LayoutKind): IndexLayout | null {
+  if (index === "pages" && kind === "hover") return pageHover
   if (index === "creatures" && tab === "Créatures" && kind === "form") return creatureForm
   if (index === "npcs" && kind === "form") return npcForm
   if (index === "states" && foldName(tab) === foldName(STATES_TAB) && kind === "hover") return stateHover

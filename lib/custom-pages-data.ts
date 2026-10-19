@@ -27,6 +27,8 @@ export type IndexSource = {
   nameHeader?: string
   /** La page d'une ligne (`nameHref`) est ouverte aux joueurs (une classe) : ils y vont aussi. */
   openToPlayers?: boolean
+  /** L'adresse propre de chaque ligne, par identifiant (l'index des pages : la page elle-même). */
+  rowHref?: (id: string) => string | undefined
   tables: Array<{ tabName: string; headers: string[]; rows: Array<{ values: string[]; html: string[] }> }>
   columns: Record<string, Array<{ header: string; spec: IndexColumnSpec }>>
 }
@@ -131,7 +133,7 @@ function rowsOf(source: IndexSource, table: IndexSource["tables"][number], heade
       const href = click === "-" ? undefined : clickHrefFor(click, (column) => { const at = headers.some((header) => foldName(header) === foldName(column)) ? table.headers.findIndex((candidate) => foldName(candidate) === foldName(column)) : -1; return at >= 0 ? row.values[at] ?? "" : "" }, rowId)
       return [{ key: `${table.tabName}|${rowId || position}`, name: label, ...(href ? { href } : {}), cells, ...(rowId && !options.player ? { id: rowId } : {}) }]
     }
-    const href = rowPage ?? (!rowId ? undefined : source.nameHref && (!options.player || source.openToPlayers) ? source.nameHref.replace("{id}", encodeURIComponent(rowId)) : options.player ? undefined : `${source.path}?ligne=${encodeURIComponent(rowId)}`)
+    const href = rowPage ?? (rowId ? source.rowHref?.(rowId) : undefined) ?? (!rowId ? undefined : source.nameHref && (!options.player || source.openToPlayers) ? source.nameHref.replace("{id}", encodeURIComponent(rowId)) : options.player ? undefined : `${source.path}?ligne=${encodeURIComponent(rowId)}`)
     return [{ key: `${table.tabName}|${rowId || position}`, name: label, ...(href ? { href } : {}), cells, ...(rowId && !options.player ? { id: rowId } : {}) }]
   })
 }

@@ -1073,6 +1073,39 @@ function builtinCardsFor(index: string, tab: string): CardTemplate[] {
           ],
         },
       ]
+    case "pages":
+      // L'index des pages (lib/pages-index.ts) : de quoi faire un menu de pages, une galerie de règles.
+      return [
+        {
+          id: "eraser-page-carte", name: "Carte de page", width: "md", lift: true, border: "subtle", band: true,
+          accent: { column: "Section", color: DEFAULT_CARD_ACCENT },
+          media: { column: "Icône", position: "left", size: "xs", tint: true, shape: "rounded", inset: true },
+          blocks: [
+            { id: "b1", type: "title", column: "Titre", size: "md", font: "display", clamp: 1 },
+            { id: "b2", type: "text", column: "Description", size: "xs", tone: "muted", clamp: 2 },
+            { id: "b3", type: "pills", columns: ["Section"], tone: "column" },
+          ],
+        },
+        {
+          id: "eraser-page-ligne", name: "Ligne de menu", width: "full", border: "left", chevron: true, density: "compact",
+          accent: { column: "Section", color: DEFAULT_CARD_ACCENT },
+          media: { column: "Icône", position: "left", size: "xs", tint: true, shape: "rounded", inset: true },
+          blocks: [
+            { id: "b1", type: "title", column: "Titre", size: "sm", font: "display", clamp: 1 },
+            { id: "b2", type: "text", column: "Description", size: "xs", tone: "muted", clamp: 1 },
+          ],
+        },
+        {
+          id: "eraser-page-vignette", name: "Vignette illustrée", width: "sm", lift: true, border: "subtle", radius: "lg",
+          accent: { column: "Section", color: DEFAULT_CARD_ACCENT },
+          media: { column: "Image", position: "top", aspect: "16/9", fit: "cover", tint: true },
+          blocks: [
+            { id: "b1", type: "title", column: "Titre", size: "md", font: "display", tone: "accent", clamp: 2 },
+            { id: "b2", type: "text", column: "Description", size: "xs", tone: "muted", clamp: 3 },
+          ],
+          grid: { equal: true },
+        },
+      ]
     case "campaigns":
       return [
         {
@@ -1282,6 +1315,7 @@ export const eraserCardSources: Array<{ index: string; tab: string; label: strin
   { index: "weapon-modifiers", tab: "Tout", label: "Modificateurs d’armes" },
   { index: "vocabulary", tab: "Vocabulaire", label: "Vocabulaire" },
   { index: "objects", tab: "Objets", label: "Items" },
+  { index: "pages", tab: "Pages", label: "Pages" },
 ]
 
 export function eraserCardPresets(exceptIndex = ""): Array<{ index: string; label: string; card: CardTemplate }> {

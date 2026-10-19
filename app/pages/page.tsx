@@ -6,6 +6,7 @@ import { canEditPage, pageSummary, type PageViewer } from "@/lib/custom-pages"
 import { listCustomPages, listPageTemplates } from "@/lib/custom-pages-store"
 import { campaignsOf, pageAuthor } from "@/lib/custom-pages-server"
 import { eraserPageEntries } from "@/lib/eraser-page-blueprints"
+import { pagesIndexRows } from "@/lib/pages-index"
 import { authorizedAccount } from "@/lib/server-auth"
 
 export const dynamic = "force-dynamic"
@@ -39,6 +40,8 @@ export default async function PagesIndexPage({ searchParams }: { searchParams: P
         key={wantsNew ? `nouvelle:${single(parameters.section) ?? ""}` : "index"}
         pages={summaries}
         eraser={eraserPageEntries(pages, account.role)}
+        // Les pages vues comme les lignes de l'index des pages (aperçus de « Modifier l'affichage »).
+        indexRows={pagesIndexRows(pages, account, admin ? null : new Set(campaigns.map((campaign) => campaign.id)))}
         templates={templates.map((template) => ({ id: template.id, name: template.name, createdAt: template.createdAt, createdBy: template.createdBy.name, title: template.content.title, icon: template.content.icon, emoji: template.content.emoji, blocks: template.content.sections.reduce((total, section) => total + section.cols.flat().length, 0) }))}
         campaigns={campaigns.filter((campaign) => admin || campaign.mine).map((campaign) => ({ id: campaign.id, name: campaign.name }))}
         allCampaigns={campaigns.map((campaign) => ({ id: campaign.id, name: campaign.name }))}

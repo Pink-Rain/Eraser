@@ -11,6 +11,7 @@ import { readCustomPage } from "@/lib/custom-pages-store"
 import { backlinkSources, indexSourceOf, readOptions, rowTemplates, viewerFor } from "@/lib/custom-pages-server"
 import { listCustomIndexes } from "@/lib/custom-indexes"
 import { listIndexCards } from "@/lib/index-cards-store"
+import { tabCardsOf } from "@/lib/index-cards"
 import { linkedBlock, type SavedView } from "@/lib/index-saved-views"
 import { listStoredSavedViews } from "@/lib/index-saved-views-store"
 import { listIndexPresentations, listIndexStatsRecord, listViewPresets } from "@/lib/index-presentations-store"
@@ -20,6 +21,21 @@ import { virtualEraserPage } from "@/lib/eraser-page-blueprints"
 import { authorizedAccount } from "@/lib/server-auth"
 import { worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
 import { getWorldIndexQuick, knownWorldIndexKey } from "@/lib/world-indexes"
+import { PAGES_INDEX, PAGES_INDEX_TITLE, pagesIndexSource } from "@/lib/pages-index"
+import type { AuthorizedUser } from "@/lib/server-auth"
+
+/** L'index d'un bloc : un index du monde, ou l'index des pages (sans feuille, fait pour le lecteur). */
+async function blockIndexKey(value: string | null | undefined): Promise<WorldIndexKey | null> {
+  if (value === PAGES_INDEX) return PAGES_INDEX as WorldIndexKey
+  return knownWorldIndexKey(value)
+}
+
+const isPagesIndex = (key: string) => key === PAGES_INDEX
+
+/** Ce qu'un bloc lit d'un index : l'index des pages se fait pour le lecteur (il ne voit que ses pages). */
+function sourceFor(key: WorldIndexKey, account: Pick<AuthorizedUser, "uid" | "role">, player: boolean) {
+  return isPagesIndex(key) ? pagesIndexSource(player && account.role !== "joueur" ? { ...account, role: "joueur" } : account) : indexSourceOf(key)
+}
 
 const denied = () => NextResponse.json({ error: "Accès refusé." }, { status: 403 })
 
@@ -73,13 +89,14 @@ async function linkedViewOf(key: WorldIndexKey, block: ViewBlock): Promise<Saved
   return found && !("removed" in found) ? found as SavedView : null
 }
 
-async function viewData(key: WorldIndexKey, raw: ViewBlock, match: Parameters<typeof viewBlockData>[1]["match"], row: RowContext | null, player: boolean, rowPageOf: RowPageOf, uid: string) {
+async function viewData(key: WorldIndexKey, raw: ViewBlock, match: Parameters<typeof viewBlockData>[1]["match"], row: RowContext | null, player: boolean, rowPageOf: RowPageOf, account: Pick<AuthorizedUser, "uid" | "role">) {
+  const uid = account.uid
   const block = blockForRow(linkedBlock(raw, await linkedViewOf(key, raw)), row)
   // « {Moi} » : les comptes du lecteur (lus seulement si une condition le demande).
   const me = block.where?.conditions.some(isMeCondition) ? await identityUidsForUser(uid).catch(() => [uid]) : undefined
   // Ce qu'une vue lit : l'index (copie en mémoire), les formes et les cartes de l'index (copies
   // du serveur partagé, relues toutes les 30 s) et, s'il est choisi, un preset. Jamais Google.
-  const [source, presentations, cards, preset, layouts, stats] = await Promise.all([indexSourceOf(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), presetLayout(block.presetId), listIndexLayouts(key).catch(() => ({})), block.kind === "dashboard" ? listIndexStatsRecord(key).catch(() => ({ stats: [], groups: [] })) : undefined])
+  const [source, presentations, cards, preset, layouts, stats] = await Promise.all([sourceFor(key, account, player), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), presetLayout(block.presetId), listIndexLayouts(key).catch(() => ({})), block.kind === "dashboard" ? listIndexStatsRecord(key).catch(() => ({ stats: [], groups: [] })) : undefined])
   const variant = block.presetId?.startsWith(PRESENTATION_VARIANT_PREFIX) ? presentationVariant(presentations, block.tab, block.presetId.slice(PRESENTATION_VARIANT_PREFIX.length)) : null
   const input = { tab: block.tab, kind: block.kind, limit: block.limit, match, layout: block.layout, preset: variant ?? preset, cardId: block.cardId, where: block.where, sort: block.sort, me, click: block.click }
   const data = viewBlockData(source, input, { presentations, cards, layouts, stats }, readOptions(key, player, rowPageOf))
@@ -87,8 +104,8 @@ async function viewData(key: WorldIndexKey, raw: ViewBlock, match: Parameters<ty
   return { ...data, ...(block.kind === "calendar" ? { calendars: await calendarTables() } : {}) }
 }
 
-async function statData(key: WorldIndexKey, statId: string, player: boolean, rowPageOf: RowPageOf) {
-  const [source, record] = await Promise.all([indexSourceOf(key), listIndexStatsRecord(key)])
+async function statData(key: WorldIndexKey, statId: string, player: boolean, rowPageOf: RowPageOf, account: Pick<AuthorizedUser, "uid" | "role">) {
+  const [source, record] = await Promise.all([sourceFor(key, account, player), listIndexStatsRecord(key)])
   return statBlockData(source, record, statId, readOptions(key, player, rowPageOf))
 }
 
@@ -119,12 +136,15 @@ export async function GET(request: Request) {
       if (!wanted) {
         const builtin = Object.values(worldIndexDefinitions).map((definition) => ({ key: definition.key, title: definition.title, path: definition.path }))
         const custom = (await listCustomIndexes().catch(() => [])).map((entry) => ({ key: entry.key, title: entry.title, path: `/ressources/index/${entry.key}` }))
-        return NextResponse.json({ indexes: [...builtin, ...custom].sort((left, right) => left.title.localeCompare(right.title, "fr")) })
+        // L'index des pages : les pages elles-mêmes (créées et d'Eraser), pour des menus, des galeries de pages…
+        const pages = { key: PAGES_INDEX, title: PAGES_INDEX_TITLE, path: "/pages" }
+        return NextResponse.json({ indexes: [...builtin, ...custom, pages].sort((left, right) => left.title.localeCompare(right.title, "fr")) })
       }
-      const key = await knownWorldIndexKey(wanted)
+      const key = await blockIndexKey(wanted)
       if (!key) return NextResponse.json({ error: "Index inconnu." }, { status: 400 })
-      const [data, presentations, cards, record, presets, layouts] = await Promise.all([getWorldIndexQuick(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), listIndexStatsRecord(key).catch(() => ({ stats: [], groups: [] })), listViewPresets().catch(() => []), listIndexLayouts(key).catch(() => ({}))])
-      const cardsOf = (tab: string) => Object.entries(cards).find(([name]) => name.toLocaleLowerCase("fr") === tab.toLocaleLowerCase("fr"))?.[1]?.cards ?? []
+      const [data, presentations, cards, record, presets, layouts] = await Promise.all([isPagesIndex(key) ? pagesIndexSource(account) : getWorldIndexQuick(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), listIndexStatsRecord(key).catch(() => ({ stats: [], groups: [] })), listViewPresets().catch(() => []), listIndexLayouts(key).catch(() => ({}))])
+      // Les cartes de l'onglet : celles enregistrées, sinon celles qu'Eraser lui donne (campagnes, pages…).
+      const cardsOf = (tab: string) => tabCardsOf(cards, key, tab).cards
       return NextResponse.json({
         tabs: data.tables.map((table) => ({
           name: table.tabName,
@@ -168,21 +188,21 @@ export async function GET(request: Request) {
         const items = backlinksOf(await backlinkSources(), row, { ...readOptions(row.index, player), hrefOf: (index, tab, id) => rowPageOf?.(index, tab, id) ?? (player ? undefined : `${(worldIndexDefinitions as Record<string, { path: string } | undefined>)[index]?.path ?? `/ressources/index/${encodeURIComponent(index)}`}?ligne=${encodeURIComponent(id)}`) })
         return NextResponse.json({ data: { kind: "backlinks", items } })
       }
-      const key = await knownWorldIndexKey(block.index)
+      const key = await blockIndexKey(block.index)
       if (!key) return NextResponse.json({ error: "L’index de ce bloc n’existe plus." }, { status: 404 })
       const match = block.type === "view" && block.rowMatch && row ? { column: block.rowMatch, index: row.index, id: row.id, name: row.name } : undefined
-      const data = block.type === "view" ? await viewData(key, block, match, row, player, rowPageOf, account.uid) : await statData(key, block.statId, player, rowPageOf)
+      const data = block.type === "view" ? await viewData(key, block, match, row, player, rowPageOf, account) : await statData(key, block.statId, player, rowPageOf, account)
       return data ? NextResponse.json({ data }) : NextResponse.json({ error: block.type === "view" ? "L’onglet de ce bloc n’existe plus dans l’index." : "Cette statistique n’existe plus dans l’index." }, { status: 404 })
     }
 
     if (!canManagePages(account.role)) return denied()
     // L'aperçu « Voir comme Joueur » de l'atelier : ce qu'un joueur recevrait.
     const asPlayer = parameters.get("as") === "joueur"
-    const key = await knownWorldIndexKey(parameters.get("index"))
+    const key = await blockIndexKey(parameters.get("index"))
     if (!key) return NextResponse.json({ error: "Index inconnu." }, { status: 400 })
     const statId = parameters.get("stat")
     if (statId) {
-      const data = await statData(key, statId, asPlayer, rowPageOf)
+      const data = await statData(key, statId, asPlayer, rowPageOf, account)
       return data ? NextResponse.json({ data }) : NextResponse.json({ error: "Cette statistique n’existe plus dans l’index." }, { status: 404 })
     }
     // L'atelier envoie les réglages du bloc (encore non enregistrés), remis en forme comme à l'enregistrement.
@@ -190,7 +210,7 @@ export async function GET(request: Request) {
     try { raw = JSON.parse(parameters.get("def") ?? "null") } catch { raw = null }
     const block = cleanBlock({ ...(raw && typeof raw === "object" ? raw : {}), type: "view", id: "atelier", index: key })
     if (!block || block.type !== "view") return NextResponse.json({ error: "Réglages du bloc illisibles." }, { status: 400 })
-    const data = await viewData(key, block, undefined, null, asPlayer, rowPageOf, account.uid)
+    const data = await viewData(key, block, undefined, null, asPlayer, rowPageOf, account)
     return data ? NextResponse.json({ data }) : NextResponse.json({ error: "Cet onglet n’existe pas dans l’index." }, { status: 404 })
   } catch (error) {
     console.error("PAGE_BLOCK_DATA_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")

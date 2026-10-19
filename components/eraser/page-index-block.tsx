@@ -68,6 +68,12 @@ export function PageSearchProvider({ children, present }: { children: ReactNode;
 
 const foldSearch = (value: string) => value.replace(/<[^>]+>/g, " ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").replace(/\s+/g, " ").trim()
 
+/** Une recherche tapée ailleurs (le champ de l'Index des pages) : les blocs Vue la suivent comme celle d'un bloc Recherche. */
+export function PageSearchQuery({ query, children }: { query: string; children: ReactNode }) {
+  const value = useMemo(() => ({ query, setQuery: () => undefined, present: true }), [query])
+  return <PageSearchContext.Provider value={value}>{children}</PageSearchContext.Provider>
+}
+
 /** Un bloc « Recherche » : un champ qui filtre les lignes des vues de la page. */
 export function PageSearchBlock({ block }: { block: SearchBlock }) {
   const search = useContext(PageSearchContext)

@@ -27,6 +27,9 @@ import type { JdrSheetKey } from "@/lib/jdr-sheets"
 import { isBuiltinWorldIndexKey, isEntityWorldIndexKey, isNameColumn, worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
 import { getWorldIndexQuick } from "@/lib/world-indexes"
 import { objectItemId } from "@/lib/object-item-id"
+import { PAGES_INDEX } from "@/lib/pages-index-shared"
+import type { IndexSource } from "@/lib/custom-pages-data"
+import type { AuthorizedUser } from "@/lib/server-auth"
 
 /**
  * Un index qu'on peut citer. `entity` : personnages, campagnes, PNJs, classes, sorts (leurs
@@ -119,8 +122,37 @@ async function sourceKeys() {
   return [...builtin.filter((key): key is string => Boolean(key)), OBJECT_REFERENCE_INDEX, ...custom, ...entities]
 }
 
-async function loadSource(key: string, options: { cited?: readonly string[] } = {}): Promise<Source | null> {
+/** Une source faite pour un lecteur (l'index des pages) vue comme une source de références. */
+function sourceOfIndex(index: IndexSource): Source {
+  return {
+    key: index.key,
+    title: index.title,
+    itemLabel: "une page",
+    tabs: index.tables.map((table) => ({ name: table.tabName })),
+    tables: index.tables.map((table) => {
+      const specs = new Map((index.columns[table.tabName] ?? []).map((column) => [foldName(column.header), normalizeSpec(column.spec)]))
+      const id = table.headers.findIndex(isIdHeader)
+      const name = index.nameHeader ? table.headers.findIndex((header) => foldName(header) === foldName(index.nameHeader!)) : table.headers.findIndex(isNameColumn)
+      return {
+        tab: table.tabName,
+        headers: table.headers,
+        columns: table.headers.filter((header) => header.trim() && !isIdHeader(header)),
+        name,
+        specs,
+        rows: id < 0 || name < 0 ? [] : table.rows.flatMap((row) => { const rowId = (row.values[id] ?? "").trim(); const rowName = (row.values[name] ?? "").trim(); return rowId && rowName ? [{ id: rowId, name: rowName, values: row.values, html: row.html }] : [] }),
+      }
+    }),
+  }
+}
+
+async function loadSource(key: string, options: { cited?: readonly string[]; viewer?: Pick<AuthorizedUser, "uid" | "role"> } = {}): Promise<Source | null> {
   try {
+    // L'index des pages : seulement les pages que le lecteur peut ouvrir.
+    if (key === PAGES_INDEX) {
+      if (!options.viewer) return null
+      const { pagesIndexSource } = await import("@/lib/pages-index")
+      return sourceOfIndex(await pagesIndexSource(options.viewer))
+    }
     if (isEntityReferenceKey(key)) {
       const source = await loadEntitySource(key, options)
       return source ? { ...source, entity: true } : null
@@ -197,12 +229,12 @@ export function referenceCatalog(options: { fresh?: boolean } = {}) {
  * par son nom (MJ et admins seulement ; un joueur ne voit que les lignes citées).
  * `player` : les colonnes privées d'une entité (notes MJ d'un PNJ…) restent introuvables.
  */
-export async function resolveReferences(requests: ReferenceRequest[], options: { byName: boolean; player?: boolean }) {
+export async function resolveReferences(requests: ReferenceRequest[], options: { byName: boolean; player?: boolean; viewer?: Pick<AuthorizedUser, "uid" | "role"> }) {
   const results: Record<string, ResolvedReference | null> = {}
   const keys = [...new Set(requests.map((request) => request.index))]
   // Les colonnes citées de chaque index (la feuille des personnages n'est lue que pour elles).
   const cited = (key: string) => [...new Set(requests.filter((request) => request.index === key && request.column).map((request) => request.column!))]
-  const sources = new Map(await Promise.all(keys.map(async (key) => [key, await loadSource(key, { cited: cited(key) })] as const)))
+  const sources = new Map(await Promise.all(keys.map(async (key) => [key, await loadSource(key, { cited: cited(key), viewer: options.viewer })] as const)))
   // Les mises en page de survol, lues une fois par index.
   const layouts = new Map<string, Promise<Record<string, TabLayouts>>>()
   for (const request of requests) {

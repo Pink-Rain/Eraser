@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useMemo, useState } from "react"
-import { ArchiveRestore, AppWindow, Eye, FilePlus2, LayoutGrid, PanelLeft, LayoutTemplate, LibraryBig, LoaderCircle, PenLine, Search, Table2, Trash2, WandSparkles } from "lucide-react"
+import { ArchiveRestore, AppWindow, Eye, FilePlus2, LayoutGrid, List, PanelLeft, LayoutTemplate, LibraryBig, LoaderCircle, PenLine, Search, Table2, Trash2, WandSparkles } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -12,6 +12,10 @@ import { fieldClass, Field } from "@/components/eraser/page-studio-settings"
 import { pagePlaces, pageVisibilities, placeLabel, type PagePlace, type PageRole, type PageSummary, studioHref } from "@/lib/custom-pages"
 import { blueprintVisibility, type EraserPageEntry } from "@/lib/eraser-page-blueprints"
 import { replacementLabel } from "@/lib/page-replacements"
+import { PagesIndexView, pageViewKinds } from "@/components/eraser/pages-index-views"
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import type { PagesIndexRow } from "@/lib/pages-index-shared"
+import type { ViewBlockKind } from "@/lib/custom-pages"
 
 /**
  * L'Index des pages (admins et MJ) : toutes les pages du créateur de pages, leur place,
@@ -21,7 +25,9 @@ import { replacementLabel } from "@/lib/page-replacements"
 
 export type TemplateSummary = { id: string; name: string; createdAt: string; createdBy: string; title: string; icon: string; emoji: string; blocks: number }
 
-type Filter = { query: string; status: "" | "publiee" | "brouillon" | "corbeille"; place: "" | PagePlace; vis: string; look: "table" | "cards"; source: "" | "atelier" | "eraser" }
+/** « Tableau » : la gestion des pages ; les autres : les pages vues par le moteur des index (cartes, liste, galerie…). */
+type Look = "table" | Exclude<ViewBlockKind, "table">
+type Filter = { query: string; status: "" | "publiee" | "brouillon" | "corbeille"; place: "" | PagePlace; vis: string; look: Look; source: "" | "atelier" | "eraser" }
 
 const fold = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
 
@@ -43,8 +49,10 @@ function VisPill({ vis }: { vis: string }) {
   return <span className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold ${tone}`}>{pageVisibilities.find((item) => item.value === vis)?.label ?? vis}</span>
 }
 
-export function PageDirectory({ pages: initialPages, eraser = [], templates: initialTemplates, campaigns, allCampaigns, role, newPage }: {
+export function PageDirectory({ pages: initialPages, eraser = [], indexRows = [], templates: initialTemplates, campaigns, allCampaigns, role, newPage }: {
   pages: PageSummary[]
+  /** Les pages vues comme les lignes de l'index des pages (cartes, liste…). */
+  indexRows?: PagesIndexRow[]
   /** Les pages d'Eraser qu'on peut modifier dans l'atelier. */
   eraser?: EraserPageEntry[]
   templates: TemplateSummary[]
@@ -188,40 +196,25 @@ export function PageDirectory({ pages: initialPages, eraser = [], templates: ini
         {pageVisibilities.map((vis) => <option key={vis.value} value={vis.value}>{vis.label}</option>)}
       </select>
       <div role="group" aria-label="Affichage" className="inline-flex rounded-[11px] border bg-card p-0.5">
-        {(["table", "cards"] as const).map((look) => <button key={look} type="button" aria-pressed={filter.look === look} onClick={() => setFilter({ ...filter, look })} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[13px] text-muted-foreground hover:bg-muted aria-pressed:bg-foreground aria-pressed:font-semibold aria-pressed:text-background">{look === "table" ? <Table2 className="size-3.5" /> : <LayoutGrid className="size-3.5" />}{look === "table" ? "Tableau" : "Cartes"}</button>)}
+        {(["table", "cards", "list"] as const).map((look) => <button key={look} type="button" aria-pressed={filter.look === look} onClick={() => setFilter({ ...filter, look })} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[13px] text-muted-foreground hover:bg-muted aria-pressed:bg-foreground aria-pressed:font-semibold aria-pressed:text-background">{look === "table" ? <Table2 className="size-3.5" /> : look === "cards" ? <LayoutGrid className="size-3.5" /> : <List className="size-3.5" />}{look === "table" ? "Tableau" : look === "cards" ? "Cartes" : "Liste"}</button>)}
       </div>
+      <NativeSelect aria-label="Autre vue" className="h-9 w-auto text-[13px]" value={filter.look === "table" || filter.look === "cards" || filter.look === "list" ? "" : filter.look} onChange={(event) => { if (event.target.value) setFilter({ ...filter, look: event.target.value as Look }) }}>
+        <NativeSelectOption value="">Autre vue…</NativeSelectOption>
+        {pageViewKinds.filter((kind) => kind.value !== "cards" && kind.value !== "list").map((kind) => <NativeSelectOption key={kind.value} value={kind.value}>{kind.label}</NativeSelectOption>)}
+      </NativeSelect>
     </div>
     {error && <p role="alert" className="mt-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
     <p className="mb-2 mt-4 text-xs text-muted-foreground">{rows.length} page{rows.length > 1 ? "s" : ""} affichée{rows.length > 1 ? "s" : ""} sur {live}{trashed ? ` · ${trashed} dans la corbeille` : ""}{eraserRows.length ? ` · ${eraserRows.length} page${eraserRows.length > 1 ? "s" : ""} d’Eraser à reprendre` : ""}</p>
     {filter.source === "eraser" && <p className="mb-3 max-w-3xl text-[12.5px] leading-relaxed text-muted-foreground">« Modifier » reprend une page d’Eraser dans l’atelier, en brouillon : les lecteurs gardent la page d’origine jusqu’à la publication, et la corbeille la leur rend. Les pages de textes, de liens et de vues d’index sont redessinées en blocs (Règles › Classes : un bloc Vue de l’index des classes, ses cartes de classe) ; les autres gardent tout leur contenu dans un bloc, autour duquel tu ajoutes ce que tu veux.</p>}
 
-    {!rows.length && !eraserRows.length
+    {filter.look !== "table"
+      ? <PagesIndexView kind={filter.look} query={filter.query} rows={indexRows} />
+      : !rows.length && !eraserRows.length
       ? <div className="grid place-items-center gap-3 rounded-2xl border border-dashed px-5 py-14 text-center text-sm text-muted-foreground">
         <p>{filter.status === "corbeille" ? "La corbeille est vide." : pages.length ? "Aucune page ne correspond à ces filtres." : "Aucune page pour l’instant. Crée la première : un guide pour les joueurs, une page de règles maison, un tableau de campagne…"}</p>
         {!pages.length && <Button type="button" variant="outline" onClick={() => setCreating(true)}><FilePlus2 />Nouvelle page</Button>}
       </div>
-      : filter.look === "cards"
-        ? <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(17.5rem,100%),1fr))]">
-          {rows.map((page) => <article key={page.id} className="grid content-start gap-2.5 rounded-2xl border bg-card/85 p-4 shadow-[0_10px_30px_rgb(67_50_31/0.05)]">
-            <div className="flex min-w-0 items-center gap-2.5">
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/8 text-primary"><PageIcon icon={page.icon} emoji={page.emoji} className="size-4" /></span>
-              <span className="min-w-0"><b className="block truncate font-display text-base">{page.title}</b><small className="block truncate font-mono text-[11px] text-muted-foreground">{page.href}</small></span>
-            </div>
-            {page.description && <p className="line-clamp-2 text-[13px] text-muted-foreground">{page.description}</p>}
-            <div className="flex flex-wrap items-center gap-1.5"><StatusPill page={page} /><VisPill vis={page.vis} /><span className="rounded-full border bg-card px-2 py-0.5 text-[11px] text-muted-foreground">{where(page)}</span></div>
-            <p className="text-[11.5px] text-muted-foreground">Modifiée le {formatWhen(page.updatedAt)}{page.updatedBy ? ` par ${page.updatedBy}` : ""} · {page.blocks} bloc{page.blocks > 1 ? "s" : ""}</p>
-            <div className="flex flex-wrap items-center gap-1">{actions(page)}</div>
-          </article>)}
-          {eraserRows.map((entry) => <article key={entry.path} className="grid content-start gap-2.5 rounded-2xl border border-dashed bg-card/60 p-4">
-            <div className="flex min-w-0 items-center gap-2.5">
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-xl border bg-muted text-muted-foreground"><AppWindow className="size-4" /></span>
-              <span className="min-w-0"><b className="block truncate font-display text-base">{entry.label}</b><small className="block truncate font-mono text-[11px] text-muted-foreground">{entry.path}</small></span>
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5"><EraserPill entry={entry} /><VisPill vis={blueprintVisibility(entry.path)} /><span className="rounded-full border bg-card px-2 py-0.5 text-[11px] text-muted-foreground">{entry.group}</span></div>
-            <div className="flex flex-wrap items-center gap-1">{eraserActions(entry)}</div>
-          </article>)}
-        </div>
-        : <div className="overflow-x-auto rounded-2xl border bg-card">
+      : <div className="overflow-x-auto rounded-2xl border bg-card">
           <table className="w-full border-collapse text-[13px]">
             <thead><tr>{["Page", "Emplacement", "Visibilité", "Statut", "Modifiée", "Blocs", ""].map((label) => <th key={label} scope="col" className="whitespace-nowrap border-b bg-muted px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{label || <span className="sr-only">Actions</span>}</th>)}</tr></thead>
             <tbody>{rows.map((page) => <tr key={page.id} className="border-b border-border/60 last:border-b-0 hover:bg-background/50">

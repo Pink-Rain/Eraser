@@ -270,3 +270,40 @@ test("Démarrage : le premier rendu attend un peu les pages et le menu du serveu
   await pagesStore.knownCustomPagesSoon(30);
   assert.ok(Date.now() - again < 20, "la lecture terminée, plus rien n'est attendu");
 });
+
+test("Index des pages : pages créées et pages d'Eraser au même rang, lues par le moteur des index", async () => {
+  const pagesIndex = await vite.ssrLoadModule("/lib/pages-index.ts");
+  const cards = await vite.ssrLoadModule("/lib/index-cards.ts");
+  const by = { uid: "admin-1", name: "Admin" };
+  const guide = await pagesStore.createCustomPage({ title: "Guide du joueur", description: "Pour bien commencer", icon: "book-open", place: "regles", sections: [{ id: "s-1", layout: "1", cols: [[{ id: "b-1", type: "image", vis: "tous", src: "https://exemple.fr/carte.png" }]] }] }, by);
+  const published = await pagesStore.publishCustomPage(guide.id, guide.updatedAt, by);
+  const secret = await pagesStore.createCustomPage({ title: "Notes du MJ", place: "regles", vis: "mj" }, by);
+  await pagesStore.publishCustomPage(secret.id, secret.updatedAt, by);
+  const draft = await pagesStore.createCustomPage({ title: "Brouillon", place: "regles" }, by);
+  // Une page d'Eraser reprise dans l'atelier et publiée : elle garde son adresse, prend le titre de sa page.
+  const { page: combat } = await pagesStore.adoptEraserPage("/regles/combat", { title: "Combat (maison)", icon: "swords", emoji: "", description: "Nos règles de combat", sections: [] }, "regles-combat", "tous", by);
+  await pagesStore.publishCustomPage(combat.id, combat.updatedAt, by);
+  const all = await pagesStore.listCustomPages({ fresh: true });
+
+  const player = pagesIndex.pagesIndexRows(all, { uid: "joueuse-1", role: "joueur" }, new Set());
+  const titles = player.map((row) => row.title);
+  assert.ok(titles.includes("Guide du joueur") && titles.includes("Classe") && titles.includes("Combat (maison)"), "créées et d'Eraser, la page modifiée sous son nouveau titre");
+  assert.ok(!titles.includes("Notes du MJ") && !titles.includes("Brouillon") && !titles.includes("Combat"), "ni page réservée, ni brouillon, ni doublon de la page remplacée");
+  assert.ok(!player.some((row) => row.address.startsWith("/ressources/")), "un joueur ne voit pas les pages d'index");
+  const guideRow = player.find((row) => row.id === published.id);
+  assert.deepEqual([guideRow.section, guideRow.origin, guideRow.status, guideRow.image, guideRow.icon], ["Règles", "Créée", "Publiée", "https://exemple.fr/carte.png", "book-open"]);
+  assert.equal(player.find((row) => row.href === "/regles/combat").origin, "Eraser, modifiée");
+
+  const mj = pagesIndex.pagesIndexRows(all, { uid: "mj-1", role: "mj" }, new Set(), { includeDrafts: true });
+  assert.ok(mj.some((row) => row.title === "Notes du MJ") && mj.some((row) => row.title === "Brouillon" && row.status === "Brouillon") && mj.some((row) => row.title === "Créatures"));
+  assert.ok(draft.id && mj.length > player.length);
+
+  // Lu comme un index : chaque ligne s'ouvre sur sa page, pour tous les lecteurs.
+  const source = pagesIndex.pagesIndexSourceOf(player);
+  const block = { tab: "Pages", kind: "cards", limit: 0 };
+  const view = data.viewBlockData(source, block, { presentations: {}, cards: {}, layouts: {} }, { player: true });
+  assert.equal(view.rows.find((row) => row.name === "Guide du joueur").href, pages.pageHref(published));
+  assert.equal(view.rows.find((row) => row.name === "Classe").href, "/regles/classes");
+  assert.equal(view.cards.cards[0].id, "eraser-page-carte", "les cartes de pages d'Eraser, d'office");
+  assert.ok(cards.eraserCardPresets().some((preset) => preset.card.id === "eraser-page-ligne"), "proposées aussi dans « Nouvelle carte » des autres index");
+});
