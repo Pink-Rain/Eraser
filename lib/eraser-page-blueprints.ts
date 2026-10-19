@@ -118,9 +118,6 @@ const blueprints: Record<string, () => Blueprint> = {
   ], "bac-a-sable"),
 }
 
-/** Les pages qu'on redessine en blocs (les autres gardent leur contenu d'origine en un module). */
-export const redrawnPaths = Object.keys(blueprints)
-
 /**
  * Les pages d'Eraser dessinées par le moteur des pages sans rien enregistrer : tant qu'aucune
  * page du créateur ne les remplace, elles se rendent depuis leur plan de blocs — leurs vues,

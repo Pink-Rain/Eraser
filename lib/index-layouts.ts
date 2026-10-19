@@ -740,11 +740,6 @@ export function layoutPlaces(layout: IndexLayout | null | undefined, column: str
   return fields.some((field) => field.block ? blockColumns(field.block).some((column) => foldName(column) === key) : foldName(fieldColumnOf(field)) === key) || [layout.image, ...subtitleColumnsOf(layout), layout.icon, layout.medallion?.column, layout.banner?.column].some((value) => value !== undefined && foldName(value) === key)
 }
 
-/** Tous les formulaires d'un onglet (étoilé compris) placent-ils cette colonne ? L'un d'eux suffit. */
-export function anyFormPlaces(entry: TabLayouts | null | undefined, column: string) {
-  return tabFormsOf(entry).some((item) => layoutPlaces(item.layout, column))
-}
-
 /** La mise en page d'un onglet parmi celles d'un index (nom d'onglet sans accents ni casse). */
 export function tabLayout(layouts: Record<string, TabLayouts> | null | undefined, tab: string, kind: LayoutKind): IndexLayout | null {
   if (!layouts) return null

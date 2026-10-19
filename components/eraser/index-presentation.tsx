@@ -527,7 +527,10 @@ function Sections({ layout, rows, valueOf, nameOf, optionsOf, render, onCommit }
   if (!layout.groupBy && layout.alphabet && nameOf) {
     // L'annuaire : une section par première lettre (les accents pliés, les chiffres et symboles sous « # »).
     const first = (row: string) => { const initial = plain(nameOf(row)).normalize("NFD").replace(/[̀-ͯ]/g, "").charAt(0).toLocaleUpperCase("fr"); return /[A-Z]/.test(initial) ? initial : "#" }
-    groups = [...new Set(rows.map(first))].sort((left, right) => left === "#" ? 1 : right === "#" ? -1 : left.localeCompare(right, "fr")).map((name) => ({ name, rows: rows.filter((row) => first(row) === name) }))
+    // Chaque nom lu une fois (une lecture par lettre et par ligne refaisait 27 fois le travail).
+    const byLetter = new Map<string, string[]>()
+    for (const row of rows) { const letter = first(row); const list = byLetter.get(letter); if (list) list.push(row); else byLetter.set(letter, [row]) }
+    groups = [...byLetter.keys()].sort((left, right) => left === "#" ? 1 : right === "#" ? -1 : left.localeCompare(right, "fr")).map((name) => ({ name, rows: byLetter.get(name) ?? [] }))
   } else if (layout.groupBy) {
     const options = optionsOf?.(layout.groupBy) ?? []
     groups = groupRowsBy(rows, groupValue, options.map((option) => option.value)).filter((group) => group.name || !layout.hideEmpty).map((group) => ({ ...group, color: options.find((option) => fold(option.value) === fold(group.name))?.color }))
@@ -548,8 +551,10 @@ function Sections({ layout, rows, valueOf, nameOf, optionsOf, render, onCommit }
 const PAGE = 60
 
 /** Les éléments par paquets de 60 : une vue de mille lignes reste fluide. */
-function Paged({ rows, render }: { rows: string[]; render: (rows: string[]) => ReactNode }) {
-  const [limit, setLimit] = useState(PAGE)
+function Paged({ rows, render, keep }: { rows: string[]; render: (rows: string[]) => ReactNode; /** Une ligne à montrer même au-delà du paquet (celle choisie). */ keep?: string }) {
+  const [shown, setLimit] = useState(PAGE)
+  const kept = keep ? rows.indexOf(keep) : -1
+  const limit = Math.max(shown, kept + 1)
   return <>
     {render(rows.slice(0, limit))}
     {rows.length > limit && <p className="flex items-center justify-center gap-2 py-3 text-xs text-muted-foreground">{limit} / {rows.length}<button type="button" className="font-semibold text-primary underline-offset-4 hover:underline" onClick={() => setLimit((current) => current + PAGE * 4)}>Afficher la suite</button></p>}
@@ -633,9 +638,19 @@ function KanbanLayout(props: PresentationProps) {
   }
   // Les colonnes : les choix de la liste dans leur ordre, puis les valeurs écrites, puis « Sans valeur ».
   const names = [...new Set([...options.map((option) => option.value), ...(layout.lanes ?? []).map((lane) => lane.value), ...rows.flatMap(valuesOf)])]
+  // Chaque ligne rangée une fois dans ses colonnes (une recherche par colonne relisait toutes les lignes).
+  const byLane = new Map<string, string[]>()
+  for (const row of rows) {
+    const values = valuesOf(row)
+    for (const lane of values.length ? new Set(values.map(fold)) : [""]) {
+      const list = byLane.get(lane)
+      if (list) list.push(row)
+      else byLane.set(lane, [row])
+    }
+  }
   const allLanes = [...names, ""].map((name) => {
     const own = settings(name)
-    return { name, label: own?.label || name, color: own?.color ?? options.find((option) => option.value === name)?.color, icon: own?.icon ?? look.sectionIcon, limit: own?.limit, hidden: Boolean(own?.hidden), rows: rows.filter((row) => { const values = valuesOf(row); return name ? values.some((value) => fold(value) === fold(name)) : !values.length }) }
+    return { name, label: own?.label || name, color: own?.color ?? options.find((option) => option.value === name)?.color, icon: own?.icon ?? look.sectionIcon, limit: own?.limit, hidden: Boolean(own?.hidden), rows: byLane.get(name ? fold(name) : "") ?? [] }
   }).filter((lane) => !lane.hidden && (!layout.hideEmpty || lane.rows.length)).filter((lane) => lane.name || lane.rows.length)
   const width = layout.laneWidth === "narrow" ? "w-52" : layout.laneWidth === "wide" ? "w-80" : "w-64"
   const laneStyle = look.laneStyle ?? "plain"
@@ -667,12 +682,13 @@ function KanbanLayout(props: PresentationProps) {
           ? <button type="button" onClick={toggle} aria-expanded={!closed} className={`text-left ${closed ? "[writing-mode:vertical-rl] rotate-180 px-1 py-2" : ""}`} title={closed ? "Déplier la colonne" : "Replier la colonne"}>{closed ? <span className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">{lane.label || "Sans valeur"} · {lane.rows.length}</span> : head}</button>
           : head}
         {!closed && <div className={`grid ${gaps[look.density ?? "normal"]} ${laneStyle === "header" ? "px-2" : ""}`}>
-          {lane.rows.map((row) => {
+          {/* Par paquets, comme la liste : une colonne de centaines de cartes ne gèle plus la vue. */}
+          <Paged rows={lane.rows} render={(shown) => shown.map((row) => {
             const drawn = card?.(row)
             const drag = { draggable: movable(row), onDragStart: () => { setDragged(row); setDraggedFrom(lane.name) }, onDragEnd: () => { setDragged(""); setOver(null) }, title: onCommit && !movable(row) ? "Plusieurs valeurs ou texte mis en forme : modifie la case dans la fiche" : undefined }
             const cursor = `${movable(row) ? "cursor-grab active:cursor-grabbing" : ""} ${dragged === row ? "opacity-50" : ""}`
             return <div key={row} data-row-key={row} {...drag} className={`min-w-0 ${cursor}`}>{drawn ?? <Item row={row} props={props} fields={(layout.fields ?? []).filter((field) => field !== column)} framed={look.surface !== "plain"} className={look.surface === "plain" ? "border-b border-border/70" : ""} />}{props.chosen === row && props.clickOf?.(row) === "below" && <div className="mt-1.5"><DetailPanel row={row} rows={rows} props={props} inline /></div>}</div>
-          })}
+          })} />
         </div>}
       </section>
     })}
@@ -770,7 +786,7 @@ function MasterDetailLayout(props: PresentationProps) {
   const columns = right ? masterWidthsRight[look.masterWidth ?? "normal"] : masterWidths[look.masterWidth ?? "normal"]
   return <div className={`grid gap-4 ${columns}`}>
     <FollowedRow.Provider value={chosen}><div ref={masterRef} className={`${look.maxHeight ? "" : "max-h-[70vh]"} overflow-y-auto border bg-card/70 p-1.5 ${radii[look.radius ?? "md"]} ${right ? "md:order-2" : ""}`} style={look.maxHeight ? { maxHeight: `${look.maxHeight}rem` } : undefined}>
-      <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} render={(group) => <div className={look.surface === "plain" ? "divide-y" : look.surface === "boxed" ? "grid gap-1" : "space-y-0.5"}>{group.map((row) => {
+      <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} render={(group) => <Paged rows={group} keep={selected} render={(page) => <div className={look.surface === "plain" ? "divide-y" : look.surface === "boxed" ? "grid gap-1" : "space-y-0.5"}>{page.map((row) => {
         const rowTint = rowColor(layout, row, valueOf, optionsOf)
         const current = row === selected
         const frame = current ? { className: "" } : accentFrame(look, rowTint)
@@ -787,7 +803,7 @@ function MasterDetailLayout(props: PresentationProps) {
             </span>
           </span>
         </button></WithRowHover>
-      })}</div>} />
+      })}</div>} />} />
     </div></FollowedRow.Provider>
     <div className={`grid min-w-0 content-start gap-3 ${right ? "md:order-1" : ""}`}>
       {props.detailTop}
@@ -867,8 +883,23 @@ function CalendarLayout(props: PresentationProps) {
   const monthName = (month: number) => calendar.months[month]?.name ?? ""
   const weekdayName = (date: CalendarDate, short = false) => { const name = calendar.weekdays[weekdayOf(calendar, date)] ?? ""; return short ? name.slice(0, 3) : name }
   const sameDay = (left: CalendarDate, right: CalendarDate) => compareCalendarDates(left, right) === 0
-  const entriesOn = (date: CalendarDate) => dated.filter((entry) => sameDay(entry.date, date))
-  const entriesInMonth = (year: number, month: number) => dated.filter((entry) => entry.date.year === year && entry.date.month === month)
+  // Les lignes datées rangées une fois par jour et par mois : les grilles de l'année demandaient
+  // chacun de leurs jours, et chaque demande relisait toutes les lignes.
+  const datedIndex = (() => {
+    const days = new Map<string, DatedRow[]>()
+    const months = new Map<string, DatedRow[]>()
+    for (const entry of dated) {
+      const day = `${entry.date.year}:${entry.date.month}:${entry.date.day}`
+      const month = `${entry.date.year}:${entry.date.month}`
+      const onDay = days.get(day)
+      if (onDay) onDay.push(entry); else days.set(day, [entry])
+      const inMonth = months.get(month)
+      if (inMonth) inMonth.push(entry); else months.set(month, [entry])
+    }
+    return { days, months }
+  })()
+  const entriesOn = (date: CalendarDate) => datedIndex.days.get(`${date.year}:${date.month}:${date.day}`) ?? []
+  const entriesInMonth = (year: number, month: number) => datedIndex.months.get(`${year}:${month}`) ?? []
   const colorOf = (row: string) => rowColor(layout, row, valueOf, optionsOf)
   const formula = (group: DatedRow[], color?: string) => layout.groupFormula ? <GroupFormulaBadge layout={layout} rows={group.map((entry) => entry.row)} valueOf={valueOf} color={color} /> : null
   const goMonth = (year: number, month: number) => { setCursor({ year, month, day: 1 }); setScale("month"); setExpandedDays(new Set()) }
@@ -1046,7 +1077,7 @@ function CalendarLayout(props: PresentationProps) {
     {banner}
     {header}
     {body}
-    {undated > 0 && layout.showUndated && <ul className="flex flex-wrap gap-1.5">{rows.filter((row) => !dated.some((entry) => entry.row === row)).map((row) => <li key={row}><button type="button" onClick={() => onOpen(row)} className="flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs hover:bg-muted"><RowIcon layout={layout} row={row} valueOf={valueOf} className="size-3" />{nameOf(row) || "Sans nom"}</button></li>)}</ul>}
+    {undated > 0 && layout.showUndated && <ul className="flex flex-wrap gap-1.5">{(() => { const withDate = new Set(dated.map((entry) => entry.row)); return rows.filter((row) => !withDate.has(row)) })().map((row) => <li key={row}><button type="button" onClick={() => onOpen(row)} className="flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs hover:bg-muted"><RowIcon layout={layout} row={row} valueOf={valueOf} className="size-3" />{nameOf(row) || "Sans nom"}</button></li>)}</ul>}
     {undated > 0 && <p className="text-xs text-muted-foreground">{undated} ligne{undated > 1 ? "s" : ""} sans date lisible dans « {layout.dateColumn} » ({calendar === realCalendar ? "« 12 mars 1023 » ou « 1023-03-12 »" : `« 12 ${calendar.months[0]?.name ?? "Mois"} 1023 »`}).</p>}
   </div>
 }
@@ -1185,7 +1216,10 @@ function TimelineLayout(props: PresentationProps) {
   // Les groupes (périodes, côtés) : une colonne, dans l'ordre de ses choix puis de leur première date.
   const groupOptions = layout.groupBy ? optionsOf?.(layout.groupBy) ?? [] : []
   const groups = layout.groupBy ? groupRowsBy(dated, (entry) => valueOf(entry.row, layout.groupBy!), groupOptions.map((option) => option.value)).filter((group) => group.name || !layout.hideEmpty).map((group) => ({ ...group, color: groupOptions.find((option) => fold(option.value) === fold(group.name))?.color })) : []
-  const groupIndexOf = (row: string) => groups.findIndex((group) => group.rows.some((entry) => entry.row === row))
+  // Le groupe de chaque ligne, retrouvé d'un coup (chercher dans tous les groupes, pour chaque ligne, était quadratique).
+  const groupOfRow = new Map<string, number>()
+  groups.forEach((group, index) => { for (const entry of group.rows) if (!groupOfRow.has(entry.row)) groupOfRow.set(entry.row, index) })
+  const groupIndexOf = (row: string) => groupOfRow.get(row) ?? -1
   const colorOf = (row: string) => rowColor(layout, row, valueOf, optionsOf) ?? (layout.groupBy && !layout.colorBy ? groups[groupIndexOf(row)]?.color : undefined) ?? accent
   const formula = (entries: typeof dated, color?: string, inverted = false) => layout.groupFormula ? <GroupFormulaBadge layout={layout} rows={entries.map((entry) => entry.row)} valueOf={valueOf} color={color} inverted={inverted} /> : null
   const fields = (layout.fields ?? []).filter((field) => field !== layout.dateColumn && field !== layout.endColumn)
@@ -1825,7 +1859,16 @@ function ListToolbarView({ layout, base, rows, count, valueOf, optionsOf, header
         case "filter": {
           if (!known(tool.column)) return null
           const options = optionsOf?.(tool.column) ?? []
-          const values = [...new Set([...options.map((option) => option.value), ...rows.flatMap((row) => cellParts(plain(valueOf(row, tool.column))))])].slice(0, 24)
+          // Chaque case lue une fois : ses valeurs, et le nombre de lignes de chaque valeur (compter
+          // chaque pastille en relisant toutes les lignes coûtait 24 lectures de l'index par frappe).
+          const written: string[] = []
+          const counts = new Map<string, number>()
+          for (const row of rows) {
+            const parts = cellParts(plain(valueOf(row, tool.column)))
+            written.push(...parts)
+            for (const part of new Set(parts.map(fold))) counts.set(part, (counts.get(part) ?? 0) + 1)
+          }
+          const values = [...new Set([...options.map((option) => option.value), ...written])].slice(0, 24)
           const on = state.filters[index] ?? []
           const toggle = (value: string) => {
             const next = on.some((item) => fold(item) === fold(value)) ? on.filter((item) => fold(item) !== fold(value)) : tool.multi ? [...on, value] : [value]
@@ -1836,7 +1879,7 @@ function ListToolbarView({ layout, base, rows, count, valueOf, optionsOf, header
             {values.map((value) => {
               const active = on.some((item) => fold(item) === fold(value))
               const color = options.find((option) => fold(option.value) === fold(value))?.color ?? accent
-              const total = rows.filter((row) => cellParts(plain(valueOf(row, tool.column))).some((part) => fold(part) === fold(value))).length
+              const total = counts.get(fold(value)) ?? 0
               return <button key={value} type="button" aria-pressed={active} onClick={() => toggle(value)} className="inline-flex h-6 items-center gap-1 rounded-full border px-2 text-[11px] font-medium transition" style={active ? { backgroundColor: color, borderColor: color, color: "#fff" } : { borderColor: `color-mix(in srgb, ${color} 40%, var(--border))` }}>{value}<span className="tabular-nums opacity-70">{total}</span></button>
             })}
             {on.length > 0 && <button type="button" onClick={() => set.filters({ ...state.filters, [index]: [] })} className="text-[11px] font-semibold text-primary hover:underline">Tout</button>}

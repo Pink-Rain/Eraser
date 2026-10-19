@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, memo, startTransition, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
-import { hasRememberedScroll, rememberScroll } from "@/lib/scroll-memory"
+import { hasRememberedScroll, rememberedScrollTop, rememberScroll } from "@/lib/scroll-memory"
 import { ArrowDownAZ, ArrowUpAZ, ClipboardPaste, Copy, CornerDownLeft, Eraser, Eye, EyeOff, Filter, ListPlus, LoaderCircle, Plus, RotateCcw, Scissors, Trash2, Minimize2 } from "lucide-react"
 
 import {
@@ -394,7 +394,7 @@ function NewRowDraft({ columns, firstKey, settings, disabled, onDone }: {
 export function SheetGrid({
   layoutKey, columns: allColumns, rows: sourceRows, valueOf, onCommit, renderCustomCell, rowCommands, rowMenuExtras, addRowLabel = "Ajouter une ligne",
   sort, onSort, toolbarLeading, toolbarTrailing, empty, disabled = false, readOnly = false, version = 0, rowVersions, fit = false,
-  fullscreen = false, onExitFullscreen,
+  fullscreen = false, onExitFullscreen, resetKey = "",
 }: {
   layoutKey: string
   columns: SheetGridColumn[]
@@ -423,6 +423,8 @@ export function SheetGrid({
   rowVersions?: Record<string, number>
   /** Petit tableau posé dans une page (statistiques, diagnostic) : à la hauteur de ses lignes, sans se figer sous l'en-tête. */
   fit?: boolean
+  /** Change quand la page montre d'autres lignes (recherche, onglet) : le tableau repart de ses premières lignes. */
+  resetKey?: string
   /** Le tableau seul, par-dessus toute la fenêtre (sous la barre de titre), avec sa barre de mise en forme. */
   fullscreen?: boolean
   onExitFullscreen?: () => void
@@ -499,21 +501,39 @@ export function SheetGrid({
   const textColumns = useMemo(() => columns.filter((column) => !column.custom && !column.computed), [columns])
   const rowKeys = useMemo(() => rows.map((row) => row.key), [rows])
   // Un grand tableau s'affiche par tranches : les premières lignes tout de suite, la suite
-  // quand l'application est au repos. Ouvrir un index de centaines de lignes ne gèle plus.
+  // quand on approche du bas en faisant défiler. Le tableau entier (des milliers de lignes,
+  // des dizaines de milliers de cases) n'est plus construit d'office : chaque tranche ajoutée
+  // faisait recalculer la mise en page de tout le tableau, pendant des dizaines de secondes.
   const [shownCount, setShownCount] = useState(FIRST_ROWS)
-  // Revenir là où l'on était dans le tableau : il est montré en entier tout de suite.
+  const moreRef = useRef<HTMLTableRowElement>(null)
+  // Une autre recherche, un autre tri ou un autre filtre : seulement les premières lignes, la
+  // suite au défilement. Garder des centaines de lignes montrées alourdissait chaque frappe.
+  const shownFor = `${resetKey}\u0000${JSON.stringify(sort ?? null)}\u0000${JSON.stringify(filters)}`
+  const [shownKey, setShownKey] = useState(shownFor)
+  if (shownKey !== shownFor) {
+    setShownKey(shownFor)
+    setShownCount(FIRST_ROWS)
+  }
+  // Revenir là où l'on était dans le tableau : assez de lignes pour retrouver la position
+  // (une ligne fait au moins 32 pixels), la suite viendra en faisant défiler.
   useEffect(() => {
-    if (!fit && hasRememberedScroll(`${layoutKey}:scroll`)) queueMicrotask(() => setShownCount(Number.POSITIVE_INFINITY))
+    if (fit || !hasRememberedScroll(`${layoutKey}:scroll`)) return
+    const needed = Math.ceil(rememberedScrollTop(`${layoutKey}:scroll`) / 32) + FIRST_ROWS
+    queueMicrotask(() => setShownCount((current) => Math.max(current, needed)))
   }, [fit, layoutKey])
   useEffect(() => {
-    if (shownCount >= rows.length) return
+    const more = moreRef.current
+    if (shownCount >= rows.length || !more) return
     const grow = () => startTransition(() => setShownCount((current) => current + MORE_ROWS))
-    if (typeof window.requestIdleCallback === "function") {
-      const id = window.requestIdleCallback(grow, { timeout: 400 })
-      return () => window.cancelIdleCallback(id)
+    if (typeof IntersectionObserver === "undefined") {
+      const id = window.setTimeout(grow, 30)
+      return () => window.clearTimeout(id)
     }
-    const id = window.setTimeout(grow, 30)
-    return () => window.clearTimeout(id)
+    // Un observateur neuf à chaque tranche : il signale tout de suite si le bas est encore
+    // proche (écran haut, lignes courtes), et la tranche suivante suit.
+    const observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) grow() }, { root: scrollerRef.current, rootMargin: "0px 0px 1200px 0px" })
+    observer.observe(more)
+    return () => observer.disconnect()
   }, [rows.length, shownCount])
   const shownRows = rows.length > shownCount ? rows.slice(0, shownCount) : rows
   // Une ligne disparue (suppression, filtre, tri) sort de la sélection d'elle-même :
@@ -846,7 +866,7 @@ export function SheetGrid({
             actions={rowActions}
             striped={rowIndex % 2 === 1}
           />)}
-          {shownRows.length < rows.length && <tr><td colSpan={columns.length + 1} className="px-3 py-2 text-xs text-muted-foreground">Affichage des lignes suivantes…</td></tr>}
+          {shownRows.length < rows.length && <tr ref={moreRef}><td colSpan={columns.length + 1} className="px-3 py-2 text-xs text-muted-foreground">{shownRows.length} lignes sur {rows.length} : la suite s’affiche en faisant défiler.</td></tr>}
           {(rowCommands?.append || rowCommands?.appendNamed) && !readOnly && Boolean(rows.length) && shownRows.length === rows.length && (drafting && rowCommands.appendNamed
             ? <NewRowDraft columns={columns} firstKey={firstKey} settings={rowCommands.appendNamed} disabled={disabled} onDone={() => setDrafting(false)} />
             : <tr>

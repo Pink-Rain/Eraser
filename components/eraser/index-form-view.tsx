@@ -21,7 +21,7 @@ type Item = { header: string; spec?: IndexColumnSpec; block?: LayoutBlock }
  * elle choisit un formulaire, et le panneau de détail (« afficher à côté », maître-détail).
  * Rien ne s'y modifie : la fiche reste le lieu de l'écriture.
  */
-export function IndexFormView({ layout, columns, valueOf, accent, compact = false, row, className }: {
+export function IndexFormView({ layout, columns, valueOf, accent, compact = false, row, inventoryEndpoint, className }: {
   layout: IndexLayout
   columns: Column[]
   /** La valeur (HTML) d'une colonne de la ligne. */
@@ -31,6 +31,8 @@ export function IndexFormView({ layout, columns, valueOf, accent, compact = fals
   compact?: boolean
   /** La ligne (son index, son identifiant, son onglet) pour les blocs qui en ont besoin (inventaire, bouton). */
   row?: { index: string; id: string; tab: string }
+  /** L'adresse de l'inventaire de la ligne (le sac d'un PNJ), sinon celle d'office. */
+  inventoryEndpoint?: (row: { index: string; id: string }) => string
   className?: string
 }) {
   const plain = (header: string) => (valueOf(header) ?? "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim()
@@ -39,7 +41,7 @@ export function IndexFormView({ layout, columns, valueOf, accent, compact = fals
   const arranged = arrangeLayout<Item>(layout, items, (item) => item.header, (field) => ({ header: field.column, block: field.block }))
   const specOf = (header: string) => columns.find((column) => foldName(column.header) === foldName(header))?.spec
   const render = (item: Item, field: Parameters<Parameters<typeof IndexLayoutView<Item>>[0]["render"]>[1]): ReactNode => {
-    if (item.block) return <div className="grid gap-1">{!field.hideLabel && field.label && <FieldLabel field={field} fallback="" accent={color} readColumn={plain} look={layout.look} className="text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground" />}<LayoutBlockView block={item.block} ctx={{ valueOf: plain, htmlOf: (header) => valueOf(header) ?? "", accent: color, compact, row }} /></div>
+    if (item.block) return <div className="grid gap-1">{!field.hideLabel && field.label && <FieldLabel field={field} fallback="" accent={color} readColumn={plain} look={layout.look} className="text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground" />}<LayoutBlockView block={item.block} ctx={{ valueOf: plain, htmlOf: (header) => valueOf(header) ?? "", accent: color, compact, row, inventoryEndpoint }} /></div>
     const html = valueOf(item.header) ?? ""
     const text = plain(item.header)
     const spec = item.spec ?? specOf(item.header)

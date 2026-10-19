@@ -202,7 +202,24 @@ async function withEntityLinkColumn(data: WorldIndexData): Promise<WorldIndexDat
   return { ...data, tables, columns }
 }
 
-export async function forPageReading(data: WorldIndexData): Promise<WorldIndexData> {
+/**
+ * Chaque bloc de page, chaque fiche, chaque recherche de liens retour refaisait ce travail
+ * (corbeille, liens, images et finition des classes) sur le même index : gardé quelques
+ * secondes par lecture de l'index (une relecture en donne une autre, et le refait).
+ */
+const pageReadings = new WeakMap<WorldIndexData, { at: number; promise: Promise<WorldIndexData> }>()
+const PAGE_READING_MS = 10_000
+
+export function forPageReading(data: WorldIndexData): Promise<WorldIndexData> {
+  const kept = pageReadings.get(data)
+  if (kept && Date.now() - kept.at < PAGE_READING_MS) return kept.promise
+  const promise = preparePageReading(data)
+  pageReadings.set(data, { at: Date.now(), promise })
+  promise.catch(() => { if (pageReadings.get(data)?.promise === promise) pageReadings.delete(data) })
+  return promise
+}
+
+async function preparePageReading(data: WorldIndexData): Promise<WorldIndexData> {
   if (data.key === "class-spells") return withPageClassRanks(data)
   // Les personnages et les campagnes à la corbeille ne s'affichent pas (comme dans leur index) ;
   // chaque personnage montre ses campagnes, chaque campagne ses personnages (colonne dérivée).

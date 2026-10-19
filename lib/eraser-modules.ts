@@ -48,7 +48,6 @@ export const eraserModules: EraserModule[] = [
 ]
 
 export const eraserModuleKeys = eraserModules.map((item) => item.key)
-export const eraserModuleLabel = (key: string) => eraserModules.find((item) => item.key === key)?.label ?? "Module d’Eraser"
 
 /** Les sections du menu dont un module « Pages d'une section » liste les pages. */
 export const moduleSections: Array<{ value: PageSection; label: string }> = [

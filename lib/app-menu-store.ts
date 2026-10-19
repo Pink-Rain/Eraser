@@ -63,6 +63,8 @@ export function knownMenuLayout(): MenuLayout | null | undefined {
 /** La toute première lecture (démarrage d'Eraser) : attendue une seule fois, et peu. */
 let firstRead: Promise<unknown> | null = null
 let firstReadDone = false
+/** Jusqu'à quand le premier rendu peut attendre la première lecture (le même délai pour toutes les pages). */
+let firstReadDeadline: number | null = null
 
 /**
  * Comme `knownMenuLayout`, mais au tout premier rendu (menu encore jamais lu) attend sa
@@ -76,7 +78,10 @@ export async function knownMenuLayoutSoon(budgetMs = 3_000): Promise<MenuLayout 
     refreshing = readMenuLayout().catch(() => null).finally(() => { refreshing = null })
   }
   firstRead ??= refreshing.finally(() => { firstReadDone = true })
-  await withTimeBudget(firstRead, budgetMs, "APP_MENU_SLOW").catch(() => null)
+  // Une seule attente en tout, pas une par page : passé ce délai, plus personne n'attend.
+  firstReadDeadline ??= Date.now() + budgetMs
+  const left = firstReadDeadline - Date.now()
+  if (left > 0) await withTimeBudget(firstRead, left, "APP_MENU_SLOW").catch(() => null)
   return knownMenuLayout()
 }
 
@@ -87,6 +92,7 @@ export function forgetMenuLayout() {
   refreshing = null
   firstRead = null
   firstReadDone = false
+  firstReadDeadline = null
 }
 
 export async function hasPreviousMenu() {

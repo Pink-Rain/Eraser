@@ -414,12 +414,13 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     return name >= 0 || !tabName ? name : headers.findIndex((header) => specOf(tabName, header)?.rowLabel)
   }, [entity, specOf])
 
-  const locate = useCallback((rowKey: string): { table: WorldIndexTable; row: WorldIndexRow } | null => {
-    const { tabName: rowTab, rowNumber } = parseRowKey(rowKey)
-    const owner = tableByName.get(rowTab)
-    const row = owner?.rows.find((candidate) => candidate.rowNumber === rowNumber)
-    return owner && row ? { table: owner, row } : null
-  }, [tableByName])
+  // Chaque case affichée retrouve sa ligne : par sa clé, sans parcourir tout l'onglet.
+  const rowsByKey = useMemo(() => {
+    const found = new Map<string, { table: WorldIndexTable; row: WorldIndexRow }>()
+    for (const owner of tables) for (const row of owner.rows) found.set(rowKeyOf(owner.tabName, row.rowNumber), { table: owner, row })
+    return found
+  }, [tables])
+  const locate = useCallback((rowKey: string): { table: WorldIndexTable; row: WorldIndexRow } | null => rowsByKey.get(rowKey) ?? null, [rowsByKey])
 
   /**
    * Données fraîches du serveur. Remonter les cellules pendant la frappe renverrait le
@@ -1414,7 +1415,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     const columns = (data?.columns[tab] ?? []).filter((column) => !isIdHeader(column.header))
     const layout = tabFormOrBuiltin(settings.layouts, indexKey, tab, formId) ?? automaticLayoutFor("form", columns)
     const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
-    return <IndexFormView layout={layout} columns={columns} valueOf={(header) => rawOf(rowKey, header)} row={id ? { index: indexKey, id, tab } : undefined} />
+    return <IndexFormView layout={layout} columns={columns} valueOf={(header) => rawOf(rowKey, header)} row={id ? { index: indexKey, id, tab } : undefined} inventoryEndpoint={indexKey === "npcs" ? (row) => `/api/npcs/${encodeURIComponent(row.id)}/inventory` : undefined} />
   }, [data, indexKey, locate, rawOf, settings.layouts])
   const layoutHeaders = useMemo(() => (table?.headers ?? []).filter((header) => header.trim() && !isIdHeader(header) && specOf(table!.tabName, header).kind !== "archived"), [specOf, table])
   // La forme de la vue choisie : l'onglet stat, les cartes, ou sa présentation (liste, kanban…),
@@ -1427,6 +1428,13 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     return table ? resolveSavedViewPresentation(activeView, { tab: table.tabName, headers: layoutHeaders, presentations: settings.presentations, presets: presentationPresets }) : null
   }, [activeView, layoutHeaders, presentationPresets, settings.presentations, table])
   const layoutNameOf = useCallback((rowKey: string) => nameOf(rowKey).replace(/<[^>]+>/g, "").trim(), [nameOf])
+  // Ce que reçoit une présentation (liste, kanban, calendrier…) : stable d'un rendu à l'autre.
+  // Recréé à chaque frappe, il lui faisait refiltrer, retrier et redessiner toutes les lignes.
+  const displayedRowKeys = useMemo(() => displayedRows.map((row) => row.key), [displayedRows])
+  const tableTabName = table?.tabName ?? ""
+  const presentationSpecOf = useCallback((header: string) => specOf(tableTabName, header), [specOf, tableTabName])
+  const activeCardId = activeView?.cardId ?? null
+  const presentationCardOf = useCallback((rowKey: string, cardId: string) => pickCard(tabCardsOf(settings.cards, indexKey, parseRowKey(rowKey).tabName), cardId === DEFAULT_ITEM_CARD ? activeCardId : cardId), [activeCardId, indexKey, settings.cards])
   // Cartes rangées en sections : les lignes de chaque valeur de la colonne choisie.
   const cardGroups = useMemo(() => {
     const groupBy = viewLayout?.kind === "cards" ? viewLayout.groupBy : undefined
@@ -1440,11 +1448,13 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   const statTabs = useMemo(() => tables.map((owner) => owner.tabName), [tables])
   const statRowKeys = useMemo(() => tables.flatMap((owner) => owner.rows.map((row) => rowKeyOf(owner.tabName, row.rowNumber))), [tables])
   // Un onglet stat calcule sur les lignes que trouve la recherche (toutes sans recherche).
+  // Seulement dans un onglet stat : ailleurs, chaque frappe repliait pour rien toutes les cases de tous les onglets.
+  const statsShown = Boolean(statsView)
   const statSearchRows = useMemo(() => {
     const folded = foldName(deferredQuery)
-    if (!folded) return statRowKeys
+    if (!folded || !statsShown) return statRowKeys
     return tables.flatMap((owner) => owner.rows.filter((row) => row.values.map(foldName).join("\n").includes(folded)).map((row) => rowKeyOf(owner.tabName, row.rowNumber)))
-  }, [deferredQuery, statRowKeys, tables])
+  }, [deferredQuery, statRowKeys, statsShown, tables])
   const statHeaders = useMemo(() => {
     const seen = new Map<string, string>()
     for (const owner of tables) for (const header of owner.headers) {
@@ -1658,9 +1668,17 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   }
 
   // L'éditeur de l'index (« Modifier »), posé dans le dock de la coque à chaque rendu (il y reste en changeant de page).
+  // Les lignes d'exemple de « Modifier » : préparées à son ouverture et à chaque lecture de l'index,
+  // pas à chaque frappe dans la page (la page repose son éditeur dans le dock à chaque rendu).
+  const editorOpen = editor !== null
+  const editorSamples = useMemo(() => {
+    if (!editorOpen) return null
+    const rowsOf = (count: number) => Object.fromEntries(tables.map((owner) => [owner.tabName, owner.rows.slice(0, count).map((row) => Object.fromEntries(owner.headers.map((header, index) => [header, row.values[index] ?? ""])))]))
+    return { sample: rowsOf(3), preview: rowsOf(40) }
+  }, [editorOpen, tables])
   const editorNode = editor ? <IndexEditor
         model={editor}
-        sampleRows={Object.fromEntries(tables.map((owner) => [owner.tabName, owner.rows.slice(0, 3).map((row) => Object.fromEntries(owner.headers.map((header, index) => [header, row.values[index] ?? ""])))]))}
+        sampleRows={editorSamples?.sample}
         open
         pending={pending === "schema"}
         error={editorError}
@@ -1679,7 +1697,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         viewPresets={settings.viewPresets}
         onSaveViewPreset={settings.saveViewPreset}
         onDeleteViewPreset={settings.deleteViewPreset}
-        previewRows={Object.fromEntries(tables.map((owner) => [owner.tabName, owner.rows.slice(0, 40).map((row) => Object.fromEntries(owner.headers.map((header, index) => [header, row.values[index] ?? ""])))]))}
+        previewRows={editorSamples?.preview}
         // « Onglet ouvert d'abord » propose les valeurs de toutes les lignes, pas seulement celles des aperçus.
         valuesOf={(tabName, header) => { const table = tables.find((item) => item.tabName === tabName); const at = table ? table.headers.findIndex((item) => foldName(item) === foldName(header)) : -1; return table && at >= 0 ? [...new Set(table.rows.map((row) => row.values[at] ?? "").filter(Boolean))].slice(0, 2000) : [] }}
         optionsOf={(tabName, header) => (specOf(tabName, header).options ?? []).map((option) => ({ value: option.value, color: option.color }))}
@@ -1757,6 +1775,8 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       {!dock && editorNode}
 
       {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
+      {/* Vues, cartes et formulaires illisibles : dit, plutôt qu'un index qui les montre vides sans raison. */}
+      {!settings.ready && settings.error && <p className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-sm text-amber-700 dark:text-amber-300">{settings.error}</p>}
 
 
       {creating && formTable && (creatingInDialog
@@ -1790,12 +1810,12 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         onManage={() => void openEditor("stats")}
       /> : table && viewLayout && viewLayout.kind !== "cards" && viewLayout.kind !== "table" ? <IndexPresentation
         layout={viewLayout}
-        rows={displayedRows.map((row) => row.key)}
+        rows={displayedRowKeys}
         headers={layoutHeaders}
         nameOf={layoutNameOf}
         valueOf={valueOf}
         optionsOf={layoutOptionsOf}
-        specOf={(header) => specOf(table.tabName, header)}
+        specOf={presentationSpecOf}
         onOpen={openRow}
         onOpenPage={openRowPage}
         onOpenForm={openRowForm}
@@ -1803,7 +1823,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         onAdd={busy ? undefined : () => { setCreatingInDialog(true); startAdding() }}
         onCommit={busy ? undefined : (rowKey, header, value) => void commitCell(rowKey, header, value)}
         renderCard={renderViewCard}
-        cardOf={(rowKey, cardId) => pickCard(tabCardsOf(settings.cards, indexKey, parseRowKey(rowKey).tabName), cardId === DEFAULT_ITEM_CARD ? activeView?.cardId ?? null : cardId)}
+        cardOf={presentationCardOf}
         renderForm={renderViewForm}
         rowRef={rowRefOf}
         empty={viewTables.some((owner) => owner.rows.length) ? "Aucune ligne ne remplit les conditions de cette vue." : `Cet onglet est vide. Ajoute ${tabDefinition.itemLabel} pour commencer.`}
@@ -1830,6 +1850,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
           fullscreen={fullscreen.fullscreen}
           onExitFullscreen={fullscreen.exit}
           layoutKey={gridKey}
+          resetKey={`${deferredQuery}\u0000${tabName}`}
           columns={columns}
           rows={displayedRows}
           valueOf={valueOf}

@@ -668,16 +668,37 @@ export function foldName(value: string) {
  * La feuille écrit « Aggressif », « défensif » ou « Humanoïde monstrueux » : ce sont
  * bien les choix « Agressif », « Défensif » et « Humanoïdes monstrueux ».
  */
+const choiceKeys = new Map<string, string>()
+
 export function choiceKey(value: string) {
-  return foldName(value).replace(/[^a-z0-9' ]+/g, " ").split(" ").filter(Boolean)
+  // Comme `foldName` : chaque case d'une colonne de choix le demande, pour chaque option.
+  const known = choiceKeys.get(value)
+  if (known !== undefined) return known
+  const key = foldName(value).replace(/[^a-z0-9' ]+/g, " ").split(" ").filter(Boolean)
     .map((word) => word.replace(/(.)\1+/g, "$1").replace(/(?<=..)s$/, "")).join(" ")
+  if (choiceKeys.size >= 10_000) choiceKeys.clear()
+  choiceKeys.set(value, key)
+  return key
 }
+
+/**
+ * Chaque liste d'options, rangée une fois par clé : une liste à ajout libre reprend toutes les
+ * valeurs déjà écrites (des centaines), et chaque case la parcourait en entier.
+ */
+const choicesByKey = new WeakMap<ChoiceOption[], Map<string, ChoiceOption>>()
 
 /** Le choix de la liste qui correspond à une valeur de la feuille, s'il y en a un. */
 export function matchChoice(value: string, options: ChoiceOption[]) {
   const key = choiceKey(value)
   if (!key) return undefined
-  return options.find((option) => choiceKey(option.value) === key || option.aliases?.some((alias) => choiceKey(alias) === key))
+  let byKey = choicesByKey.get(options)
+  if (!byKey) {
+    byKey = new Map()
+    // Le premier de la liste l'emporte (par sa valeur ou un alias), comme le parcours d'avant.
+    for (const option of options) for (const name of [option.value, ...(option.aliases ?? [])]) if (!byKey.has(choiceKey(name))) byKey.set(choiceKey(name), option)
+    choicesByKey.set(options, byKey)
+  }
+  return byKey.get(key)
 }
 
 /**

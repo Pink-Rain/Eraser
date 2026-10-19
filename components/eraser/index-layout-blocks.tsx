@@ -93,7 +93,9 @@ function TilesBlock({ block, ctx }: { block: Extract<LayoutBlock, { kind: "tiles
 
 /** L'inventaire d'une ligne : son sac (tout), ou une seule famille d'items. */
 function InventoryBlock({ block, ctx }: { block: Extract<LayoutBlock, { kind: "inventory" }>; ctx: LayoutBlockContext }) {
-  const [opened, setOpened] = useState(!ctx.preview)
+  // Ouvert d'office dans une fiche modifiable seulement. Dans une liste, un kanban ou un survol,
+  // chaque ligne montrée chargeait le sien (et préparait son contenant dans Google) : il s'ouvre au clic.
+  const [opened, setOpened] = useState(!ctx.preview && Boolean(ctx.onChange) && !ctx.compact)
   if (!ctx.row?.id || ctx.preview) return <div className="rounded-xl border border-dashed px-4 py-6 text-center text-xs text-muted-foreground">
     {block.title || "Inventaire"} · {block.accept === "all" ? "tous les items" : `seulement : ${block.accept}`}{ctx.preview ? " (aperçu)" : " — enregistre d’abord la ligne"}
   </div>

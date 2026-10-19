@@ -309,10 +309,18 @@ test("Items, un index du moteur : le moteur des index lit et écrit les items, l
   google.grid(id, "Armes").splice(1, 0, ["ARM-0", "Hache", "Arme", "6", ""]);
   await world.updateWorldIndexCell("objects", "Armes", { rowNumber: 3, id: "ARM-2", name: "Dague" }, "Prix", "5");
   assert.deepEqual(google.grid(id, "Armes").find((row) => row[0] === "ARM-2"), ["ARM-2", "Dague", "Arme", "5", "Rare"]);
-  // L'inventaire et les magasins (le lecteur des items) voient l'écriture du moteur.
+  // L'inventaire et les magasins (le lecteur des items) voient l'écriture du moteur (ici, le
+  // catalogue gardé ne connaissait pas la ligne insérée dans Sheets : il est relu).
   const read = await sheets.listObjectIndexTables();
   const armes = read.find((table) => table.tabName === "Armes");
   assert.equal(armes.rows.find((row) => row.values[0] === "ARM-2").values[3], "5");
+  // Catalogue à jour : la case est recopiée dans le catalogue gardé, sans relire tout le classeur mis en forme.
+  const gridReads = () => google.world.calls.filter((call) => call.url.includes("includeGridData")).length;
+  const before = gridReads();
+  const hache = google.grid(id, "Armes").findIndex((row) => row[0] === "ARM-0") + 1;
+  await world.updateWorldIndexCell("objects", "Armes", { rowNumber: hache, id: "ARM-0", name: "Hache" }, "Prix", "7");
+  assert.equal((await sheets.listObjectIndexTables()).find((table) => table.tabName === "Armes").rows.find((row) => row.values[0] === "ARM-0").values[3], "7");
+  assert.equal(gridReads(), before);
   // « Corriger N fautes » : la rareté mal écrite prend le choix de la liste.
   assert.equal(await world.normalizeWorldIndexChoices("objects"), 1);
   assert.equal(google.grid(id, "Armes").find((row) => row[0] === "ARM-1")[4], "Commun");

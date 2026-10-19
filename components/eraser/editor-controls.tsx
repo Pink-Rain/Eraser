@@ -139,11 +139,6 @@ export function SettingsRow({ children, className }: { children: ReactNode; clas
   return <div className={cn("flex flex-wrap items-end gap-x-3 gap-y-2", className)}>{children}</div>
 }
 
-/** Un réglage : son libellé au-dessus, le contrôle dessous (sur toute la largeur s'il s'agit d'une liste). */
-export function Inline({ label, children, className, hint }: { label: string; children: ReactNode; className?: string; hint?: string }) {
-  return <label className={cn("grid min-w-0 content-start gap-1 text-[11px] font-semibold text-muted-foreground [&_[data-slot=native-select-wrapper]]:w-full", className)} title={hint}><span>{label}</span>{children}</label>
-}
-
 export type ImageBoxValue = { widthPct?: number; heightPct?: number; autoHeight?: boolean; linked?: boolean; edges?: Array<"top" | "bottom" | "left" | "right">; /** Sans fond ni cadre (image détourée). */ bare?: boolean }
 
 /**

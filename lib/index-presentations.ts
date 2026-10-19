@@ -1075,18 +1075,25 @@ export function presentationFor(stored: Record<string, TabPresentations> | null 
   return entry?.[kind] ?? { kind }
 }
 
+const layoutCollator = new Intl.Collator("fr", { numeric: true, sensitivity: "base" })
+
 /** Les lignes dans l'ordre de la vue (nombres comparés comme des nombres, sinon l'ordre alphabétique). */
 export function sortLayoutRows<T>(rows: T[], layout: Pick<Presentation, "sortBy" | "sortDesc">, valueOf: (row: T, column: string) => string) {
   if (!layout.sortBy) return rows
-  const key = (row: T) => valueOf(row, layout.sortBy!).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
-  const sorted = [...rows].sort((left, right) => {
-    const a = key(left), b = key(right)
+  // Chaque case lue une fois, avant le tri : la relire (et la reconvertir) à chaque comparaison
+  // coûtait des dizaines de milliers de lectures pour un millier de lignes.
+  const keyed = rows.map((row) => {
+    const text = valueOf(row, layout.sortBy!).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+    const number = /^-?\d/.test(text) ? cellNumber(text) : null
+    return { row, text, number }
+  })
+  keyed.sort((left, right) => {
+    const a = left.text, b = right.text
     if (!a !== !b) return a ? -1 : 1
-    const na = cellNumber(a), nb = cellNumber(b)
-    const order = na !== null && nb !== null && /^-?\d/.test(a) && /^-?\d/.test(b) ? na - nb : a.localeCompare(b, "fr", { numeric: true, sensitivity: "base" })
+    const order = left.number !== null && right.number !== null ? left.number - right.number : layoutCollator.compare(a, b)
     return layout.sortDesc ? -order : order
   })
-  return sorted
+  return keyed.map((entry) => entry.row)
 }
 
 /**

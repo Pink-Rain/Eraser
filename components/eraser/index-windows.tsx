@@ -33,10 +33,48 @@ const emptySettings: Settings = { views: [], savedViews: [], savedViewsUnavailab
 const known = new Map<string, Settings>()
 
 async function postSettings(body: Record<string, unknown>) {
+  // Un réglage enregistré : une lecture gardée d'avant ne doit plus servir.
+  settingsReads.clear()
   const response = await fetch("/api/resources/index-settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
   const payload = (await response.json().catch(() => ({}))) as Partial<Settings> & { id?: string; error?: string; savedView?: SavedView }
   if (!response.ok) throw new Error(payload.error || "Le réglage n’a pas pu être enregistré.")
   return payload
+}
+
+type SettingsPayload = Partial<Settings> & { error?: string }
+
+/**
+ * Une seule lecture à la fois par index : l'index, ses dialogues (vues, cartes, mises en page)
+ * et l'atelier la partagent au lieu d'en lancer chacun une. Une réponse de moins de quelques
+ * secondes sert encore ; une lecture ratée (serveur local qui redémarre, Worker lent) est
+ * retentée deux fois, puis l'erreur est rendue.
+ */
+const settingsReads = new Map<string, { promise: Promise<SettingsPayload>; at: number }>()
+const SETTINGS_REUSE_MS = 3_000
+
+async function fetchSettingsOnce(index: string): Promise<SettingsPayload> {
+  const response = await fetch(`/api/resources/index-settings?index=${encodeURIComponent(index)}`, { cache: "no-store" })
+  const payload = (await response.json().catch(() => ({}))) as SettingsPayload
+  if (!response.ok) throw new Error(payload.error || "Les réglages de cet index n’ont pas pu être lus.")
+  return payload
+}
+
+function readSettings(index: string) {
+  const current = settingsReads.get(index)
+  if (current && Date.now() - current.at < SETTINGS_REUSE_MS) return current.promise
+  const promise = (async () => {
+    let failure: unknown
+    for (const wait of [0, 1_500, 5_000]) {
+      if (wait) await new Promise((resolve) => setTimeout(resolve, wait))
+      try { return await fetchSettingsOnce(index) } catch (error) { failure = error }
+    }
+    throw failure
+  })()
+  const entry = { promise, at: Date.now() }
+  settingsReads.set(index, entry)
+  // Une lecture ratée ne sert pas à la suivante.
+  promise.catch(() => { if (settingsReads.get(index) === entry) settingsReads.delete(index) })
+  return promise
 }
 
 /** Les onglets-fenêtres d'un index et les presets d'onglets (partagés par tous les index). */
@@ -45,21 +83,28 @@ export function useIndexSettings(index: string) {
   const [error, setError] = useState("")
   // Lus au moins une fois (pour dire « cette vue n'existe plus » sans attendre à tort).
   const [ready, setReady] = useState(() => known.has(index))
+  // Un autre index dans le même composant (le choix d'une vue dans l'atelier) : ses réglages, pas ceux d'avant.
+  const [shownIndex, setShownIndex] = useState(index)
+  if (shownIndex !== index) {
+    setShownIndex(index)
+    setSettings(known.get(index) ?? emptySettings)
+    setReady(known.has(index))
+    setError("")
+  }
   useEffect(() => {
     let active = true
-    fetch(`/api/resources/index-settings?index=${encodeURIComponent(index)}`, { cache: "no-store" })
-      .then(async (response) => ({ response, payload: (await response.json().catch(() => ({}))) as Partial<Settings> & { error?: string } }))
-      .then(({ response, payload }) => {
+    readSettings(index)
+      .then((payload) => {
         if (!active) return
-        if (!response.ok) { setError(payload.error || ""); return }
         // Les vues enregistrées (serveur partagé et onglets-fenêtres réunis) ; une route d'avant ne les
         // donne pas : les onglets-fenêtres en tiennent lieu.
         const next = { views: payload.views ?? [], savedViews: payload.savedViews ?? (payload.views ?? []).map(savedViewFromWindow), savedViewsUnavailable: payload.savedViewsUnavailable === true, savedViewPages: payload.savedViewPages ?? {}, presets: payload.presets ?? [], layouts: payload.layouts ?? {}, layoutPresets: payload.layoutPresets ?? [], cards: payload.cards ?? {}, cardPresets: payload.cardPresets ?? [], presentations: payload.presentations ?? {}, viewPresets: payload.viewPresets ?? [], stats: payload.stats ?? [], statGroups: payload.statGroups ?? [], locks: payload.locks ?? {} }
         known.set(index, next)
         setSettings(next)
+        setError("")
         setReady(true)
       })
-      .catch(() => { if (active) setError("Les onglets-fenêtres n’ont pas pu être chargés.") })
+      .catch((reason) => { if (active) setError(reason instanceof Error && reason.message && !/fetch/i.test(reason.message) ? reason.message : "Les réglages de cet index (vues, cartes, formulaires) n’ont pas pu être chargés : actualise dans un instant.") })
     return () => { active = false }
   }, [index])
   const update = useCallback((changes: Partial<Settings>) => {
@@ -69,11 +114,6 @@ export function useIndexSettings(index: string) {
       return next
     })
   }, [index])
-  const saveView = useCallback(async (view: Omit<IndexWindow, "id" | "position"> & { id?: string }) => {
-    const payload = await postSettings({ action: "save-view", ...view })
-    if (payload.views) update({ views: payload.views })
-    return payload.id ?? ""
-  }, [update])
   /** Les mises en page (fiche, survol) d'onglets de cet index ; `null` : l'affichage automatique. */
   const saveLayouts = useCallback(async (changes: Array<{ tab: string; form: IndexLayout | null; hover: IndexLayout | null; forms?: NamedLayout[]; hovers?: NamedLayout[] }>) => {
     if (!changes.length) return
@@ -104,10 +144,6 @@ export function useIndexSettings(index: string) {
       return next
     })
   }, [index])
-  const deleteView = useCallback(async (id: string) => {
-    const payload = await postSettings({ action: "delete-view", id, index })
-    if (payload.views) update({ views: payload.views })
-  }, [index, update])
   const savePreset = useCallback(async (preset: { id?: string; name: string; description?: string; columns: PresetColumn[] }) => {
     const payload = await postSettings({ action: "save-preset", ...preset })
     if (payload.presets) update({ presets: payload.presets })
@@ -170,7 +206,7 @@ export function useIndexSettings(index: string) {
     const payload = await postSettings({ action: "delete-card-preset", id })
     if (payload.cardPresets) update({ cardPresets: payload.cardPresets })
   }, [update])
-  return { ...settings, ready, error, saveView, deleteView, saveSavedView, removeSavedView, savePreset, deletePreset, saveLayouts, saveLayoutPreset, deleteLayoutPreset, saveCards, saveCardPreset, deleteCardPreset, savePresentations, saveViewPreset, deleteViewPreset, saveStats, saveLocks }
+  return { ...settings, ready, error, saveSavedView, removeSavedView, savePreset, deletePreset, saveLayouts, saveLayoutPreset, deleteLayoutPreset, saveCards, saveCardPreset, deleteCardPreset, savePresentations, saveViewPreset, deleteViewPreset, saveStats, saveLocks }
 }
 
 const emptyCondition = (column: string): FilterCondition => ({ column, operator: "est", value: "" })

@@ -22,6 +22,7 @@ import { pickCard } from "@/lib/index-cards"
 import { foldName } from "@/lib/index-columns"
 import { DEFAULT_ITEM_CARD, isPresentationKind } from "@/lib/index-presentations"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { PAGES_INDEX } from "@/lib/pages-index-shared"
 
 /**
  * Les blocs d'une page qui montrent un index : une vue (tableau, cartes, liste, kanban,
@@ -189,7 +190,8 @@ function ViewContent({ data, block, searching = false, onChanged }: { data: View
   const openRowPage = useCallback((rowKey: string) => { const href = rowPageOf(rowKey); if (!href) return false; router.push(href); return true }, [rowPageOf, router])
   const [sheet, setSheet] = useState<{ row: string; form: string; card?: string } | null>(null)
   // La ligne se modifie ici seulement si le serveur a donné son identifiant (MJ et admins ; jamais un joueur).
-  const editable = useCallback((rowKey: string) => Boolean(byKey.get(rowKey)?.id) && data.index !== "", [byKey, data.index])
+  // L'index des pages n'a pas de feuille : ses lignes se changent dans l'atelier des pages, pas ici.
+  const editable = useCallback((rowKey: string) => Boolean(byKey.get(rowKey)?.id) && data.index !== "" && data.index !== PAGES_INDEX, [byKey, data.index])
   // « Ajouter » de la barre d'outils : une ligne neuve dans l'onglet, ici, dans une fenêtre (le serveur vérifie qui peut écrire).
   const [adding, setAdding] = useState(false)
   const [addState, setAddState] = useState<{ pending: boolean; error: string }>({ pending: false, error: "" })

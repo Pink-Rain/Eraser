@@ -14,8 +14,13 @@ function read(key: string): Position | null {
 
 /** Une position gardée plus bas que le haut du conteneur (le tableau doit alors être complet). */
 export function hasRememberedScroll(key: string) {
-  if (typeof window === "undefined") return false
-  return Boolean(read(key)?.top)
+  return rememberedScrollTop(key) > 0
+}
+
+/** Jusqu'où le conteneur avait défilé (0 sans position gardée) : de quoi savoir combien de lignes montrer. */
+export function rememberedScrollTop(key: string) {
+  if (typeof window === "undefined") return 0
+  return read(key)?.top ?? 0
 }
 
 /**

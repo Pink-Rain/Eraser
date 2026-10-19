@@ -7,10 +7,17 @@ import { DeferredContentLoading } from "@/components/eraser/deferred-content-loa
 import { WorldIndexManager } from "@/components/eraser/world-index-manager"
 import { worldIndexDefinitions, type BuiltinWorldIndexKey, type WorldIndexKey } from "@/lib/world-index-definitions"
 import { withEntityExtras } from "@/lib/entity-index-extras"
+import { googleFailureMessage } from "@/lib/google-failures"
 import { authorizedAccount, currentAuthToken } from "@/lib/server-auth"
 import { packTableRows } from "@/lib/index-rows-wire"
 import { getWorldIndex, type WorldIndexData } from "@/lib/world-indexes"
 import { ensureShopTypeTabPrepared } from "@/lib/shop-types-server"
+
+const loadFailures: Record<string, string> = {
+  OBJECT_INDEX_FOLDER_NOT_FOUND: "Le dossier « Objets » est introuvable dans le Google Drive relié à Eraser.",
+  OBJECT_INDEX_NOT_FOUND: "Le dossier « Objets » du Drive ne contient aucun classeur d’items.",
+  OBJECT_INDEX_NOT_REGROUPED: "Les items sont encore répartis dans plusieurs classeurs du dossier « Objets » : regroupe-les d’abord en un seul « Index des objets ».",
+}
 
 async function IndexData({ indexKey, sheetName }: { indexKey: WorldIndexKey; sheetName: string }) {
   let data: WorldIndexData | null = null
@@ -20,8 +27,10 @@ async function IndexData({ indexKey, sheetName }: { indexKey: WorldIndexKey; she
     data = await getWorldIndex(indexKey)
     if (account) data = await withEntityExtras(data, account, await currentAuthToken())
   } catch (reason) {
-    console.error("WORLD_INDEX_LOAD_FAILED", indexKey, reason instanceof Error ? reason.message : "UNKNOWN_ERROR")
-    error = `La feuille « ${sheetName} » n’a pas pu être chargée depuis Google Drive.`
+    const code = reason instanceof Error ? reason.message : ""
+    console.error("WORLD_INDEX_LOAD_FAILED", indexKey, code || "UNKNOWN_ERROR")
+    // La vraie cause, quand on la connaît : sans elle, impossible de savoir quoi réparer.
+    error = loadFailures[code] ?? `La feuille « ${sheetName} » n’a pas pu être chargée depuis Google Drive.${googleFailureMessage(code) ? ` ${googleFailureMessage(code)}` : ""}`
   }
   return <WorldIndexManager indexKey={indexKey} initialData={data ? { ...data, tables: data.tables.map(packTableRows) } : data} initialError={error} />
 }

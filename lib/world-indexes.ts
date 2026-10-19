@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks"
 
 import {
   appendRows,
+  clearObjectIndexTableCache,
   clearSpreadsheetReadCache,
   columnName,
   configureStructuredSheet,
@@ -15,6 +16,7 @@ import {
   googleSheetsJson,
   listClassOptions,
   listObjectIndexTables,
+  writeObjectIndexCells,
   onSpreadsheetWrite,
   readFormattedSheet,
   readNamedColumns,
@@ -768,6 +770,9 @@ export async function getWorldIndex(key: WorldIndexKey, options: { refresh?: boo
   // lu avant le clic est relu pour la page rechargée. Les autres index sont des règles : ils
   // sont relus quand l'administrateur ou le MJ actualise (lib/data-refresh.ts).
   if (!options.refresh && isEntityWorldIndexKey(key) && await mustReread(worldIndexCache.get(key)?.loadedAt ?? Date.now())) options = { ...options, refresh: true }
+  // « Actualiser » des items : leur catalogue (gardé cinq minutes pour l'inventaire et les
+  // magasins) est relu aussi, sinon le bouton rendait la même copie.
+  if (options.refresh && key === OBJECTS_INDEX_KEY) clearObjectIndexTableCache()
   const cached = worldIndexCache.get(key)
   if (!options.refresh && cached && cached.expiresAt > Date.now()) return cached.promise
   // Passé quelques minutes, l'index gardé est rendu tout de suite et relu en arrière-plan
@@ -1379,8 +1384,13 @@ export function updateWorldIndexCell(key: WorldIndexKey, tabName: string, row: W
     const current = before.rows[rowIndex]?.[column] ?? ""
     if (options.previous !== undefined && !sameCellText(options.previous, current)) throw new Error("WORLD_INDEX_CELL_CHANGED")
     // Une case HTML-en-texte (le vocabulaire) garde son HTML tel quel, comme l'écrit sa page.
-    if (isHtmlTextColumn(key, tabName, target)) await writeCell(before, tabName, rowIndex, column, html)
-    else await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId: await sheetIdOf(sheet.spreadsheetId, tabName), rowNumber: rowIndex + 1, column, html })
+    const write = async () => {
+      if (isHtmlTextColumn(key, tabName, target)) await writeCell(before, tabName, rowIndex, column, html)
+      else await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId: await sheetIdOf(sheet.spreadsheetId, tabName), rowNumber: rowIndex + 1, column, html })
+    }
+    // Les items : le catalogue gardé (inventaire, magasins) reçoit la case, sans tout relire.
+    if (key === OBJECTS_INDEX_KEY) await writeObjectIndexCells({ fileId: sheet.spreadsheetId, tabName, rowNumber: rowIndex + 1, id: rowId(before, rowIndex) }, write, () => [{ header: target, html }])
+    else await write()
     await patchCachedRow(key, tabName, cachedIdentityOf(before, rowIndex), [{ header: target, html }])
     // La case est écrite. Ce qui suit (les liens vers d'autres index) peut échouer sans que
     // l'écriture soit annoncée comme refusée : la page croirait la case non enregistrée, et
@@ -1660,17 +1670,21 @@ export function updateWorldIndexFields(key: WorldIndexKey, tabName: string, row:
       const cell = `${columnName(target.column + 1)}${rowNumber}`
       data.push({ range: sheetTabRange(tabName, `${cell}:${cell}`), values: [[target.value]] })
     }
-    if (data.length) {
-      await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}/values:batchUpdate`, {
-        method: "POST",
-        body: JSON.stringify({ valueInputOption: "RAW", data }),
-      })
-      clearSpreadsheetReadCache(sheet.spreadsheetId)
+    const write = async () => {
+      if (data.length) {
+        await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}/values:batchUpdate`, {
+          method: "POST",
+          body: JSON.stringify({ valueInputOption: "RAW", data }),
+        })
+        clearSpreadsheetReadCache(sheet.spreadsheetId)
+      }
+      if (formatted.length) {
+        const sheetId = await sheetIdOf(sheet.spreadsheetId, tabName)
+        for (const cell of formatted) await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId, rowNumber, column: cell.column, html: cell.html })
+      }
     }
-    if (formatted.length) {
-      const sheetId = await sheetIdOf(sheet.spreadsheetId, tabName)
-      for (const cell of formatted) await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId, rowNumber, column: cell.column, html: cell.html })
-    }
+    if (key === OBJECTS_INDEX_KEY) await writeObjectIndexCells({ fileId: sheet.spreadsheetId, tabName, rowNumber, id: rowId(table, rowIndex) }, write, () => written)
+    else await write()
     await patchCachedRow(key, tabName, cachedIdentityOf(table, rowIndex), written)
     const nameField = Object.entries(fields).find(([header]) => columnOf(table.headers, header) === nameColumn)?.[1]
     const newName = nameField === undefined ? "" : htmlToRichText(String(nameField)).text.replace(/\s+/g, " ").trim()

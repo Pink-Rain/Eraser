@@ -91,17 +91,27 @@ async function linkedViewOf(key: WorldIndexKey, block: ViewBlock): Promise<Saved
 
 async function viewData(key: WorldIndexKey, raw: ViewBlock, match: Parameters<typeof viewBlockData>[1]["match"], row: RowContext | null, player: boolean, rowPageOf: RowPageOf, account: Pick<AuthorizedUser, "uid" | "role">) {
   const uid = account.uid
+  // Ce qui ne dépend pas de la vue enregistrée part tout de suite, en même temps qu'elle :
+  // l'index (copie en mémoire), ses formes, ses cartes et ses formulaires (copies du serveur
+  // partagé, relues toutes les 30 s). Jamais Google.
+  const sourceRead = sourceFor(key, account, player)
+  const sharedReads = Promise.all([listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), listIndexLayouts(key).catch(() => ({}))])
+  sourceRead.catch(() => undefined)
   const block = blockForRow(linkedBlock(raw, await linkedViewOf(key, raw)), row)
-  // « {Moi} » : les comptes du lecteur (lus seulement si une condition le demande).
-  const me = block.where?.conditions.some(isMeCondition) ? await identityUidsForUser(uid).catch(() => [uid]) : undefined
-  // Ce qu'une vue lit : l'index (copie en mémoire), les formes et les cartes de l'index (copies
-  // du serveur partagé, relues toutes les 30 s) et, s'il est choisi, un preset. Jamais Google.
-  const [source, presentations, cards, preset, layouts, stats] = await Promise.all([sourceFor(key, account, player), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), presetLayout(block.presetId), listIndexLayouts(key).catch(() => ({})), block.kind === "dashboard" ? listIndexStatsRecord(key).catch(() => ({ stats: [], groups: [] })) : undefined])
+  // « {Moi} » : les comptes du lecteur (lus seulement si une condition le demande), le preset choisi, les stats et les calendriers.
+  const [source, [presentations, cards, layouts], me, preset, stats, calendars] = await Promise.all([
+    sourceRead,
+    sharedReads,
+    block.where?.conditions.some(isMeCondition) ? identityUidsForUser(uid).catch(() => [uid]) : Promise.resolve(undefined),
+    presetLayout(block.presetId),
+    block.kind === "dashboard" ? listIndexStatsRecord(key).catch(() => ({ stats: [], groups: [] })) : Promise.resolve(undefined),
+    block.kind === "calendar" ? calendarTables() : Promise.resolve(undefined),
+  ])
   const variant = block.presetId?.startsWith(PRESENTATION_VARIANT_PREFIX) ? presentationVariant(presentations, block.tab, block.presetId.slice(PRESENTATION_VARIANT_PREFIX.length)) : null
   const input = { tab: block.tab, kind: block.kind, limit: block.limit, match, layout: block.layout, preset: variant ?? preset, cardId: block.cardId, where: block.where, sort: block.sort, me, click: block.click }
   const data = viewBlockData(source, input, { presentations, cards, layouts, stats }, readOptions(key, player, rowPageOf))
   if (!data) return null
-  return { ...data, ...(block.kind === "calendar" ? { calendars: await calendarTables() } : {}) }
+  return { ...data, ...(calendars !== undefined ? { calendars } : {}) }
 }
 
 async function statData(key: WorldIndexKey, statId: string, player: boolean, rowPageOf: RowPageOf, account: Pick<AuthorizedUser, "uid" | "role">) {

@@ -47,6 +47,8 @@ export async function GET(request: Request) {
   if (!account) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   const index = new URL(request.url).searchParams.get("index")?.trim() ?? ""
   try {
+    // Les pages (pour dire lesquelles montrent chaque vue) sont lues en même temps que le reste.
+    const pages = index ? listCustomPages().catch(() => []) : Promise.resolve([])
     const [views, presets, layouts, layoutPresets, cards, cardPresets, presentations, viewPresets, statsRecord, locks] = await Promise.all([
       index ? listIndexViews(index) : Promise.resolve([]),
       listColumnPresets(),
@@ -70,7 +72,7 @@ export async function GET(request: Request) {
         savedViewsUnavailable = true
         console.error("INDEX_SAVED_VIEWS_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
       }
-      savedViewPages = savedViewUses(await listCustomPages().catch(() => []), index)
+      savedViewPages = savedViewUses(await pages, index)
     }
     return NextResponse.json({ views, presets, layouts, layoutPresets, cards, cardPresets, presentations, viewPresets, stats: statsRecord.stats, statGroups: statsRecord.groups, locks, savedViews, savedViewPages, ...(savedViewsUnavailable ? { savedViewsUnavailable: true } : {}) })
   } catch (error) {

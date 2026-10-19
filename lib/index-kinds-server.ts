@@ -39,13 +39,17 @@ async function worldKeys() {
   return [...builtin.filter((key): key is WorldIndexKey => Boolean(key)), ...custom]
 }
 
-/** Les index du monde lus (trois à la fois : le quota Google est commun à toute la table). */
-export async function readWorldIndexes(): Promise<WorldIndexData[]> {
+/**
+ * Les index du monde lus (trois à la fois : le quota Google est commun à toute la table).
+ * `failed` : un index n'a pas pu être lu (le recensement est incomplet).
+ */
+export async function readWorldIndexes(): Promise<WorldIndexData[] & { failed?: boolean }> {
   const keys = await worldKeys()
-  const out: WorldIndexData[] = []
+  const out: WorldIndexData[] & { failed?: boolean } = []
   for (let start = 0; start < keys.length; start += 3) {
     const batch = await Promise.all(keys.slice(start, start + 3).map((key) => getWorldIndexQuick(key).catch((error) => {
       console.error("INDEX_KINDS_READ_FAILED", key, error instanceof Error ? error.message : error)
+      out.failed = true
       return null
     })))
     for (const data of batch) if (data) out.push(data)
@@ -53,19 +57,24 @@ export async function readWorldIndexes(): Promise<WorldIndexData[]> {
   return out
 }
 
-const cache = new Map<IndexColumnKind, { at: number; promise: Promise<IndexWithKind[]> }>()
+const cache = new Map<IndexColumnKind, { at: number; promise: Promise<IndexWithKind[]>; partial?: boolean }>()
 const CACHE_MS = 5 * 60_000
+/** Un recensement incomplet (un index illisible un instant) n'est gardé que le temps de réessayer. */
+const PARTIAL_CACHE_MS = 20_000
 
 /** Les index qui ont une colonne de ce type : l'Index des objets d'abord, puis les autres par titre. */
 export function indexesWithColumnKind(kind: IndexColumnKind, options: { fresh?: boolean } = {}): Promise<IndexWithKind[]> {
   const known = cache.get(kind)
-  if (!options.fresh && known && Date.now() - known.at < CACHE_MS) return known.promise
+  if (!options.fresh && known && Date.now() - known.at < (known.partial ? PARTIAL_CACHE_MS : CACHE_MS)) return known.promise
+  const entry: { at: number; promise: Promise<IndexWithKind[]>; partial?: boolean } = { at: Date.now(), promise: Promise.resolve([]) }
+  let objectsFailed = false
   const promise = (async () => {
     const [objects, worlds] = await Promise.all([
-      listObjectIndexTablesForDisplay().catch(() => [] as ObjectIndexTable[]),
+      listObjectIndexTablesForDisplay().catch(() => { objectsFailed = true; return [] as ObjectIndexTable[] }),
       readWorldIndexes(),
     ])
     const out: IndexWithKind[] = []
+    if (worlds.failed || objectsFailed) entry.partial = true
     const objectTabs = objects.flatMap((table) => { const column = columnOfKind(objectTableSpecs(table), kind); return column ? [{ tab: table.tabName, column }] : [] })
     if (objectTabs.length) out.push({ key: OBJECT_REFERENCE_INDEX, title: OBJECTS_TITLE, tabs: objectTabs })
     const others: IndexWithKind[] = []
@@ -76,7 +85,8 @@ export function indexesWithColumnKind(kind: IndexColumnKind, options: { fresh?: 
     others.sort((left, right) => left.title.localeCompare(right.title, "fr"))
     return [...out, ...others]
   })()
-  cache.set(kind, { at: Date.now(), promise })
+  entry.promise = promise
+  cache.set(kind, entry)
   promise.catch(() => { if (cache.get(kind)?.promise === promise) cache.delete(kind) })
   return promise
 }

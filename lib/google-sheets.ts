@@ -4,6 +4,7 @@ import {
 } from "@/lib/google-service-account"
 import { driveImageFormula, isGeneratedObjectIcon, objectIconDriveFileId, suggestedObjectIconKey } from "@/lib/object-icons"
 import { ensureObjectIconsOnDrive } from "@/lib/object-icon-drive"
+import { AsyncLocalStorage } from "node:async_hooks"
 import { cache } from "react"
 import { and, desc, eq, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm"
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core"
@@ -482,8 +483,11 @@ function announceSpreadsheetWrite(path: string, method: string) {
   // Les copies partagées de ce classeur (lib/shared-reads.ts) ne servent plus, pour aucune installation.
   void markSpreadsheetChanged(spreadsheetId)
   // Le classeur des items écrit (par le moteur des index, l'inventaire…) : l'inventaire, les
-  // magasins et l'index relisent ce classeur, et lui seul.
-  if (objectIndexTableCache?.tables.some((table) => table.fileId === spreadsheetId)) markObjectIndexFileChanged(spreadsheetId)
+  // magasins et l'index relisent ce classeur, et lui seul. Sauf les cases que le moteur écrit
+  // lui-même (`writeObjectIndexCells`) : elles sont recopiées dans le catalogue gardé.
+  const ownCells = objectCellWrite.getStore()
+  if (ownCells && ownCells.fileId === spreadsheetId) ownCells.wrote = true
+  else if (objectIndexTableCache?.tables.some((table) => table.fileId === spreadsheetId)) markObjectIndexFileChanged(spreadsheetId)
   for (const listener of spreadsheetWriteListeners) {
     try { listener(spreadsheetId) } catch { /* un auditeur en échec n'empêche pas l'écriture */ }
   }
@@ -1599,6 +1603,50 @@ function markObjectIndexFileChanged(fileId: string) {
   objectIndexTablesRequest = null
   objectIndexTablesVersion += 1
   clearInventoryWorkbookCache()
+}
+
+/** Les cases d'items que le moteur des index écrit en ce moment (voir `writeObjectIndexCells`). */
+const objectCellWrite = new AsyncLocalStorage<{ fileId: string; wrote: boolean }>()
+
+/**
+ * Des cases d'une ligne d'items écrites par le moteur des index (une case, une fiche) : le
+ * catalogue gardé en mémoire (inventaire, magasins, fouilles) reçoit les nouvelles valeurs au
+ * lieu de relire tout le classeur des items, grilles mises en forme comprises — ce qui suivait
+ * chaque case modifiée. La ligne est reconnue à son numéro et à son ID ; sans elle (catalogue
+ * absent, de secours, ligne déplacée), le classeur est relu comme avant.
+ */
+export async function writeObjectIndexCells<T>(target: { fileId: string; tabName: string; rowNumber: number; id: string }, write: () => Promise<T>, cells: () => Array<{ header: string; html: string }>): Promise<T> {
+  const scope = { fileId: target.fileId, wrote: false }
+  const result = await objectCellWrite.run(scope, write).catch((error) => {
+    // Une écriture a pu partir avant l'erreur : le classeur est relu.
+    if (scope.wrote) markObjectIndexFileChanged(target.fileId)
+    throw error
+  })
+  if (scope.wrote && !patchObjectIndexRow(target, cells())) markObjectIndexFileChanged(target.fileId)
+  return result
+}
+
+function patchObjectIndexRow(target: { fileId: string; tabName: string; rowNumber: number; id: string }, cells: Array<{ header: string; html: string }>) {
+  const cache = objectIndexTableCache
+  if (!cache || fallbackObjectIndexTables.has(cache.tables) || staleObjectIndexFiles.has(target.fileId)) return false
+  const table = cache.tables.find((candidate) => candidate.fileId === target.fileId && candidate.tabName === target.tabName)
+  const row = table?.rows.find((candidate) => candidate.rowNumber === target.rowNumber)
+  if (!table || !row) return false
+  const idColumn = table.headers.findIndex((header) => foldName(header) === "id")
+  if (idColumn >= 0 && (row.values[idColumn] ?? "").trim() !== target.id.trim()) return false
+  const columns = cells.map((cell) => table.headers.findIndex((header) => foldName(header) === foldName(cell.header)))
+  if (columns.some((column) => column < 0)) return false
+  cells.forEach((cell, index) => {
+    const rich = /<[a-z]/i.test(cell.html)
+    row.values[columns[index]] = rich ? htmlToRichText(cell.html).text : cell.html
+    row.html[columns[index]] = rich ? cell.html : richTextHtml(cell.html)
+  })
+  // Une lecture partie avant l'écriture ne remplace pas la copie corrigée ; l'inventaire
+  // (qui reprend des colonnes des items) est relu.
+  objectIndexTablesRequest = null
+  objectIndexTablesVersion += 1
+  clearInventoryWorkbookCache()
+  return true
 }
 
 /** Un tableau tel que lu dans Sheets, avant `fillMissingObjectIndexHeaders` (en-têtes repris retirés). */

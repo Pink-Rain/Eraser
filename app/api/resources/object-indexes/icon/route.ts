@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-import { listObjectIndexTables, setObjectIndexIcon } from "@/lib/google-sheets"
+import { setObjectIndexIcon } from "@/lib/google-sheets"
 import { forgetObjectIconFolderFiles, uploadObjectIcon } from "@/lib/object-icon-drive"
 import { OBJECT_INDEX_CHANGED_MESSAGE, parseObjectIndexRowRef } from "@/lib/object-index-refs"
 import { authorizedAccount } from "@/lib/server-auth"
@@ -27,7 +27,8 @@ export async function POST(request: Request) {
     const driveFileId = await uploadObjectIcon(name, file.type, await file.arrayBuffer())
     forgetObjectIconFolderFiles()
     await setObjectIndexIcon(fileId, tabName, row, driveFileId)
-    return NextResponse.json({ ok: true, tables: await listObjectIndexTables() })
+    // La page relit l'index elle-même : le catalogue entier n'a pas à voyager dans la réponse.
+    return NextResponse.json({ ok: true })
   } catch (error) {
     if (error instanceof Error && error.message === "OBJECT_INDEX_CHANGED") return NextResponse.json({ error: OBJECT_INDEX_CHANGED_MESSAGE }, { status: 409 })
     return NextResponse.json({ error: "L’icône n’a pas pu être importée dans le Drive." }, { status: 400 })

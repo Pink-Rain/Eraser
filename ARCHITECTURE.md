@@ -136,7 +136,10 @@ pour tout index. Sa page est `WorldIndexPage`. Particularités :
 - ses colonnes prennent le type et les verrous des items (`objectColumnSpec`,
   `objectColumnPolicy`) : l’inventaire, les magasins et la table les lisent par leur nom ;
 - toute écriture dans son classeur fait relire les items à l’inventaire et aux magasins
-  (`announceSpreadsheetWrite`).
+  (`announceSpreadsheetWrite`), sauf les cases que le moteur écrit lui-même (case, fiche) :
+  `writeObjectIndexCells` les recopie dans le catalogue gardé, reconnu par numéro et ID de ligne,
+  et ne fait relire le classeur que si la ligne n’y est pas telle quelle.
+- « Actualiser » (`refresh=1`) relit aussi le catalogue des items.
 Les vues d’avant désignaient un onglet par « fichier:sheetId » : la page les lit sous son nom.
 
 ## Rareté et emplacements, sections, listes d’index, index des pages

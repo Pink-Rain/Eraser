@@ -229,6 +229,11 @@ test("Emplacements des items : liste liée à Environnement et Magasin, « - » 
   const values = columns.splitListValue("Marché ordinaire - Marché noir -\nForêt - Foret ordinaire", options, "-");
   assert.deepEqual(values, ["Marché ordinaire", "Marché noir", "Forêt", "Foret ordinaire"]);
   assert.deepEqual(values.map((value) => columns.matchChoice(value, options)?.value ?? null), ["Marché", "Marché noir", "Forêt", null]);
+  // Le premier choix de la liste l'emporte, qu'il corresponde par sa valeur ou par un alias
+  // (la liste est rangée une fois par clé : l'ordre reste celui d'avant).
+  const ordered = [{ value: "Lame", aliases: ["Épée"] }, { value: "Épée" }];
+  assert.equal(columns.matchChoice("epee", ordered)?.value, "Lame");
+  assert.equal(columns.matchChoice("Épées", [{ value: "Épée" }, { value: "Lame", aliases: ["Épée"] }])?.value, "Épée");
   assert.equal(columns.joinListValue(["Forêt", "Marché noir"], "-"), "Forêt - Marché noir");
   assert.equal(columns.joinListValue(["Forêt", "Ville"]), "Forêt, Ville");
   const { ChoicePicker } = await vite.ssrLoadModule("/components/eraser/index-cells.tsx");

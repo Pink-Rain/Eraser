@@ -201,6 +201,8 @@ export function knownCustomPages(): CustomPage[] | null {
  */
 let firstRead: Promise<unknown> | null = null
 let firstReadDone = false
+/** Jusqu'à quand le premier rendu peut attendre la première lecture (le même délai pour toutes les pages). */
+let firstReadDeadline: number | null = null
 
 /**
  * Comme `knownCustomPages`, mais au tout premier rendu (copie encore jamais lue) attend la
@@ -211,7 +213,10 @@ export async function knownCustomPagesSoon(budgetMs = 3_000): Promise<CustomPage
   if (known || firstReadDone || !sharedStoreAvailable()) return knownCustomPages()
   knownCustomPages() // lance la lecture si elle n'est pas déjà partie
   firstRead ??= listCustomPages().catch(() => null).finally(() => { firstReadDone = true })
-  await withTimeBudget(firstRead, budgetMs, "CUSTOM_PAGES_SLOW").catch(() => null)
+  // Une seule attente en tout, pas une par page : passé ce délai, plus personne n'attend.
+  firstReadDeadline ??= Date.now() + budgetMs
+  const left = firstReadDeadline - Date.now()
+  if (left > 0) await withTimeBudget(firstRead, left, "CUSTOM_PAGES_SLOW").catch(() => null)
   return knownCustomPages()
 }
 
@@ -222,6 +227,7 @@ export function forgetCustomPages() {
   refreshing = null
   firstRead = null
   firstReadDone = false
+  firstReadDeadline = null
 }
 
 export async function readCustomPage(id: string, options: { fresh?: boolean } = {}) {
