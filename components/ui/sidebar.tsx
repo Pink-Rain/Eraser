@@ -522,7 +522,9 @@ function SidebarMenuButton({
     />
   )
 
-  if (!tooltip) {
+  // Eraser : barre dépliée (ou téléphone), l'infobulle ne s'affiche jamais. Sans elle, un
+  // survol ne crée plus une bulle cachée à positionner, et la barre se redessine plus vite.
+  if (!tooltip || state !== "collapsed" || isMobile) {
     return button
   }
 
@@ -538,7 +540,6 @@ function SidebarMenuButton({
       <TooltipContent
         side="right"
         align="center"
-        hidden={state !== "collapsed" || isMobile}
         {...tooltip}
       />
     </Tooltip>

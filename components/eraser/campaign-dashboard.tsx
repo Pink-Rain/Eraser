@@ -69,13 +69,19 @@ export function CampaignDashboard({
   /** Cache (ou remontre) un personnage aux autres joueurs : il reste dans la campagne, son joueur le voit toujours. */
   async function toggleHidden(character: CampaignMemberRecord) {
     const hidden = !hiddenCharacters.includes(character.id)
+    // L'œil change tout de suite ; un refus le remet comme il était.
+    const before = hiddenCharacters
+    setHiddenCharacters(hidden ? [...hiddenCharacters, character.id] : hiddenCharacters.filter((id) => id !== character.id))
     setHidingId(character.id); setHidingError("")
     try {
       const response = await fetch(`/api/campaigns/${encodeURIComponent(campaign.id)}/characters`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ characterId: character.id, hidden }) })
       const payload = (await response.json().catch(() => ({}))) as { hidden?: string[]; error?: string }
       if (!response.ok || !payload.hidden) throw new Error(payload.error || "Ce choix n’a pas pu être enregistré.")
       setHiddenCharacters(payload.hidden)
-    } catch (caught) { setHidingError(caught instanceof Error ? caught.message : "Ce choix n’a pas pu être enregistré.") }
+    } catch (caught) {
+      setHiddenCharacters(before)
+      setHidingError(caught instanceof Error ? caught.message : "Ce choix n’a pas pu être enregistré.")
+    }
     setHidingId("")
   }
   const [members, setMembers] = useState(initialMembers)
@@ -116,12 +122,17 @@ export function CampaignDashboard({
     return Boolean(payload.campaign)
   }
 
+  // Le titre et la description s'affichent dès « Enregistrer » ; un refus rouvre l'éditeur avec le texte tapé.
   async function saveTitle() {
-    if (await update({ name: title })) setEditingTitle(false)
+    const before = campaign
+    setCampaign({ ...campaign, name: title }); setEditingTitle(false)
+    if (!await update({ name: title }).catch(() => false)) { setCampaign(before); setEditingTitle(true) }
   }
 
   async function saveDescription() {
-    if (await update({ description })) setEditingDescription(false)
+    const before = campaign
+    setCampaign({ ...campaign, description }); setEditingDescription(false)
+    if (!await update({ description }).catch(() => false)) { setCampaign(before); setEditingDescription(true) }
   }
 
   async function saveBanner(event: FormEvent) {
@@ -269,7 +280,7 @@ export function CampaignDashboard({
               const classes = parseListCell(character.classes).entries.join(" · ")
               const honoraryTitle = parseListCell(character.honoraryTitle).selected
               const classAndLevel = [classes || NO_CLASS, character.level ? `Niveau ${character.level}` : ""].filter(Boolean).join(" · ")
-              return <article key={character.id} className="group relative grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] overflow-hidden rounded-2xl border bg-card/75 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"><div className="relative min-h-36 bg-muted"><div className="absolute inset-0 grid place-items-center"><CircleUserRound className="size-10 text-primary/20" /></div><img src={`/api/characters/portrait/${encodeURIComponent(character.id)}`} alt={`Portrait de ${character.name}`} loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover transition duration-300 group-hover:scale-[1.025]" onError={(event) => { event.currentTarget.style.display = "none" }} /></div><div className="min-w-0 p-4 pr-11"><h3 className="font-display text-xl font-semibold leading-tight">{character.name}{character.playerName && <span className="font-sans text-sm font-normal text-muted-foreground"> • {character.playerName}</span>}</h3>{honoraryTitle && <p className="mt-1 text-sm font-medium leading-snug" style={{ color: campaign.accentColor }}>{honoraryTitle}</p>}{classAndLevel && <p className="mt-3 text-sm font-semibold leading-snug text-foreground/80">{classAndLevel}</p>}{people && <p className="mt-1 text-sm leading-snug text-muted-foreground">{people}</p>}{canManage && hiddenCharacters.includes(character.id) && <p className="mt-2 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><EyeOff className="size-3" />Caché aux autres joueurs</p>}</div><div className="absolute right-2 top-2 flex flex-col gap-1">{canHideCharacters && <Button type="button" size="icon-sm" variant={hiddenCharacters.includes(character.id) ? "secondary" : "ghost"} aria-pressed={hiddenCharacters.includes(character.id)} disabled={hidingId === character.id} aria-label={hiddenCharacters.includes(character.id) ? `Montrer ${character.name} aux autres joueurs` : `Cacher ${character.name} aux autres joueurs`} title={hiddenCharacters.includes(character.id) ? "Caché aux autres joueurs — cliquer pour le leur montrer" : "Visible de tous — cliquer pour le cacher aux autres joueurs (son joueur le voit toujours)"} onClick={() => void toggleHidden(character)}>{hidingId === character.id ? <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : hiddenCharacters.includes(character.id) ? <EyeOff /> : <Eye />}</Button>}{canOpen && <Button asChild size="icon-sm" variant="ghost" aria-label={`Ouvrir la fiche de ${character.name}`} title="Ouvrir la fiche"><Link href={`/personnage/${encodeURIComponent(character.id)}`} prefetch={false}><ArrowUpRight /></Link></Button>}{canManage && <Button type="button" size="icon-sm" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" aria-label={`Retirer ${character.name} de la campagne`} title="Retirer de la campagne" onClick={() => setRemoveTarget(character)}><Trash2 /></Button>}</div></article>
+              return <article key={character.id} className="group relative grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] overflow-hidden rounded-2xl border bg-card/75 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"><div className="relative min-h-36 bg-muted"><div className="absolute inset-0 grid place-items-center"><CircleUserRound className="size-10 text-primary/20" /></div><img src={`/api/characters/portrait/${encodeURIComponent(character.id)}`} alt={`Portrait de ${character.name}`} loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover transition duration-300 group-hover:scale-[1.025]" onError={(event) => { event.currentTarget.style.display = "none" }} /></div><div className="min-w-0 p-4 pr-11"><h3 className="font-display text-xl font-semibold leading-tight">{character.name}{character.playerName && <span className="font-sans text-sm font-normal text-muted-foreground"> • {character.playerName}</span>}</h3>{honoraryTitle && <p className="mt-1 text-sm font-medium leading-snug" style={{ color: campaign.accentColor }}>{honoraryTitle}</p>}{classAndLevel && <p className="mt-3 text-sm font-semibold leading-snug text-foreground/80">{classAndLevel}</p>}{people && <p className="mt-1 text-sm leading-snug text-muted-foreground">{people}</p>}{canManage && hiddenCharacters.includes(character.id) && <p className="mt-2 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><EyeOff className="size-3" />Caché aux autres joueurs</p>}</div><div className="absolute right-2 top-2 flex flex-col gap-1">{canHideCharacters && <Button type="button" size="icon-sm" variant={hiddenCharacters.includes(character.id) ? "secondary" : "ghost"} aria-pressed={hiddenCharacters.includes(character.id)} disabled={hidingId === character.id} aria-label={hiddenCharacters.includes(character.id) ? `Montrer ${character.name} aux autres joueurs` : `Cacher ${character.name} aux autres joueurs`} title={hiddenCharacters.includes(character.id) ? "Caché aux autres joueurs — cliquer pour le leur montrer" : "Visible de tous — cliquer pour le cacher aux autres joueurs (son joueur le voit toujours)"} onClick={() => void toggleHidden(character)}>{hiddenCharacters.includes(character.id) ? <EyeOff /> : <Eye />}</Button>}{canOpen && <Button asChild size="icon-sm" variant="ghost" aria-label={`Ouvrir la fiche de ${character.name}`} title="Ouvrir la fiche"><Link href={`/personnage/${encodeURIComponent(character.id)}`} prefetch={false}><ArrowUpRight /></Link></Button>}{canManage && <Button type="button" size="icon-sm" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" aria-label={`Retirer ${character.name} de la campagne`} title="Retirer de la campagne" onClick={() => setRemoveTarget(character)}><Trash2 /></Button>}</div></article>
             }) : <p className="text-sm text-muted-foreground">Aucun personnage dans cette campagne.</p>}
           </div>
           {canManage && !addingCharacter && availableError && <p className="mt-3 text-sm text-destructive">{availableError}</p>}

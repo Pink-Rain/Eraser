@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Check, LoaderCircle, Plus, Search, Sparkles, Trash2, UserRound, Users, X } from "lucide-react"
 
 import { RichTextField, RichTextView } from "@/components/eraser/rich-text"
@@ -135,15 +135,33 @@ export function CharacterRelations({ characterId, campaigns }: { characterId: st
     return () => { active = false }
   }, [characterId, endpoint])
 
+  // Changer le niveau ou la note d'une relation, ou la retirer, s'affiche tout de suite ; seule
+  // la réponse de la dernière demande compte, et un refus remet les relations d'avant.
+  const requestSeq = useRef(0)
   async function request(body: Record<string, unknown>) {
-    setPending(true); setError("")
+    const optimistic = (body.action === "update" || body.action === "delete") && typeof body.relationId === "string"
+    const before = relations
+    const seq = ++requestSeq.current
+    if (optimistic) {
+      setRelations(body.action === "delete"
+        ? relations.filter((relation) => relation.id !== body.relationId)
+        : relations.map((relation) => relation.id !== body.relationId ? relation : {
+          ...relation,
+          level: typeof body.level === "number" ? body.level as RelationLevel : relation.level,
+          personalNotes: typeof body.personalNotes === "string" ? body.personalNotes : relation.personalNotes,
+        }))
+    } else setPending(true)
+    setError("")
     try {
       const response = await fetch(endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
       const payload = (await response.json()) as { relations?: Relation[]; error?: string }
       if (!response.ok || !payload.relations) throw new Error(payload.error)
-      setRelations(payload.relations)
-    } catch (caught) { setError(caught instanceof Error && caught.message ? caught.message : "La relation n’a pas pu être enregistrée.") }
-    setPending(false)
+      if (requestSeq.current === seq) setRelations(payload.relations)
+    } catch (caught) {
+      if (optimistic && requestSeq.current === seq) setRelations(before)
+      setError(caught instanceof Error && caught.message ? caught.message : "La relation n’a pas pu être enregistrée.")
+    }
+    if (!optimistic) setPending(false)
   }
 
   async function openCreation() {

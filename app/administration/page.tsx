@@ -22,7 +22,7 @@ export default async function AdministrationPage() {
         description="Les comptes, la connexion à Google et la corbeille, puis ce qui s’est mal passé sur ce serveur."
         links={[
           { href: "/administration/comptes-et-roles", label: "Comptes et rôles", description: "Les comptes de la table, leurs rôles et leurs accès.", icon: Users },
-          { href: "/administration/google-drive", label: "Google Drive et Sheets", description: "Le compte Google relié, les feuilles d’Eraser et leurs performances.", icon: HardDrive },
+          { href: "/administration/google-drive", label: "Google Drive et Sheets", description: "Le compte Google relié, les feuilles d’Eraser, leurs performances et la fluidité de cet ordinateur.", icon: HardDrive },
           { href: "/administration/corbeille", label: "Corbeille", description: "Les personnages, campagnes et index supprimés, à restaurer.", icon: Trash2 },
           ...pages,
         ]}

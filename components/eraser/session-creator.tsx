@@ -2,7 +2,7 @@
 
 import { NO_CLASS } from "@/lib/class-visibility"
 import { displayedMultipleValue } from "@/lib/multiple-values"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ArrowUpRight, CalendarPlus, CircleMinus, CircleUserRound, ImagePlus, LoaderCircle, Pencil, Plus, Trash2, UsersRound } from "lucide-react"
 import Link from "next/link"
 
@@ -20,7 +20,7 @@ import { SavedShopCollection } from "@/components/eraser/shop-generator"
 import { SessionEvents } from "@/components/eraser/session-events"
 import { RichTextField } from "@/components/eraser/rich-text"
 import { RevealAllBar, RevealToggle, SessionRevealProvider } from "@/components/eraser/session-reveal"
-import { sessionItemKey, sessionItemKeys, type SessionRevealKind } from "@/lib/session-reveal"
+import { hiddenAfterChange, sessionItemKey, sessionItemKeys, type SessionRevealKind } from "@/lib/session-reveal"
 import { replaceAppUrl } from "@/components/eraser/app-tabs"
 import type { CampaignNpcRecord, SavedShopRecord, ShopGeneratorItem } from "@/lib/shop-schema"
 import { builtinShopTypes, type ShopTypeDefinition } from "@/lib/shop-types"
@@ -68,6 +68,23 @@ function PlayerCard({ member, pending, onRemove }: { member: SessionMember; pend
   </article>
 }
 
+type Membership = { characterIds?: string[]; npcIds?: string[]; shopIds?: string[] }
+
+/** La session après des ajouts et retraits, telle que le serveur l'écrira : une chose ajoutée arrive cachée. */
+function withMembership(session: CampaignSessionRecord, add: Membership, remove: Membership): CampaignSessionRecord {
+  const lists = { characterIds: session.characterIds, npcIds: session.npcIds, shopIds: session.shopIds }
+  let hidden = session.hidden ?? []
+  const kinds: Array<[keyof Membership, SessionRevealKind]> = [["characterIds", "character"], ["npcIds", "npc"], ["shopIds", "shop"]]
+  for (const [key, kind] of kinds) {
+    if (!add[key]?.length && !remove[key]?.length) continue
+    const removed = new Set(remove[key] ?? [])
+    const next = [...new Set([...lists[key], ...(add[key] ?? [])])].filter((id) => !removed.has(id))
+    hidden = hiddenAfterChange(hidden, kind, lists[key], next)
+    lists[key] = next
+  }
+  return { ...session, ...lists, hidden }
+}
+
 export function SessionCreator({ campaignId, initialSessions, initialSessionId, members, npcs, shops, generatorItems, shopTypes = builtinShopTypes, events = [] }: {
   campaignId: string
   initialSessions: CampaignSessionRecord[]
@@ -111,9 +128,29 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
     return () => window.removeEventListener(SESSION_UPDATED_EVENT, listener)
   }, [campaignId])
 
+  // Ajouter ou retirer un joueur, un PNJ ou un magasin s'affiche tout de suite, comme le serveur
+  // le fera (lib/campaign-sessions.ts) ; seule la réponse de la dernière modification compte, et
+  // un refus remet la session comme elle était.
+  const changeSeq = useRef(0)
   async function change(body: Parameters<typeof patchSession>[2]) {
     if (!session) return
-    replace(await patchSession(campaignId, session.id, body))
+    const before = session
+    const seq = ++changeSeq.current
+    const membership = !(body instanceof FormData) && (body.add || body.remove) ? body : null
+    if (membership) replace(withMembership(session, membership.add ?? {}, membership.remove ?? {}))
+    try {
+      const saved = await patchSession(campaignId, session.id, body)
+      if (changeSeq.current === seq) replace(saved)
+    } catch (caught) {
+      if (membership && changeSeq.current === seq) replace(before)
+      throw caught
+    }
+  }
+
+  /** Un joueur ajouté ou retiré : rien n'est bloqué pendant l'enregistrement. */
+  function changePlayers(body: { add?: Membership; remove?: Membership }) {
+    setError("")
+    void change(body).catch((caught) => setError(caught instanceof Error ? caught.message : "La session n’a pas pu être modifiée."))
   }
 
   // La visibilité dans le journal : l'œil change tout de suite, l'enregistrement suit ; en cas
@@ -231,13 +268,13 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
       <section className="border-t pt-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <SectionTitle count={players.length}>Joueurs</SectionTitle>
-          {addable.length > 0 && <NativeSelect value="" aria-label="Ajouter un joueur" disabled={pending} onChange={(event) => { const id = event.target.value; if (id) void guarded(() => change({ add: { characterIds: [id] } })) }}>
+          {addable.length > 0 && <NativeSelect value="" aria-label="Ajouter un joueur" disabled={pending} onChange={(event) => { const id = event.target.value; if (id) changePlayers({ add: { characterIds: [id] } }) }}>
             <NativeSelectOption value="">+ Ajouter un joueur…</NativeSelectOption>
             {addable.map((member) => <NativeSelectOption key={member.id} value={member.id}>{member.name}</NativeSelectOption>)}
           </NativeSelect>}
         </div>
         {players.length
-          ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{players.map((member) => <PlayerCard key={member.id} member={member} pending={pending} onRemove={() => void guarded(() => change({ remove: { characterIds: [member.id] } }))} />)}</div>
+          ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{players.map((member) => <PlayerCard key={member.id} member={member} pending={pending} onRemove={() => changePlayers({ remove: { characterIds: [member.id] } })} />)}</div>
           : <p className="flex items-center gap-2 rounded-2xl border border-dashed px-5 py-8 text-sm text-muted-foreground"><UsersRound className="size-4" />{members.length ? "Aucun joueur dans cette session." : "Aucun personnage joueur dans la campagne."}</p>}
       </section>
 

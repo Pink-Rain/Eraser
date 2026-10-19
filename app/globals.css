@@ -648,8 +648,10 @@ body:has(.tabletop-detail-windows) [data-radix-popper-content-wrapper] {
  * flou ; plus aucun verre dépoli ni glissade de la barre latérale. Ce sont eux qui
  * redessinent la page à chaque image sur une carte graphique modeste.
  */
+/* Les enfants animés sont nommés : « [class*=…] * » forçait chaque élément de la page à
+   chercher ce texte chez tous ses parents, à chaque calcul des styles. */
 html[data-effects="light"] [class*="eraser-fx-"],
-html[data-effects="light"] [class*="eraser-fx-"] * { animation: none !important; }
+html[data-effects="light"] :is(.eraser-fx-flames, .eraser-fx-frost, .eraser-fx-mist, .eraser-fx-ooze) > :is(i, b, s) { animation: none !important; }
 html[data-effects="light"] .eraser-fx-blur,
 html[data-effects="light"] .eraser-fx-blur-soft,
 html[data-effects="light"] .eraser-fx-mist > i,

@@ -9,6 +9,7 @@ import { replacementFor, shellMenu, warmShellCopies } from "@/lib/custom-pages-s
 import { currentRequestPath } from "@/lib/request-path";
 import { currentAccount, currentViewAccount } from "@/lib/server-auth";
 import { applyEffectsScript } from "@/lib/visual-effects";
+import { warmUpOnce } from "@/lib/warm-up";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -28,6 +29,8 @@ export default async function RootLayout({
   const [account, viewAccount] = await Promise.all([currentAccount(), currentViewAccount()]);
   let content = children;
   if (account?.role && viewAccount) {
+    // Une fois par lancement : les index se lisent en arrière-plan pour s'ouvrir tout de suite (lib/warm-up.ts).
+    warmUpOnce(account.role);
     // Cette coque est rendue à chaque navigation (vinext relance le layout racine, requêtes
     // RSC comprises), et même deux fois par page : une première fois « à blanc », sans
     // paramètres de requête, pour y détecter une redirection, puis pour de vrai. Attendre ici

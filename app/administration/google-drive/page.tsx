@@ -4,6 +4,7 @@ import { redirect } from "next/navigation"
 
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
+import { FluidityPanel } from "@/components/eraser/fluidity-panel"
 import { GoogleDriveManager } from "@/components/eraser/google-drive-manager"
 import { PerformancePanel } from "@/components/eraser/performance-panel"
 import { SheetDiagnosticsGrid } from "@/components/eraser/sheet-diagnostics-grid"
@@ -115,6 +116,7 @@ export default async function GoogleDriveAdministrationPage({
         <Suspense fallback={<DeferredContentLoading label="Diagnostic des feuilles…" />}>
           <SheetDiagnostics writeTest={writeTest} />
         </Suspense>
+        <FluidityPanel />
         <PerformancePanel />
       </div>
     </AuthenticatedShell>

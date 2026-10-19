@@ -114,8 +114,13 @@ async function deleteSessionNoteRequest(campaignId: string, noteId: string) {
 }
 
 /** Cocher ou décocher une étape de quête : cochée dans la session affichée. */
+/** L'étape de quête cochée (ou décochée) telle qu'elle sera enregistrée. */
+function tickedQuest(step: SessionNote, done: boolean, sessionId: string): SessionNote {
+  return { ...step, quest: { after: step.quest?.after ?? "", done, doneIn: done ? sessionId : "" } }
+}
+
 function tickQuestRequest(campaignId: string, step: SessionNote, done: boolean, sessionId: string) {
-  return saveSessionNoteRequest(campaignId, { ...step, quest: { after: step.quest?.after ?? "", done, doneIn: done ? sessionId : "" } })
+  return saveSessionNoteRequest(campaignId, tickedQuest(step, done, sessionId))
 }
 
 /* ---------- Liens ---------- */
@@ -422,7 +427,6 @@ export function SessionNotesBoard({ campaignId, sessions, sessionId, notes, onNo
   const [filter, setFilter] = useState<SessionNoteType | "">("")
   const [draft, setDraft] = useState<NoteDraft | null>(null)
   const [error, setError] = useState("")
-  const [pending, setPending] = useState(false)
   const [flash, setFlash] = useState("")
   const searchRef = useRef<HTMLInputElement>(null)
   const linkLabel = useLinkLabel(entities, notes)
@@ -472,19 +476,29 @@ export function SessionNotesBoard({ campaignId, sessions, sessionId, notes, onNo
   }))
   async function remove(note: SessionNote) {
     if (!window.confirm(`Supprimer la note « ${sessionNoteLabel(note, 50)} » ?`)) return
-    setPending(true); setError("")
+    setError("")
+    // Retirée tout de suite ; un refus la remet à sa place.
+    const before = notes
+    onNotesChange(notes.filter((entry) => entry.id !== note.id))
     try {
       await deleteSessionNoteRequest(campaignId, note.id)
-      onNotesChange(notes.filter((entry) => entry.id !== note.id))
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Suppression impossible.") }
-    setPending(false)
+    } catch (caught) {
+      onNotesChange(before)
+      setError(caught instanceof Error ? caught.message : "Suppression impossible.")
+    }
   }
   async function tick(note: SessionNote, done: boolean) {
     setError("")
+    // Cochée tout de suite ; un refus remet la case comme elle était.
+    const shown = notes.map((entry) => entry.id === note.id ? tickedQuest(note, done, sessionId) : entry)
+    onNotesChange(shown)
     try {
       const saved = await tickQuestRequest(campaignId, note, done, sessionId)
-      onNotesChange(notes.map((entry) => entry.id === saved.id ? saved : entry))
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "La quête n’a pas pu être cochée.") }
+      onNotesChange(shown.map((entry) => entry.id === saved.id ? saved : entry))
+    } catch (caught) {
+      onNotesChange(shown.map((entry) => entry.id === note.id ? note : entry))
+      setError(caught instanceof Error ? caught.message : "La quête n’a pas pu être cochée.")
+    }
   }
   function saved(note: SessionNote) {
     onNotesChange(notes.some((entry) => entry.id === note.id) ? notes.map((entry) => entry.id === note.id ? note : entry) : [...notes, note])
@@ -501,7 +515,7 @@ export function SessionNotesBoard({ campaignId, sessions, sessionId, notes, onNo
       <h2 className="min-w-0 flex-1 truncate font-display text-lg font-semibold">{title}</h2>
       <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">{here.length}<span className="sr-only"> note{here.length > 1 ? "s" : ""}</span></span>
     </div>
-    <Button type="button" className="mt-3 w-full" disabled={!sessions.length || pending} onClick={() => newDraft("resume")}><Plus />Ajouter une note</Button>
+    <Button type="button" className="mt-3 w-full" disabled={!sessions.length} onClick={() => newDraft("resume")}><Plus />Ajouter une note</Button>
     <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
       <div className="relative min-w-[8rem] flex-1"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input ref={searchRef} id={id ? `${id}-search` : undefined} type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Chercher…" className="h-8 bg-background/60 pl-8 text-sm" aria-label="Chercher dans les notes" /></div>
       {counts.size > 1 && <span style={activeFilter ? tone(sessionNoteType(activeFilter).color) : undefined}>
@@ -562,10 +576,16 @@ export function SessionQuestChains({ campaignId, sessions, sessionId, notes, onN
   const questTone = tone(sessionNoteType("quete").color)
   async function tick(step: SessionNote, done: boolean) {
     setError("")
+    // Cochée tout de suite ; un refus remet la case comme elle était.
+    const shown = notes.map((note) => note.id === step.id ? tickedQuest(step, done, sessionId) : note)
+    onNotesChange(shown)
     try {
       const saved = await tickQuestRequest(campaignId, step, done, sessionId)
-      onNotesChange(notes.map((note) => note.id === saved.id ? saved : note))
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "La quête n’a pas pu être cochée.") }
+      onNotesChange(shown.map((note) => note.id === saved.id ? saved : note))
+    } catch (caught) {
+      onNotesChange(shown.map((note) => note.id === step.id ? step : note))
+      setError(caught instanceof Error ? caught.message : "La quête n’a pas pu être cochée.")
+    }
   }
   if (!moved.length && !ongoing.length) return <EmptyHint icon={Flag}>Aucune quête en cours. Ajoute une note « Quête » pour en suivre une.</EmptyHint>
   const row = (chain: (typeof chains)[number]) => {

@@ -639,7 +639,9 @@ const RANGE_CACHE_MS = 180_000
  * d'Eraser vide le cache de son classeur : ses propres changements ne sont jamais servis
  * en retard.
  */
-const RANGE_STALE_MS = 30 * 60_000
+// Six heures : une page revue au cours d'une longue séance s'affiche tout de suite (et se
+// relit derrière) au lieu d'attendre Google ; cela ne coûte aucune lecture de plus.
+const RANGE_STALE_MS = 6 * 3_600_000
 type RangeCacheEntry = { expiresAt: number; promise: Promise<string[][]>; value?: string[][]; loadedAt?: number; refreshing?: boolean; refreshFailed?: boolean; /** Quand la lecture a été lancée : « Actualiser » relit ce qui date d'avant. */ startedAt: number }
 const rangeReadCache = new Map<string, RangeCacheEntry>()
 

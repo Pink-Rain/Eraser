@@ -2,7 +2,8 @@
 
 import { EditorDockProvider } from "@/components/eraser/editor-dock"
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react"
-import { installNavigationCacheGuard } from "@/lib/navigation-cache"
+import { installFluidityJournal, notePageShown } from "@/lib/fluidity-journal"
+import { installNavigationCacheGuard, revalidateShownPage } from "@/lib/navigation-cache"
 import { PortraitFramingEffect } from "@/components/eraser/portrait-framing"
 import { PageEditButton } from "@/components/eraser/page-edit-button"
 import { SharePageButton } from "@/components/eraser/share-page"
@@ -139,12 +140,30 @@ export function useShellData() {
   return value
 }
 
-function IntentLink(props: ComponentProps<typeof Link>) {
-  // Automatic and hover prefetching both start the full Google-backed server
-  // render. When someone clicks before that slow prefetch completes, the
-  // router starts a second identical request. Keep navigation single-shot;
-  // route-level Suspense boundaries below make the destination appear at once.
-  return <Link {...props} prefetch={false} />
+/** Le temps de viser : un lien seulement traversé par la souris ne précharge rien. */
+const INTENT_DELAY_MS = 120
+
+function IntentLink({ onMouseEnter, onMouseLeave, onFocus, ...props }: ComponentProps<typeof Link>) {
+  // Le préchargement automatique de tous les liens lancerait le rendu complet (Google compris)
+  // de chaque page du menu. Un lien visé (survolé un instant, ou atteint au clavier) précharge
+  // seulement sa page : le clic, qui suit de 200 à 300 ms, la trouve prête ou en route — le clic
+  // arrivé pendant le préchargement reprend sa réponse (lib/navigation-cache.ts).
+  const router = useRouter()
+  const timer = useRef(0)
+  const href = typeof props.href === "string" ? props.href : ""
+  const prefetch = () => {
+    if (!href.startsWith("/") || href.startsWith("/api/")) return
+    window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => { try { router.prefetch(href) } catch { /* adresse refusée par le routeur */ } }, INTENT_DELAY_MS)
+  }
+  useEffect(() => () => window.clearTimeout(timer.current), [])
+  return <Link
+    {...props}
+    prefetch={false}
+    onMouseEnter={(event) => { onMouseEnter?.(event); prefetch() }}
+    onMouseLeave={(event) => { onMouseLeave?.(event); window.clearTimeout(timer.current) }}
+    onFocus={(event) => { onFocus?.(event); prefetch() }}
+  />
 }
 
 export type ShellUser = {
@@ -347,6 +366,14 @@ export function AppShell({
   // Une modification enregistrée rend périmées les pages gardées par le routeur : elles
   // sont oubliées, et revenir sur un index le relit au lieu d'en montrer l'ancienne copie.
   useEffect(() => installNavigationCacheGuard(), [])
+  // Le relevé de fluidité de cet ordinateur (Administration › Google Drive et Sheets).
+  useEffect(() => installFluidityJournal(), [])
+  useEffect(() => {
+    notePageShown(pathname)
+    // Une page revue depuis sa copie, périmée, se relit derrière son affichage.
+    const frame = requestAnimationFrame(() => revalidateShownPage())
+    return () => cancelAnimationFrame(frame)
+  }, [pathname])
 
   // Revenir sur une page (autre onglet d'Eraser, lien) la remet là où on l'avait laissée.
   const pageScrollerRef = useRef<HTMLDivElement>(null)

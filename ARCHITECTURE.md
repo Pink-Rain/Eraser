@@ -210,7 +210,37 @@ Le réglage « Fluidité » du compte (`lib/visual-effects.ts`) pose `data-effec
 quatre cœurs ou moins, ou au choix. `app/globals.css` y coupe les animations et flous des états
 de la fiche, tout `backdrop-filter` et la glissade de la barre latérale. Les surfaces
 permanentes (en-tête, chat, barres collantes, notifications) n'utilisent pas de flou
-d'arrière-plan : un fond opaque, que la page défile dessous ou non.
+d'arrière-plan : un fond opaque, que la page défile dessous ou non. Une règle CSS globale ne
+doit jamais avoir la forme « [attribut*=…] * » : chaque élément y cherche ce texte chez tous
+ses parents, à chaque calcul des styles.
+
+Le React Compiler (`vite.config.ts`) mémorise composants et calculs de rendu. Le lint applique
+ses règles (`react-hooks/*`) ; un composant qui les suspend (`eslint-disable react-hooks/…`)
+n'est pas compilé et garde son comportement.
+
+### Navigation
+
+- Le routeur de vinext 0.0.50 est retouché à la compilation (`eraserVinextRouter`, dans
+  `vite.config.ts`) : sa table des pages visitées est accessible (`__ERASER_VISITED_PAGES__`)
+  et dure 30 minutes, et chaque page n'a qu'une copie (le « contexte d'interception », la
+  page d'où l'on vient, ne sert qu'aux routes interceptées, qu'Eraser n'a pas). Si vinext
+  change, la compilation l'écrit et `lib/navigation-cache.ts` retombe sur l'oubli complet.
+- `lib/navigation-cache.ts` : une écriture vers `/api` n'oublie que la page où elle a été
+  faite ; une page revue depuis sa copie, d'avant une modification ou de plus d'une minute,
+  s'affiche aussitôt puis se relit en arrière-plan (mode « refresh » du routeur, sans vider
+  les autres copies comme `router.refresh()`). Deux demandes identiques d'une même page en
+  route (préchargement puis clic) partagent une seule réponse.
+- Les liens de la barre latérale préchargent leur page quand ils sont visés (survol de
+  120 ms, clavier), jamais d'office.
+
+### Données et mesures
+
+- `lib/warm-up.ts` : peu après le lancement par un MJ ou un admin, les index sont lus en
+  arrière-plan, une fois. Les caches de Google (plages, index, schémas, spécificités de
+  classe) rendent leur copie aussitôt et la relisent derrière pendant six heures.
+- Administration › Google Drive et Sheets › « Fluidité de cet ordinateur »
+  (`lib/fluidity-journal.ts`) : clics lents, gels de l'écran, temps de chaque page et
+  attentes du serveur, gardés dans le navigateur et copiables pour être envoyés.
 
 ## Tabletop
 

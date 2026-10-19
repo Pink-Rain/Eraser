@@ -827,7 +827,7 @@ function scheduleIdBackfill(key: WorldIndexKey) {
  */
 const WORLD_INDEX_CACHE_MS = 5 * 60_000
 /** Au-delà, la version gardée est trop vieille pour être rendue sans attendre. */
-const WORLD_INDEX_STALE_MS = 30 * 60_000
+const WORLD_INDEX_STALE_MS = 6 * 3_600_000
 /** Un index lu sans son schéma (lecture ratée) n'est gardé que le temps de réessayer. */
 const WORLD_INDEX_DEGRADED_MS = 15_000
 

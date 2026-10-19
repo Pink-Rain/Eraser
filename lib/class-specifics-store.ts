@@ -146,7 +146,7 @@ export async function listClassSpecifics(options: { create?: boolean; refresh?: 
 }
 
 const SPECIFICS_FRESH_MS = 3 * 60_000
-const SPECIFICS_STALE_MS = 30 * 60_000
+const SPECIFICS_STALE_MS = 6 * 3_600_000
 let backgroundRefresh: Promise<unknown> | null = null
 
 async function readClassSpecifics(options: { create?: boolean }): Promise<ClassSpecificsTable> {

@@ -309,9 +309,10 @@ function CategorySection({ category, inventory, pendingKey, openSearch, catalogL
 }
 
 /** L'inventaire avec les cases « équipé » changées mais pas encore confirmées par le serveur. */
-function withEquipped(inventory: CharacterInventoryRecord, overrides: Record<string, boolean>): CharacterInventoryRecord {
-  if (!Object.keys(overrides).length) return inventory
-  return { ...inventory, containers: inventory.containers.map((container) => container.slots.some((slot) => slot.id in overrides) ? { ...container, slots: container.slots.map((slot) => slot.id in overrides ? { ...slot, equipped: overrides[slot.id] } : slot) } : container) }
+function withOverrides(inventory: CharacterInventoryRecord, equipped: Record<string, boolean>, quantities: Record<string, number>): CharacterInventoryRecord {
+  if (!Object.keys(equipped).length && !Object.keys(quantities).length) return inventory
+  const touched = (slotId: string) => slotId in equipped || slotId in quantities
+  return { ...inventory, containers: inventory.containers.map((container) => container.slots.some((slot) => touched(slot.id)) ? { ...container, slots: container.slots.map((slot) => touched(slot.id) ? { ...slot, ...(slot.id in equipped ? { equipped: equipped[slot.id] } : {}), ...(slot.id in quantities ? { quantity: quantities[slot.id] } : {}) } : slot) } : container) }
 }
 
 export function CharacterInventory({ characterId, initialInventory, endpoint, flat = false, readOnly = false, mode = "character", inventory: controlledInventory, onInventoryChange, categories }: { characterId: string; initialInventory?: CharacterInventoryRecord; endpoint?: string; flat?: boolean; readOnly?: boolean; mode?: "character" | "npc"; inventory?: CharacterInventoryRecord | null; onInventoryChange?: (inventory: CharacterInventoryRecord) => void; /** Seulement ces familles (un bloc Inventaire « Armes seulement » d'une fiche d'index). */ categories?: InventoryCategory[] }) {
@@ -322,7 +323,11 @@ export function CharacterInventory({ characterId, initialInventory, endpoint, fl
   const storedInventory = controlled ? controlledInventory || emptyCharacterInventory() : ownInventory
   // Équiper ou déséquiper s'affiche tout de suite, avant la réponse du serveur ; un refus remet la case.
   const [equipOverrides, setEquipOverrides] = useState<Record<string, boolean>>({})
-  const inventory = useMemo(() => withEquipped(storedInventory, equipOverrides), [equipOverrides, storedInventory])
+  // Les quantités (+, −, retirer) aussi : les clics rapprochés sur une case partent en une
+  // seule écriture, chacune avec la quantité que Sheets avait juste avant (conflits détectés).
+  const [quantityOverrides, setQuantityOverrides] = useState<Record<string, number>>({})
+  const quantityQueues = useRef(new Map<string, { target: number; confirmed: number; itemId: string }>())
+  const inventory = useMemo(() => withOverrides(storedInventory, equipOverrides, quantityOverrides), [equipOverrides, quantityOverrides, storedInventory])
   const [initialLoading, setInitialLoading] = useState(!initialInventory && !controlled)
 
   function applyInventory(next: CharacterInventoryRecord | ((current: CharacterInventoryRecord) => CharacterInventoryRecord)) {
@@ -381,10 +386,41 @@ export function CharacterInventory({ characterId, initialInventory, endpoint, fl
 
   async function mutate(body: MutationBody, key: string) {
     if (readOnly) return false
+    if (body.action === "set-quantity") return changeQuantity(body)
+    return send(body, key)
+  }
+
+  async function changeQuantity(body: Extract<MutationBody, { action: "set-quantity" }>) {
+    setQuantityOverrides((current) => ({ ...current, [body.slotId]: body.quantity }))
+    const queues = quantityQueues.current
+    const running = queues.get(body.slotId)
+    // Une écriture part déjà pour cette case : elle enverra la dernière quantité demandée.
+    if (running) { running.target = body.quantity; return true }
+    const queue = { target: body.quantity, confirmed: body.expectedQuantity, itemId: body.expectedItemId }
+    queues.set(body.slotId, queue)
+    let saved = true
+    while (saved && queue.target !== queue.confirmed) {
+      const target = queue.target
+      saved = await send({ action: "set-quantity", slotId: body.slotId, quantity: target, expectedItemId: queue.itemId, expectedQuantity: queue.confirmed }, "")
+      if (saved) queue.confirmed = target
+    }
+    queues.delete(body.slotId)
+    // Enregistrée (l'inventaire reçu la porte) ou refusée (celui de Sheets revient) : la case
+    // montre de nouveau l'inventaire enregistré.
+    setQuantityOverrides((current) => {
+      if (!(body.slotId in current)) return current
+      const next = { ...current }
+      delete next[body.slotId]
+      return next
+    })
+    return saved
+  }
+
+  async function send(body: MutationBody, key: string) {
     // Équiper ne bloque pas le reste de l'inventaire : la case change aussitôt, les autres restent cliquables.
     const equip = body.action === "set-equipped" ? body : null
     if (equip) setEquipOverrides((current) => ({ ...current, [equip.slotId]: equip.equipped }))
-    else setPendingKey(key)
+    else if (key) setPendingKey(key)
     setError("")
     setNotice("")
     try {
@@ -414,7 +450,7 @@ export function CharacterInventory({ characterId, initialInventory, endpoint, fl
         delete next[equip.slotId]
         return next
       })
-      else setPendingKey((current) => current === key ? "" : current)
+      else if (key) setPendingKey((current) => current === key ? "" : current)
     }
   }
 

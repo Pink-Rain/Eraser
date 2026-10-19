@@ -33,7 +33,7 @@ const HEADERS = ["Onglet", "Colonne", "Nom d’origine", "Type et réglages (JSO
  */
 const cache = new Map<string, { expiresAt: number; promise: Promise<SchemaEntry[]>; loadedAt?: number; refreshing?: boolean }>()
 const CACHE_MS = 5 * 60_000
-const STALE_MS = 30 * 60_000
+const STALE_MS = 6 * 3_600_000
 
 function parseSpec(value: string): IndexColumnSpec | null {
   if (!value.trim()) return null

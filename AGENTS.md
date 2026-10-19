@@ -115,6 +115,17 @@
 - Le chantier en cours suit la roadmap « Eraser · Vues des index » (document
   partagé du propriétaire) : la relire et la mettre à jour à chaque étape.
 
+## Fluidité
+
+- Une action d'un clic s'affiche d'abord et s'enregistre ensuite, avec retour en arrière visible
+  si le serveur refuse (modèles : quantités de l'inventaire, relations, quêtes, PNJ). Ce qui
+  attend un identifiant donné par le serveur reste en attente.
+- `vite.config.ts` retouche le routeur de vinext 0.0.50 (`eraserVinextRouter`) : à vérifier, et
+  à refaire si besoin, à toute montée de version de vinext. Voir `ARCHITECTURE.md`.
+- Le React Compiler est actif : garder le code conforme aux règles `react-hooks/*` du lint.
+- Mesurer avant et après : Administration › « Fluidité de cet ordinateur »
+  (`lib/fluidity-journal.ts`).
+
 ## Tabletop et Roll20
 
 - Le tabletop utilise notamment Leaflet et Trystero. Ses routes, composants et

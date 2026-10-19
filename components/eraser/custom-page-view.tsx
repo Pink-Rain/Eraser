@@ -338,14 +338,16 @@ export function BlockView({ block, context }: { block: ViewedBlock; context: Blo
 export function PageSections({ sections, render }: { sections: ViewedSection[]; render: (block: ViewedBlock) => ReactNode }) {
   const searchable = sections.some((section) => section.cols.some((column) => column.some((block) => block.type === "search")))
   return <PageSearchProvider present={searchable}><div className="@container grid gap-8">
-    {sections.map((section) => {
+    {sections.map((section, sectionIndex) => {
       // Une colonne vide pour ce lecteur (blocs qu'il ne voit pas) laisse la place aux autres.
       const columns = section.cols.filter((column) => column.length)
       if (!columns.length) return null
       const whole = columns.length === section.cols.length
       const layout: SectionLayout = whole ? section.layout : columns.length === 1 ? "1" : "2"
       const grid = sectionGrid(layout, whole ? section.widths : undefined)
-      return <section key={section.id} style={grid.style} className={`grid items-start gap-6 ${grid.className} ${section.framed ? "rounded-[1.5rem] border bg-card/80 p-4 shadow-[0_12px_35px_rgb(67_50_31/0.06)] sm:p-6" : ""}`}>
+      // Au-delà des deux premières (visibles à l'ouverture), une section hors de l'écran n'est
+      // dessinée qu'en s'en approchant : une longue page s'ouvre aussi vite qu'une courte.
+      return <section key={section.id} style={grid.style} className={`grid items-start gap-6 ${sectionIndex >= 2 ? "deferred-section" : ""} ${grid.className} ${section.framed ? "rounded-[1.5rem] border bg-card/80 p-4 shadow-[0_12px_35px_rgb(67_50_31/0.06)] sm:p-6" : ""}`}>
         {columns.map((column, index) => <div key={index} className="grid min-w-0 content-start gap-5">
           {column.map((block) => <div key={block.id} id={`bloc-${block.id}`} className="min-w-0">{render(block)}</div>)}
         </div>)}
