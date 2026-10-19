@@ -629,8 +629,16 @@ async function addMissingRows(key: WorldIndexKey, sheet: Awaited<ReturnType<type
  * inventaires), ses icônes, ses en-têtes réparés. Rien n'y est ajouté au chargement : ni lignes
  * de départ, ni identifiants (le lecteur des items les donne).
  */
-async function loadObjectsIndex(sheet: Awaited<ReturnType<typeof workbook>>): Promise<WorldIndexData> {
-  const read = (await listObjectIndexTables()).filter((table) => table.fileId === sheet.spreadsheetId)
+async function loadObjectsIndex(sheet: Awaited<ReturnType<typeof workbook>>, reread = false): Promise<WorldIndexData> {
+  const all = await listObjectIndexTables()
+  const read = all.filter((table) => table.fileId === sheet.spreadsheetId)
+  // Un onglet ajouté, renommé ou réuni dans Sheets (ou un autre classeur d'items) : la liste des
+  // onglets gardée en mémoire est relue, sinon l'index ne montrerait plus ces items (jusqu'au
+  // redémarrage d'Eraser).
+  if (!reread && all.some((table) => table.fileId !== sheet.spreadsheetId || !sheet.definition.tabs.some((tab) => tab.name === table.tabName))) {
+    effectiveIndexes.delete(OBJECTS_INDEX_KEY)
+    return loadObjectsIndex(await workbook(OBJECTS_INDEX_KEY), true)
+  }
   const tables = sheet.definition.tabs.flatMap((tab): WorldIndexTable[] => {
     const table = read.find((candidate) => candidate.tabName === tab.name)
     if (!table) return []

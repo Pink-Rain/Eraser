@@ -86,11 +86,25 @@ async function regroupLog(fileId: string) {
   return (await readRange(fileId, sheetTabRange(OBJECT_INDEX_REGROUP_TAB, `A2:${columnName(OBJECT_INDEX_REGROUP_HEADERS.length)}`))).filter((row) => row[0]?.trim())
 }
 
+/**
+ * Le classeur regroupé : celui qui garde l'onglet « Eraser · regroupement », quel que soit son
+ * nom dans le Drive (« Index des objets » d'office, renommable). Celui de ce nom est regardé d'abord.
+ */
+async function mergedSpreadsheet(files: Awaited<ReturnType<typeof folderSpreadsheets>>) {
+  const ordered = [...files].sort((left, right) => Number(right.name.trim() === MERGED_OBJECT_INDEX_NAME) - Number(left.name.trim() === MERGED_OBJECT_INDEX_NAME))
+  for (const file of ordered) {
+    const log = await regroupLog(file.fileId).catch(() => null)
+    if (log?.length) return { file, log }
+  }
+  return null
+}
+
 export async function objectIndexRegroupStatus(): Promise<ObjectIndexRegroupStatus> {
   const folder = await objectsFolder()
   const files = await folderSpreadsheets(folder.id)
-  const candidate = files.find((file) => file.name.trim() === MERGED_OBJECT_INDEX_NAME)
-  const log = candidate ? await regroupLog(candidate.fileId).catch(() => null) : null
+  const found = await mergedSpreadsheet(files)
+  const candidate = found?.file
+  const log = found?.log
   return {
     state: log?.length ? "regroupé" : "séparé",
     files: files.map((file) => file.name).sort((left, right) => left.localeCompare(right, "fr")),
@@ -265,9 +279,9 @@ export async function regroupObjectIndexes() {
 export async function revertObjectIndexRegroup() {
   const folder = await objectsFolder()
   const files = await folderSpreadsheets(folder.id)
-  const merged = files.find((file) => file.name.trim() === MERGED_OBJECT_INDEX_NAME)
-  const log = merged ? await regroupLog(merged.fileId) : null
-  if (!merged || !log?.length) throw new Error("OBJECT_REGROUP_NOT_FOUND")
+  const found = await mergedSpreadsheet(files)
+  if (!found) throw new Error("OBJECT_REGROUP_NOT_FOUND")
+  const { file: merged, log } = found
   const backupId = log[0][8]?.trim()
   if (!backupId) throw new Error("OBJECT_REGROUP_NOT_FOUND")
   const nameOf = (entryId: string) => log.find((row) => row[6]?.trim() === entryId)?.[1] || entryId

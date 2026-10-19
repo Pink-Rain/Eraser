@@ -343,3 +343,21 @@ test("Items, un index du moteur : le moteur des index lit et écrit les items, l
   // Les items sont une cible de relation comme les autres index.
   assert.ok((await world.worldRelationTargets()).some((target) => target.index === "objects" && target.tabs.some((tab) => tab.name === "Armes")));
 });
+
+test("Onglets d'items réunis et renommés dans Sheets : l'index les montre sans redémarrer Eraser", async () => {
+  const world = await vite.ssrLoadModule("/lib/world-indexes.ts");
+  const id = objectsFile([
+    { title: "Objets", grid: [["ID", "Nom", "Genre"], ["OBJ-1", "Corde", "Objet"]] },
+    { title: "Armes", grid: [["ID", "Nom", "Genre"], ["ARM-1", "Épée", "Arme"]] },
+  ]);
+  assert.deepEqual((await world.getWorldIndex("objects", { refresh: true })).tables.map((table) => table.tabName).sort(), ["Armes", "Objets"]);
+  // Dans Sheets : les armes rejoignent « Objets », « Armes » est supprimé, « Objets » devient « Items ».
+  const file = google.world.files.get(id);
+  const [objets, armesTab] = file.tabs;
+  objets.grid.push(armesTab.grid[1]);
+  file.tabs.splice(1, 1);
+  objets.title = "Items";
+  const data = await world.getWorldIndex("objects", { refresh: true });
+  assert.deepEqual(data.tables.map((table) => table.tabName), ["Items"]);
+  assert.deepEqual(data.tables[0].rows.map((row) => row.values[0]), ["OBJ-1", "ARM-1"]);
+});

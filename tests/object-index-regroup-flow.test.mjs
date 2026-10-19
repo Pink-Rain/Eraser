@@ -132,3 +132,14 @@ test("une annulation arrêtée en chemin est défaite, et ce qui ne peut pas l'�
   assert.equal(failure.message, "OBJECT_REGROUP_REVERT_INCOMPLETE");
   assert.match(failure.details[0], /^« Index Objet » est revenu dans « Objets »/);
 });
+
+test("le classeur regroupé renommé dans le Drive (« Index des items ») reste reconnu", async () => {
+  const result = await flow.regroupObjectIndexes();
+  google.world.files.get(result.fileId).name = "Index des items";
+  const status = await flow.objectIndexRegroupStatus();
+  assert.equal(status.state, "regroupé");
+  assert.equal(status.merged?.id, result.fileId);
+  // L'annulation le retrouve aussi.
+  await flow.revertObjectIndexRegroup();
+  assert.deepEqual(inObjects(), ["Anciens index d’objets (avant regroupement)", "Index Objet", "Index armes"]);
+});
