@@ -1203,6 +1203,8 @@ function TimelineLayout(props: PresentationProps) {
   const calendar = named ?? realCalendar
   const parse = useCallback((text: string) => parseCalendarDate(text, calendar), [calendar])
   const { dated, undated } = useMemo(() => !layout.dateColumn ? { dated: [], undated: rows } : timelineEntries(rows, (row) => valueOf(row, layout.dateColumn!), parse), [layout.dateColumn, parse, rows, valueOf])
+  // Par paquets, comme la liste : une frise de centaines d'événements reste fluide.
+  const [shownEvents, setShownEvents] = useState(PAGE * 2)
   const [period, setPeriod] = useState("")
   if (!layout.dateColumn) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne de la date dans les réglages de cette vue.</p>
   const side = layout.timelineSide ?? "alternate"
@@ -1269,7 +1271,9 @@ function TimelineLayout(props: PresentationProps) {
   }
 
   /* ---- La ligne du temps (verticale ou en frise), pour un lot de lignes ---- */
-  const line = (entries: typeof dated) => {
+  const line = (all: typeof dated) => {
+    const entries = all.length > shownEvents ? all.slice(0, shownEvents) : all
+    const more = all.length > entries.length && <p className="flex items-center justify-center gap-2 py-3 text-xs text-muted-foreground">{entries.length} / {all.length}<button type="button" className="font-semibold text-primary underline-offset-4 hover:underline" onClick={() => setShownEvents((current) => current + PAGE * 4)}>Afficher la suite</button></p>
     const placed = entries.map((entry, index) => ({ ...entry, milestone: index === 0 || periodOf(entries[index - 1].date.year) !== periodOf(entry.date.year), right: side === "right" || (side === "alternate" ? index % 2 === 0 : groupIndexOf(entry.row) % 2 === 0) }))
     const alternate = side !== "right"
     const lineClass = style === "icons" ? "before:left-[1.1875rem]" : "before:left-[0.6875rem]"
@@ -1281,15 +1285,15 @@ function TimelineLayout(props: PresentationProps) {
     }
     const when = (entry: (typeof placed)[number], color: string) => { const text = whenOf(entry); return text ? (layout.dateStyle === "badge" ? <p className="mb-1"><span className="inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-white" style={{ backgroundColor: color }}>{text}</span></p> : <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color }}>{text}</p>) : null }
     const milestone = (year: number) => <span className={`flex items-center gap-1.5 rounded-full border bg-background px-3 py-0.5 font-display font-semibold shadow-sm ${style === "chapters" ? "text-base" : "text-sm"}`} style={{ borderColor: `color-mix(in srgb, ${accent} 45%, transparent)`, color: accent }}><Glyph value={layout.milestoneIcon} />{milestoneLabel(year)}</span>
-    if (horizontal) return <div className="overflow-x-auto pb-2"><ol className={`relative flex ${look.density === "compact" ? "gap-3" : look.density === "airy" ? "gap-6" : "gap-4"} px-2 pt-10 before:absolute before:inset-x-0 before:top-[2.1875rem] before:h-0.5 before:rounded-full before:bg-[linear-gradient(to_right,color-mix(in_srgb,var(--eraser-timeline)_50%,transparent),color-mix(in_srgb,var(--eraser-timeline)_15%,transparent))]`} style={{ ["--eraser-timeline" as string]: accent }}>
+    if (horizontal) return <><div className="overflow-x-auto pb-2"><ol className={`relative flex ${look.density === "compact" ? "gap-3" : look.density === "airy" ? "gap-6" : "gap-4"} px-2 pt-10 before:absolute before:inset-x-0 before:top-[2.1875rem] before:h-0.5 before:rounded-full before:bg-[linear-gradient(to_right,color-mix(in_srgb,var(--eraser-timeline)_50%,transparent),color-mix(in_srgb,var(--eraser-timeline)_15%,transparent))]`} style={{ ["--eraser-timeline" as string]: accent }}>
       {placed.map((entry) => { const color = colorOf(entry.row); return <li key={entry.row} className="relative w-64 shrink-0 pt-3">
         {entry.milestone && <div className="absolute -top-10 left-0">{milestone(entry.date.year)}</div>}
         {marker(entry.row, color, true)}
         {when(entry, color)}
         {body(entry.row, color)}
       </li> })}
-    </ol></div>
-    return <ol className={`relative grid ${gaps[look.density ?? "normal"]} ${alternate ? "md:before:left-1/2" : ""} before:absolute before:inset-y-1 ${lineClass} before:w-0.5 before:rounded-full before:bg-[linear-gradient(to_bottom,color-mix(in_srgb,var(--eraser-timeline)_50%,transparent),color-mix(in_srgb,var(--eraser-timeline)_25%,transparent),color-mix(in_srgb,var(--eraser-timeline)_5%,transparent))] md:before:-translate-x-1/2`} style={{ ["--eraser-timeline" as string]: accent }}>
+    </ol></div>{more}</>
+    return <><ol className={`relative grid ${gaps[look.density ?? "normal"]} ${alternate ? "md:before:left-1/2" : ""} before:absolute before:inset-y-1 ${lineClass} before:w-0.5 before:rounded-full before:bg-[linear-gradient(to_bottom,color-mix(in_srgb,var(--eraser-timeline)_50%,transparent),color-mix(in_srgb,var(--eraser-timeline)_25%,transparent),color-mix(in_srgb,var(--eraser-timeline)_5%,transparent))] md:before:-translate-x-1/2`} style={{ ["--eraser-timeline" as string]: accent }}>
       {placed.map((entry) => {
         const color = colorOf(entry.row)
         const pad = style === "icons" ? "pl-12" : "pl-8"
@@ -1302,7 +1306,7 @@ function TimelineLayout(props: PresentationProps) {
           </div>
         </li>
       })}
-    </ol>
+    </ol>{more}</>
   }
 
   /* ---- Les périodes : les groupes en bandes, ou en échelle (une bande en haut, un clic déplie) ---- */
@@ -1388,7 +1392,8 @@ function TreeLayout(props: PresentationProps) {
   } else {
     body = <div className="grid gap-2">
       <div className="flex flex-wrap items-center gap-2 text-xs"><Button type="button" size="sm" variant="ghost" className="h-7" onClick={() => all(true)}>Tout déplier</Button><Button type="button" size="sm" variant="ghost" className="h-7" onClick={() => all(false)}>Tout replier</Button><span className="text-muted-foreground">{tree.length} racine{tree.length > 1 ? "s" : ""} · rangées par « {parentColumn} »</span></div>
-      <ul role="tree" aria-label="Arborescence" className={framed ? `border bg-card/70 p-1.5 ${radii[look.radius ?? "md"]}` : style === "boxed" ? `grid ${gaps[look.density ?? "normal"]}` : style === "org" ? "flex justify-center gap-6 overflow-x-auto pb-2" : ""}>{list(tree)}</ul>
+      {/* Les racines par paquets, comme la liste (chaque racine dépliée dessine toute sa branche). */}
+      <Paged rows={tree.map((node) => node.row)} render={(shown) => <ul role="tree" aria-label="Arborescence" className={framed ? `border bg-card/70 p-1.5 ${radii[look.radius ?? "md"]}` : style === "boxed" ? `grid ${gaps[look.density ?? "normal"]}` : style === "org" ? "flex justify-center gap-6 overflow-x-auto pb-2" : ""}>{list(tree.slice(0, shown.length))}</ul>} />
     </div>
   }
   // « Afficher à côté › les enfants » : le nœud choisi déplie ses enfants (en cartes) dans le panneau.
