@@ -229,7 +229,8 @@ function handleSheets(path: string, init: RequestInit) {
         tab.columnCount = Math.max(tab.columnCount, request.updateSheetProperties.properties.gridProperties.columnCount)
       } else if (request.appendCells) {
         // Comme Google : après la dernière ligne qui porte une donnée, toutes colonnes confondues,
-        // à partir de la colonne A.
+        // à partir de la colonne A. Un onglet inconnu (recréé ailleurs) : refus, rien n'est écrit.
+        if (!file.tabs.some((candidate) => candidate.sheetId === request.appendCells.sheetId)) return json({ error: { message: `Invalid requests[0].appendCells: No grid with id: ${request.appendCells.sheetId}` } }, 400)
         const tab = file.tabs.find((candidate) => candidate.sheetId === request.appendCells.sheetId)!
         let last = -1
         tab.grid.forEach((row, index) => { if (row.some((cell) => cell !== "")) last = index })

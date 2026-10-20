@@ -436,3 +436,18 @@ test("Colonne clé renommée dans Sheets : jamais recréée vide à droite", asy
   await sheets.ensureNamedColumns(id, "Personnages", sheetColumns(google.grid(id, "Personnages")[0], expected));
   assert.deepEqual(google.grid(id, "Personnages")[0], ["ID", "Joueur", "Nom personnage", "Peuple"]);
 });
+
+test("un ajout de lignes ne relit plus la description de l'onglet à chaque fois, et la relit si Google refuse", async () => {
+  const id = fresh("notes");
+  google.addSpreadsheet(id, [{ title: "Notes", grid: [["ID", "Texte"]] }]);
+  const metadataReads = () => google.world.requests.filter((request) => request === "GET ").length;
+  await sheets.appendRows(id, "'Notes'!A:B", [["N-1", "première"]], { valueInputOption: "RAW" });
+  await sheets.appendRows(id, "'Notes'!A:B", [["N-2", "deuxième"]], { valueInputOption: "RAW" });
+  assert.equal(metadataReads(), 1, "une seule lecture de la description pour deux ajouts");
+  // L'onglet supprimé puis recréé ailleurs : son numéro a changé, la description gardée ne vaut plus.
+  google.world.files.get(id).tabs[0].sheetId = 99;
+  const result = await sheets.appendRows(id, "'Notes'!A:B", [["N-3", "troisième"]], { valueInputOption: "RAW" });
+  assert.equal(metadataReads(), 2, "relue après le refus");
+  assert.deepEqual(google.grid(id, "Notes").slice(1).map((row) => row.slice(0, 2)), [["N-1", "première"], ["N-2", "deuxième"], ["N-3", "troisième"]], "chaque ligne écrite une seule fois");
+  assert.equal(result.updatedRange, "'Notes'!A4:B4");
+});

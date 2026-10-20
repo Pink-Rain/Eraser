@@ -70,33 +70,60 @@ function audio() {
 /** La sortie des sons : le volume général, puis les haut-parleurs. */
 const output = (ctx: AudioContext) => master ?? ctx.destination
 
-// Les fichiers des sons, décodés une fois. Un échec est oublié au bout d'une minute.
+// Les fichiers des sons, téléchargés puis décodés une fois. Un échec est oublié au bout d'une minute.
+const fetched = new Map<SoundName, Promise<ArrayBuffer | null>>()
 const decoded = new Map<SoundName, Promise<AudioBuffer | null>>()
+
+function fetchSound(name: SoundName) {
+  let promise = fetched.get(name)
+  if (!promise) {
+    promise = fetch(`/api/sounds/${name}`, { cache: "force-cache" })
+      .then((response) => response.ok ? response.arrayBuffer() : null)
+      .catch(() => null)
+    fetched.set(name, promise)
+  }
+  return promise
+}
 
 function loadSound(ctx: AudioContext, name: SoundName) {
   let promise = decoded.get(name)
   if (!promise) {
-    promise = fetch(`/api/sounds/${name}`, { cache: "force-cache" })
-      .then(async (response) => response.ok ? await ctx.decodeAudioData(await response.arrayBuffer()) : null)
+    // Le fichier n'est décodé qu'une fois : ses octets ne servent plus ensuite.
+    promise = fetchSound(name)
+      .then((bytes) => bytes ? ctx.decodeAudioData(bytes) : null)
       .catch(() => null)
+      .finally(() => { fetched.delete(name) })
     decoded.set(name, promise)
     void promise.then((buffer) => { if (!buffer) window.setTimeout(() => { if (decoded.get(name) === promise) decoded.delete(name) }, 60_000) })
   }
   return promise
 }
 
-/** Charge les sons à l'avance : le premier ne part pas en retard. */
+/**
+ * Télécharge les sons à l'avance : le premier ne part pas en retard. Le moteur audio n'est
+ * pas créé pour autant : sous Windows, sa création fige la page un quart de seconde, elle
+ * attend donc le premier son joué.
+ */
 export function preloadSounds(names: SoundName[]) {
-  const ctx = audio()
-  if (!ctx) return
-  for (const name of names) void loadSound(ctx, name)
+  if (typeof window === "undefined" || !soundsEnabled()) return
+  for (const name of names) void fetchSound(name)
 }
 
 /**
  * Joue le fichier du son ; s'il n'est pas prêt assez vite, ou introuvable, le son de
- * secours (synthétisé) le remplace. Un son en retard n'est jamais joué après coup.
+ * secours (synthétisé) le remplace. Un son en retard n'est jamais joué après coup. Le tout
+ * premier son crée le moteur audio après l'affichage du clic qui l'a demandé : ce clic ne
+ * l'attend pas.
  */
 function playFile(name: SoundName, fallback: (ctx: AudioContext) => void, volume = 0.8) {
+  if (!context && typeof window !== "undefined") {
+    window.requestAnimationFrame(() => window.setTimeout(() => playFileNow(name, fallback, volume), 0))
+    return
+  }
+  playFileNow(name, fallback, volume)
+}
+
+function playFileNow(name: SoundName, fallback: (ctx: AudioContext) => void, volume: number) {
   const ctx = audio()
   if (!ctx) return
   let settled = false

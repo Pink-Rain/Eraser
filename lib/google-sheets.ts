@@ -620,6 +620,8 @@ function forgetAfterStructureChange(path: string, init?: RequestInit) {
   if (!structural) return
   const spreadsheetId = /^spreadsheets\/([^/:?]+)/.exec(path)?.[1]
   if (spreadsheetId) clearSpreadsheetReadCache(spreadsheetId)
+  // Des colonnes ajoutées par un ajout de lignes (appendDimension) changent la largeur gardée.
+  if (spreadsheetId) forgetTabGrids(spreadsheetId)
   characterColumnsCache = null
   // L'inventaire et le catalogue des objets gardés en mémoire portent des numéros de ligne.
   if (spreadsheetId && inventoryWorkbookCache?.workbook.spreadsheetId === spreadsheetId) clearInventoryWorkbookCache()
@@ -1330,6 +1332,30 @@ function enteredValue(value: string | number | boolean, raw: boolean): EnteredVa
   return { stringValue: value }
 }
 
+/**
+ * Le numéro et la largeur des onglets où Eraser ajoute des lignes, gardés pour `appendRows` :
+ * chaque ajout (une note, un message, une relation) relisait d'abord la description du
+ * classeur chez Google, souvent plus long que l'ajout lui-même. Un changement de structure du
+ * classeur fait par Eraser l'oublie (forgetAfterStructureChange) ; fait ailleurs, Google refuse
+ * l'ajout, qui est alors refait une fois avec la description relue (rien n'a été écrit : un
+ * `batchUpdate` est appliqué en entier ou pas du tout).
+ */
+const GRID_CACHE_MS = 10 * 60_000
+const gridCache = new Map<string, { at: number; grid: Awaited<ReturnType<typeof tabGrid>> }>()
+
+async function knownTabGrid(spreadsheetId: string, tabName: string) {
+  const key = `${spreadsheetId}\u0000${tabName}`
+  const known = gridCache.get(key)
+  if (known && Date.now() - known.at < GRID_CACHE_MS) return { grid: known.grid, cached: true }
+  const grid = await tabGrid(spreadsheetId, tabName)
+  gridCache.set(key, { at: Date.now(), grid })
+  return { grid, cached: false }
+}
+
+function forgetTabGrids(spreadsheetId: string) {
+  for (const key of [...gridCache.keys()]) if (key.startsWith(`${spreadsheetId}\u0000`)) gridCache.delete(key)
+}
+
 /** L'onglet, son numéro et la taille de sa grille, relus chez Google. */
 async function tabGrid(spreadsheetId: string, tabName: string) {
   const metadata = await googleSheetsJson<{ sheets?: Array<{ properties?: { sheetId?: number; title?: string; gridProperties?: { rowCount?: number; columnCount?: number } } }> }>(
@@ -1368,17 +1394,28 @@ export async function appendRows(
     const width = Math.max(1, ...values.map((row) => row.length))
     const raw = options.valueInputOption === "RAW"
     const entered = values.map((row) => Array.from({ length: width }, (_, column) => column < row.length ? enteredValue(row[column], raw) : null))
-    const grid = await tabGrid(spreadsheetId, tabName)
-    const requests: unknown[] = []
-    if (left + width > grid.columnCount) requests.push({ appendDimension: { sheetId: grid.sheetId, dimension: "COLUMNS", length: left + width - grid.columnCount } })
-    requests.push({
-      appendCells: {
-        sheetId: grid.sheetId,
-        rows: entered.map((row) => ({ values: [...Array.from({ length: left }, () => ({})), ...row.map((cell) => cell ? { userEnteredValue: cell } : {})] })),
-        fields: "userEnteredValue",
-      },
-    })
-    await googleSheetsJson(`spreadsheets/${spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
+    const append = async (grid: Awaited<ReturnType<typeof tabGrid>>) => {
+      const requests: unknown[] = []
+      if (left + width > grid.columnCount) requests.push({ appendDimension: { sheetId: grid.sheetId, dimension: "COLUMNS", length: left + width - grid.columnCount } })
+      requests.push({
+        appendCells: {
+          sheetId: grid.sheetId,
+          rows: entered.map((row) => ({ values: [...Array.from({ length: left }, () => ({})), ...row.map((cell) => cell ? { userEnteredValue: cell } : {})] })),
+          fields: "userEnteredValue",
+        },
+      })
+      await googleSheetsJson(`spreadsheets/${spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
+    }
+    const known = await knownTabGrid(spreadsheetId, tabName)
+    try {
+      await append(known.grid)
+    } catch (error) {
+      // Refusé avec la description gardée (onglet recréé ou rétréci ailleurs) : rien n'a été
+      // écrit ; une fois, avec la description relue. Un quota ou une panne remonte tel quel.
+      if (!known.cached || !(error instanceof Error && error.message.startsWith("SHEETS_API_ERROR:400"))) throw error
+      forgetTabGrids(spreadsheetId)
+      await append((await knownTabGrid(spreadsheetId, tabName)).grid)
+    }
     clearSpreadsheetReadCache(spreadsheetId)
     const [read] = await readRangesFresh(spreadsheetId, [range])
     const firstRow = read ? appendedRowNumber(read, entered) : null

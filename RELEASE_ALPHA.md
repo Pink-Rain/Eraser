@@ -1,35 +1,19 @@
-# Eraser 0.1.1-alpha.244 — Fenêtres, menus et fiches sans recalculer toute la page
+# Eraser 0.1.1-alpha.245 — Fiche de personnage et ajouts plus rapides
 
 Cette version arrive **sans réinstallation** (enveloppe 10, comme l'alpha 238) : Eraser la
 télécharge, redémarre son serveur et recharge la page tout seul. Rien n'est modifié dans Google
 Sheets.
 
-Trouvé grâce au profil des gels de l'alpha 243 : sur l'index des items, ouvrir une fenêtre ou un
-menu faisait recalculer le style de **toute la page**, jusqu'à quatre fois de suite. Mesuré sur
-un banc avec un processeur bridé comme un petit portable :
+Relevé de l'alpha 244 sur un vrai poste : les clics sont passés d'une médiane de 568 ms (pire
+1,1 s) à 144 ms (pire 0,34 s) ; « Ouvrir la fiche » d'un item 960 → 168 ms, « Suivante »
+300 ms à 1,1 s → 104 ms. Les deux lenteurs qu'il montrait encore :
 
-| Geste (index des items) | Avant | Maintenant |
-| --- | --- | --- |
-| Ouvrir la fiche d'un item | 1,8 s | 0,9 s |
-| « Suivante » dans la fiche | 0,5 à 0,65 s | 0,3 s |
-| Fermer la fiche (Échap) | 0,5 à 0,95 s | 0,2 s |
-| Ouvrir le menu du logo (to-do, personnages, campagnes) | 1,35 s | 0,4 s |
-| Le refermer | 0,9 s | 0,15 s |
-
-## Ce qui a changé
-
-- **Fenêtres et menus** : pour rendre la page inerte derrière eux, ils changeaient le style de
-  la page entière, à l'ouverture comme à la fermeture. Un calque invisible posé juste sous la
-  fenêtre fait le même travail sans rien recalculer : un clic à côté ferme toujours la fenêtre
-  sans rien déclencher derrière.
-- **Barre de défilement** : chaque fenêtre mesurait puis modifiait la page pour masquer une barre
-  de défilement qu'Eraser n'a pas (seul le contenu défile). Retiré.
-- **Trois règles de style** (`:has()`) obligeaient le navigateur à revérifier toute la page à
-  chaque élément ajouté ou retiré : fenêtres du tabletop, barre latérale, cartes « même
-  hauteur ». Remplacées par des équivalents ciblés, sans rien changer à l'affichage.
-- **« Suivante » / « Précédente »** : la fiche retirait le focus du bouton cliqué avant de
-  changer de ligne, ce qui forçait un recalcul complet ; seul un champ en cours de saisie le perd
-  maintenant (pour enregistrer ce qui vient d'être tapé). Le bouton garde le focus : Entrée
-  enchaîne les lignes.
-- Le bouton du logo dit ce qu'il ouvre : « Ouvrir mes to-do », « mes campagnes » ou
-  « mes personnages » selon le rôle (et le relevé de fluidité aussi).
+- **Fiche de personnage** : à son ouverture, Eraser créait le moteur audio de Windows pour
+  préparer les sons (monter de niveau, choisir un sort, équiper…), ce qui figeait la page un
+  quart de seconde. Les sons sont toujours téléchargés d'avance ; le moteur n'est créé qu'au
+  premier son joué, juste après l'affichage du clic.
+- **Ajouter une ligne** (une note, un message du chat, une relation, une entrée du journal) :
+  chaque ajout relisait d'abord chez Google la description du classeur (le numéro et la
+  largeur de l'onglet), souvent plus long que l'ajout lui-même — 0,7 à 1,4 s de plus chez
+  vous. Elle est gardée en mémoire ; si l'onglet a été recréé ou rétréci ailleurs, Google
+  refuse l'ajout sans rien écrire, et Eraser le refait une fois avec la description relue.
