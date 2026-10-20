@@ -44,6 +44,7 @@ import {
 import { campaignsOf, pageAuthor, viewerFor } from "@/lib/custom-pages-server"
 import { blueprintSlug, blueprintVisibility, eraserPageBlueprint, eraserPageEntries } from "@/lib/eraser-page-blueprints"
 import { isReplaceablePath } from "@/lib/page-replacements"
+import { updatePageFolders } from "@/lib/page-folders-store"
 import { authorizedAccount, type AuthorizedUser } from "@/lib/server-auth"
 import { sanitizeRichText } from "@/lib/rich-text-sanitize"
 
@@ -237,6 +238,8 @@ export async function POST(request: Request) {
       case "delete":
         if (account.role !== "admin") return NextResponse.json({ error: "Seul un administrateur supprime une page pour de bon." }, { status: 403 })
         await deleteCustomPage(page.id)
+        // Elle quitte aussi son dossier (une page qui remplace une d'Eraser y laisse sa place : l'adresse reste rangée).
+        if (!page.replaces) await updatePageFolders([{ op: "place", keys: [page.id], folder: "" }], by.name).catch(() => null)
         return NextResponse.json({ ok: true })
       default:
         return NextResponse.json({ error: "Action inconnue." }, { status: 400 })

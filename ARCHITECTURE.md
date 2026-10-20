@@ -200,6 +200,23 @@ Les vues d’avant désignaient un onglet par « fichier:sheetId » : la page le
   `lib/custom-pages.ts`) — créer, modifier, brouillons, menu. `canManagePages` (MJ
   et administrateurs) garde ce que le MJ fait d’une page qu’il lit (secrets, notes),
   sans la construire.
+- **Dossiers des pages** (`lib/page-folders.ts`, `lib/page-folders-store.ts`, route
+  `/api/pages/folders`) : un seul rangement pour toute la table, portée Worker
+  `custom-page-folders`, clé `rangement` (dossiers imbriqués, place de chaque page). La clé d’une
+  page est son identifiant, ou `eraser:` et l’adresse pour une page d’Eraser, reprise ou non
+  (`folderKeyOf`) : reprendre, publier ou jeter une reprise ne la déplace pas. Supprimer un
+  dossier remonte son contenu, jamais une page. Le serveur refait chaque geste sur le rangement
+  relu ; l’explorateur l’affiche avant (retour en arrière si refus). La coque n’en lit que la
+  copie en mémoire (`knownPageFolders`).
+- **Explorateur des pages** (`components/eraser/page-directory.tsx`, `lib/page-explorer.ts`) :
+  pages d’Eraser et pages de l’atelier sous une seule forme ; « Ouvrir » reprend une page
+  d’Eraser en coulisses. `?dossier=` et `?vue=` (toutes, corbeille, modeles) gardent la vue ;
+  l’atelier y revient. Onglets communs Pages · Menu · Modèles (`page-creator-nav.tsx`).
+- **Menu et dossiers** : une entrée `dossier:<id>` (`lib/app-menu.ts`) montre les pages
+  publiées et lisibles d’un dossier (au premier niveau : une section, un groupe par
+  sous-dossier). Une page placée à la main n’y est pas répétée. L’éditeur du menu montre
+  les pages d’une section comme des entrées (`expandSectionPages`) ; une page d’Eraser y
+  entre comme un lien vers son adresse.
 - **Versions brouillon d’une page** : portée Worker `custom-page-drafts`
   (`listPageSnapshots`, `savePageSnapshot`), 20 par page, supprimées avec la page.
 

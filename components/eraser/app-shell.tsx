@@ -544,6 +544,13 @@ export function AppShell({
       // Les pages du créateur de pages rangées dans la section, sous ses pages d'Eraser.
       return (item.pages ?? []).map((page) => <NavSubLink key={`${item.key}:${page.href}`} href={page.href} label={page.title} active={pathname === page.href} />)
     }
+    if (item.dynamic === "dossier-pages") {
+      // Un dossier du créateur de pages : son nom, puis ses pages en retrait.
+      return <div key={item.key}>
+        <SidebarMenuSubItem><span className="flex h-7 items-center gap-1.5 px-2 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-sidebar-foreground/50"><Folder className="size-3.5" />{item.label}</span></SidebarMenuSubItem>
+        {(item.pages ?? []).map((page) => <NavSubLink key={`${item.key}:${page.href}`} nested href={page.href} label={page.title} active={pathname === page.href} />)}
+      </div>
+    }
     if (!item.href) return null
     return <NavSubLink key={item.key} href={item.href} label={item.label} active={menuItemActive(item, pathname)} />
   }

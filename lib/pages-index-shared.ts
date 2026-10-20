@@ -10,10 +10,16 @@ export const PAGES_INDEX = "pages"
 export const PAGES_INDEX_TITLE = "Pages"
 export const PAGES_TAB = "Pages"
 
-export const pagesIndexHeaders = ["Titre", "Description", "Icône", "Image", "Section", "Adresse", "Visibilité", "Statut", "Origine", "Modifiée le", "ID"] as const
+export const pagesIndexHeaders = ["Titre", "Description", "Icône", "Image", "Section", "Adresse", "Visibilité", "Statut", "Origine", "Modifiée le", "Dossier", "ID"] as const
 
 /** Une page vue comme une ligne de l'index des pages. */
-export type PagesIndexRow = { id: string; href: string; title: string; description: string; icon: string; image: string; section: string; address: string; visibility: string; status: string; origin: string; updated: string }
+/** `folder` : son dossier du créateur de pages (« Lore › Dieux »), lib/page-folders.ts. */
+export type PagesIndexRow = { id: string; href: string; title: string; description: string; icon: string; image: string; section: string; address: string; visibility: string; status: string; origin: string; updated: string; folder: string }
+
+/** Les valeurs d'une ligne, dans l'ordre de `pagesIndexHeaders`. */
+export function pagesIndexValues(row: PagesIndexRow) {
+  return [row.title, row.description, row.icon, row.image, row.section, row.address, row.visibility, row.status, row.origin, row.updated, row.folder, row.id]
+}
 
 /** Les colonnes de l'index des pages et leur type (lues seulement : une page se règle dans l'atelier). */
 export function pagesIndexColumns(): Array<{ header: string; spec: IndexColumnSpec }> {
@@ -29,6 +35,7 @@ export function pagesIndexColumns(): Array<{ header: string; spec: IndexColumnSp
     { header: "Statut", spec: choice([["Publiée", "#0f7a65"], ["Brouillon", "#9a6512"]], "Une page en brouillon n’est vue que de ceux qui la modifient.") },
     { header: "Origine", spec: choice([["Créée", "#682522"], ["Eraser", "#78716c"], ["Eraser, modifiée", "#9a6512"]], "Faite dans l’atelier, une page d’Eraser, ou une page d’Eraser reprise dans l’atelier.") },
     { header: "Modifiée le", spec: { kind: "rich", readOnly: true } },
+    { header: "Dossier", spec: { kind: "rich", readOnly: true, description: "Son dossier dans l’Index des pages (« Lore › Dieux ») : pour ranger une vue par dossier, ou n’en montrer qu’un." } },
     { header: "ID", spec: { kind: "id", hidden: true } },
   ]
 }

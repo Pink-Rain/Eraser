@@ -213,6 +213,11 @@ export type EraserPageEntry = {
   path: string
   label: string
   group: string
+  /** Son icône et sa description (celles de son plan quand elle est redessinée en blocs). */
+  icon: string
+  description: string
+  /** Qui la voit (lib/custom-pages.ts) : celle de la page d'Eraser. */
+  vis: PageVisibility
   redrawn: boolean
   page?: { id: string; title: string; status: CustomPage["status"]; mode: ReplaceMode; unpublished: boolean }
 }
@@ -222,6 +227,7 @@ export function eraserPageEntries(pages: CustomPage[], role: PageRole): EraserPa
   const replacing = new Map(pages.filter((page) => !page.trashedAt && page.replaces).map((page) => [page.replaces!, page]))
   return eraserPages.filter((route) => role === "admin" || blueprintVisibility(route.path) !== "admin").map((route) => {
     const page = replacing.get(route.path)
-    return { path: route.path, label: route.label, group: route.group, redrawn: route.redrawn, ...(page ? { page: { id: page.id, title: page.title, status: page.status, mode: page.replaceMode ?? "after", unpublished: page.status === "publiee" && hasUnpublishedChanges(page) } } : {}) }
+    const blueprint = route.redrawn ? blueprints[route.path]() : null
+    return { path: route.path, label: route.label, group: route.group, icon: blueprint?.icon || route.icon, description: blueprint?.description ?? "", vis: blueprintVisibility(route.path), redrawn: route.redrawn, ...(page ? { page: { id: page.id, title: page.title, status: page.status, mode: page.replaceMode ?? "after", unpublished: page.status === "publiee" && hasUnpublishedChanges(page) } } : {}) }
   })
 }

@@ -297,6 +297,14 @@ export function pageHref(page: Pick<CustomPage, "place" | "slug" | "campaignId">
   return `/${page.place}/${slug}`
 }
 
+/**
+ * L'adresse d'une page dans le menu et les liens : celle de la page d'Eraser qu'elle remplace ou
+ * complète (on l'y lit), sinon la sienne.
+ */
+export function pageMenuHref(page: Pick<CustomPage, "place" | "slug" | "campaignId" | "replaces">) {
+  return page.replaces && !page.replaces.includes("[") ? page.replaces : pageHref(page)
+}
+
 /** L'atelier d'une page : son identifiant dans le chemin (jamais en « ?id= », voir app/pages/atelier). */
 export function studioHref(id: string) {
   return `/pages/atelier/${encodeURIComponent(id)}`
@@ -857,6 +865,7 @@ export type PageSummary = {
   status: PageStatus
   unpublished: boolean
   blocks: number
+  createdAt: string
   updatedAt: string
   updatedBy: string
   trashedAt: string
@@ -870,7 +879,7 @@ export function pageSummary(page: CustomPage, viewer: PageViewer): PageSummary {
   return {
     id: page.id, title: page.title, icon: page.icon, emoji: page.emoji, description: page.description, href: pageHref(page), slug: page.slug,
     place: page.place, campaignId: page.campaignId, vis: page.vis, status: page.status, unpublished: hasUnpublishedChanges(page),
-    blocks: allBlocks(page).length, updatedAt: page.updatedAt, updatedBy: page.updatedBy.name, trashedAt: page.trashedAt, editable: canEditPage(page, viewer),
+    blocks: allBlocks(page).length, createdAt: page.createdAt, updatedAt: page.updatedAt, updatedBy: page.updatedBy.name, trashedAt: page.trashedAt, editable: canEditPage(page, viewer),
     ...(page.replaces ? { replaces: page.replaces, replaceMode: page.replaceMode ?? "after" } : {}),
   }
 }

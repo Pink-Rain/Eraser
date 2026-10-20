@@ -4,16 +4,18 @@
  * elles-mêmes sont dans lib/custom-pages.ts.
  */
 import { getCampaignForMj, getCampaignForPlayer, listAllCampaignsForAdmin, listCampaignsForMj, listCampaignsForPlayer } from "@/lib/google-sheets"
-import { canBuildPages, canEditPage, canManagePages, canReadPage, pageForViewer, pageHref, placeLabel, type CustomPage, type PageAuthor, type PagePlace, type PageView, type PageViewer } from "@/lib/custom-pages"
+import { canBuildPages, canEditPage, canManagePages, canReadPage, pageForViewer, pageHref, pageMenuHref, pageVisibleTo, placeLabel, type CustomPage, type PageAuthor, type PagePlace, type PageView, type PageViewer } from "@/lib/custom-pages"
 import { knownCustomPages, knownCustomPagesSoon, listCustomPages } from "@/lib/custom-pages-store"
 import type { BlockDataOptions, IndexSource } from "@/lib/custom-pages-data"
 import { rowPageHref, templateForRow } from "@/lib/custom-pages-rows"
-import { resolveMenu, type MenuPageEntry, type ResolvedMenuItem } from "@/lib/app-menu"
+import { menuFolderIds, resolveMenu, type MenuFolderEntry, type MenuPageEntry, type ResolvedMenuItem } from "@/lib/app-menu"
 import { knownMenuLayout, knownMenuLayoutSoon } from "@/lib/app-menu-store"
 import { listCustomIndexes } from "@/lib/custom-indexes"
 import { entityColumnHiddenForPlayers } from "@/lib/index-references-entities"
-import { isForbiddenReplacement, isReplaceablePath, matchesReplacement } from "@/lib/page-replacements"
-import { enginePageOf, virtualEraserPage } from "@/lib/eraser-page-blueprints"
+import { isForbiddenReplacement, isReplaceablePath, matchesReplacement, replaceableRoutes } from "@/lib/page-replacements"
+import { eraserFolderKey, folderKeyOf, menuFolderEntries } from "@/lib/page-folders"
+import { knownPageFolders } from "@/lib/page-folders-store"
+import { blueprintVisibility, enginePageOf, virtualEraserPage } from "@/lib/eraser-page-blueprints"
 import type { AuthorizedUser } from "@/lib/server-auth"
 import { worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
 import { getWorldIndexQuick } from "@/lib/world-indexes"
@@ -173,8 +175,9 @@ export function shellMenu(account: Pick<AuthorizedUser, "uid" | "role" | "displa
   const pages: Record<string, MenuPageEntry> = {}
   const sectionPages: Record<string, MenuPageEntry[]> = {}
   const campaignPages: Record<string, MenuPageEntry[]> = {}
-  const entryOf = (page: CustomPage): MenuPageEntry => { const content = page.published ?? page; return { title: content.title, href: pageHref(page), icon: content.icon, emoji: content.emoji } }
-  for (const { page } of readableAmong(known, account, null)) {
+  const entryOf = (page: CustomPage): MenuPageEntry => { const content = page.published ?? page; return { title: content.title, href: pageMenuHref(page), icon: content.icon, emoji: content.emoji } }
+  const readable = readableAmong(known, account, null)
+  for (const { page } of readable) {
     pages[page.id] = entryOf(page)
     // Une page de ligne d'index ou qui remplace une page d'Eraser n'est pas une entrée de section.
     if (page.rowOf?.index || page.replaces || page.place === "hors-menu" || page.place === "campagne") continue
@@ -189,7 +192,31 @@ export function shellMenu(account: Pick<AuthorizedUser, "uid" | "role" | "displa
     }
   }
   for (const list of [...Object.values(sectionPages), ...Object.values(campaignPages)]) list.sort((left, right) => left.title.localeCompare(right.title, "fr"))
-  return { items: resolveMenu(layout?.items ?? null, { role: account.role, pages, sectionPages }), campaignPages }
+  const folders = menuFolderIds(layout?.items).length ? shellFolders(readable.map(({ page }) => page), account.role, entryOf) : undefined
+  return { items: resolveMenu(layout?.items ?? null, { role: account.role, pages, sectionPages, folders }), campaignPages }
+}
+
+/**
+ * Les dossiers du créateur de pages placés dans le menu, vus par ce rôle : les pages publiées
+ * qu'il lit, et les pages d'Eraser qui lui sont ouvertes (rangées par leur adresse). D'après les
+ * copies en mémoire : rien n'est attendu.
+ */
+function shellFolders(readable: CustomPage[], role: PageViewer["role"], entryOf: (page: CustomPage) => MenuPageEntry): Record<string, MenuFolderEntry> {
+  const entries: Array<{ key: string; page: MenuPageEntry }> = []
+  const keys = new Set<string>()
+  for (const page of readable) {
+    // Une page de ligne ou de campagne n'a pas d'adresse à elle seule ; une page sur une adresse « [id] » non plus.
+    if (page.rowOf?.index || page.place === "campagne" || page.replaces?.includes("[")) continue
+    const key = folderKeyOf(page)
+    keys.add(key)
+    entries.push({ key, page: entryOf(page) })
+  }
+  for (const route of replaceableRoutes) {
+    const key = eraserFolderKey(route.path)
+    if (route.path.includes("[") || keys.has(key) || !pageVisibleTo(blueprintVisibility(route.path), role)) continue
+    entries.push({ key, page: { title: route.label, href: route.path, icon: route.icon, emoji: "" } })
+  }
+  return menuFolderEntries(knownPageFolders(), entries)
 }
 
 /* ---------- Pages d'Eraser remplacées ou complétées ---------- */

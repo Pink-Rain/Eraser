@@ -172,12 +172,13 @@ function AddHere({ empty, onAdd }: { empty: boolean; onAdd: (type: BlockType) =>
 
 /* ---------- Les blocs, dans l'atelier ---------- */
 
-type EditorProps = { block: PageBlock; rev: number; live: StudioPage["live"]; links: Record<string, PageLinkTarget>; viewAs: PageRole; onChange: (patch: Partial<PageBlock>, coalesce?: string) => void }
+/** `origin` : la page d'Eraser que la page remplace (le nom de son module « page d'origine »). */
+type EditorProps = { block: PageBlock; rev: number; live: StudioPage["live"]; links: Record<string, PageLinkTarget>; viewAs: PageRole; origin?: string; onChange: (patch: Partial<PageBlock>, coalesce?: string) => void }
 
 const richInCanvas = "border-transparent bg-transparent shadow-none hover:border-border/70 focus-within:border-border focus-within:bg-background/60"
 
 /** Un bloc tel qu'on l'écrit : le texte se tape directement dedans. */
-function BlockEditor({ block, rev, live, links, viewAs, onChange }: EditorProps) {
+function BlockEditor({ block, rev, live, links, viewAs, origin, onChange }: EditorProps) {
   const set = (patch: Record<string, unknown>, field: string) => onChange(patch as Partial<PageBlock>, `${block.id}:${field}`)
   const key = `${block.id}:${rev}`
   switch (block.type) {
@@ -245,7 +246,7 @@ function BlockEditor({ block, rev, live, links, viewAs, onChange }: EditorProps)
     case "search":
       return <PageSearchBlock block={block} />
     case "module":
-      return <ModulePlaceholder block={block} />
+      return <ModulePlaceholder block={block} origin={origin} />
     case "rowfields":
     case "backlinks":
       return <BlockView block={block} context={{ source: { direct: true }, canReveal: false, links }} />
@@ -261,8 +262,10 @@ function hiddenReason(block: PageBlock, viewAs: PageRole, live: StudioPage["live
 
 /* ---------- L'atelier ---------- */
 
-export function PageStudio({ initial, pages: initialPages, campaigns, linking, role }: {
+export function PageStudio({ initial, pages: initialPages, campaigns, linking, role, backHref = "/pages" }: {
   initial: StudioPage
+  /** Le retour à l'Index des pages : le dossier où la page est rangée. */
+  backHref?: string
   pages: PageSummary[]
   campaigns: Array<{ id: string; name: string }>
   linking: Array<{ id: string; title: string; href: string }>
@@ -575,7 +578,7 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
       return
     }
     if (name === "duplicate") { router.push(studioHref(result.page.id)); return }
-    if (name === "trash") { router.push("/pages"); return }
+    if (name === "trash") { router.push(backHref); return }
     const server = result.page
     if (name === "revert") {
       history.current.push(JSON.stringify(draftOf(docRef.current)))
@@ -588,7 +591,7 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
     }
     setSaveState({ kind: "saved" })
     notify(message)
-  }, [commit, flush, notify, router, setSaveState])
+  }, [backHref, commit, flush, notify, router, setSaveState])
 
   const saveTemplate = useCallback(async () => {
     if (!templateName.trim()) return
@@ -684,7 +687,7 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
     {/* La barre d'outils de l'atelier */}
     <div role="toolbar" aria-label="Réglages de l’atelier" className="sticky top-0 z-30 -mx-3 mb-3.5 max-[959px]:static flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-background px-3 py-2.5 sm:-mx-5 sm:px-5">
       <div role="group" aria-label="Vue" className="inline-flex rounded-[11px] border bg-card p-0.5">
-        <Link href="/pages" prefetch={false} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[13px] text-muted-foreground transition hover:bg-muted hover:text-foreground"><LibraryBig className="size-3.5" />Index des pages</Link>
+        <Link href={backHref} prefetch={false} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[13px] text-muted-foreground transition hover:bg-muted hover:text-foreground"><LibraryBig className="size-3.5" />Index des pages</Link>
         {(["build", "preview"] as const).map((value) => <button key={value} type="button" aria-pressed={mode === value} onClick={() => { setMode(value); setDrawer(null) }} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[13px] text-muted-foreground transition hover:bg-muted hover:text-foreground aria-pressed:bg-foreground aria-pressed:font-semibold aria-pressed:text-background">{value === "build" ? <Hammer className="size-3.5" /> : <Eye className="size-3.5" />}{value === "build" ? "Construire" : "Aperçu"}</button>)}
       </div>
       <span className="hidden h-6 w-px bg-border sm:block" />
@@ -807,7 +810,7 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
                       </div>
                       {reason && <p className="flex items-center gap-1.5 pb-1.5 text-xs text-muted-foreground"><EyeOff className="size-3.5" />{reason}</p>}
                       <div className={reason ? "opacity-45 grayscale-[0.6]" : ""}>
-                        <BlockEditor block={block} rev={rev} live={doc.live} links={links} viewAs={viewAs} onChange={(patch, coalesce) => updateBlock(block.id, patch, coalesce)} />
+                        <BlockEditor block={block} rev={rev} live={doc.live} links={links} viewAs={viewAs} origin={doc.replaces} onChange={(patch, coalesce) => updateBlock(block.id, patch, coalesce)} />
                       </div>
                     </div>
                   </Fragment>

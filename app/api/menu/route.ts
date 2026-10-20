@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server"
 
 import { mergeMenu } from "@/lib/app-menu"
-import { hasPreviousMenu, readMenuLayout, resetMenuLayout, restorePreviousMenu, saveMenuLayout } from "@/lib/app-menu-store"
-import { canBuildPages, pageHref } from "@/lib/custom-pages"
+import { resetMenuLayout, restorePreviousMenu, saveMenuLayout } from "@/lib/app-menu-store"
+import { canBuildPages } from "@/lib/custom-pages"
 import { PageStoreError } from "@/lib/custom-pages-store"
-import { pageAuthor, readablePages } from "@/lib/custom-pages-server"
+import { pageAuthor } from "@/lib/custom-pages-server"
+import { menuEditorData } from "@/lib/menu-editor-data"
 import { authorizedAccount } from "@/lib/server-auth"
 
 const denied = () => NextResponse.json({ error: "Accès refusé." }, { status: 403 })
@@ -15,20 +16,12 @@ function failure(error: unknown) {
   return NextResponse.json({ error: "Le menu n’a pas pu être enregistré sur le serveur partagé d’Eraser." }, { status: 502 })
 }
 
-/** Le menu réglé (admins et MJ) : le réglage complété du menu d'Eraser, et les pages qu'on peut y placer. */
+/** Le menu réglé (admins et MJ) : le réglage complété du menu d'Eraser, les pages qu'on peut y placer et les dossiers. */
 export async function GET() {
   const account = await authorizedAccount(["admin", "mj"])
   if (!account || !canBuildPages(account.role)) return denied()
   try {
-    const [layout, pages, previous] = await Promise.all([readMenuLayout(), readablePages(account, { includeDrafts: true }), hasPreviousMenu()])
-    return NextResponse.json({
-      items: mergeMenu(layout?.items),
-      custom: Boolean(layout),
-      updatedAt: layout?.updatedAt ?? "",
-      updatedBy: layout?.updatedBy ?? "",
-      previous,
-      pages: pages.map(({ page }) => ({ id: page.id, title: (page.published ?? page).title, href: pageHref(page), icon: (page.published ?? page).icon, emoji: (page.published ?? page).emoji, status: page.status, vis: page.vis, place: page.rowOf?.index || page.replaces ? "" : page.place })),
-    })
+    return NextResponse.json(await menuEditorData(account))
   } catch (error) {
     return failure(error)
   }

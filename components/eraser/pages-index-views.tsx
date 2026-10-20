@@ -9,7 +9,7 @@ import { useIndexSettings } from "@/components/eraser/index-windows"
 import { PageSearchQuery, PageViewBlock } from "@/components/eraser/page-index-block"
 import { newBlock, type ViewBlock, type ViewBlockKind } from "@/lib/custom-pages"
 import { lockedPolicy, type IndexEditorModel } from "@/lib/index-schema-shared"
-import { PAGES_INDEX, PAGES_INDEX_TITLE, PAGES_TAB, pagesIndexColumns, pagesIndexHeaders, type PagesIndexRow } from "@/lib/pages-index-shared"
+import { PAGES_INDEX, PAGES_INDEX_TITLE, PAGES_TAB, pagesIndexColumns, pagesIndexHeaders, pagesIndexValues, type PagesIndexRow } from "@/lib/pages-index-shared"
 
 /**
  * L'Index des pages vu par le moteur des index : les pages (celles de l'atelier et celles
@@ -59,7 +59,7 @@ export function PagesIndexView({ kind, query, rows }: { kind: Exclude<ViewBlockK
   // Après « Modifier l'affichage », la vue relit ses cartes et ses formes.
   const [version, setVersion] = useState(0)
   const block = useMemo<ViewBlock>(() => ({ ...(newBlock("view", "b-index-pages") as ViewBlock), index: PAGES_INDEX, tab: PAGES_TAB, kind }), [kind])
-  const preview = useMemo(() => ({ [PAGES_TAB]: rows.slice(0, 40).map((row) => Object.fromEntries(pagesIndexHeaders.map((header, at) => [header, [row.title, row.description, row.icon, row.image, row.section, row.address, row.visibility, row.status, row.origin, row.updated, row.id][at] ?? ""]))) }), [rows])
+  const preview = useMemo(() => ({ [PAGES_TAB]: rows.slice(0, 40).map((row) => Object.fromEntries(pagesIndexHeaders.map((header, at) => [header, pagesIndexValues(row)[at] ?? ""]))) }), [rows])
   const optionsOf = (_tab: string, header: string) => (pagesIndexColumns().find((column) => column.header === header)?.spec.options ?? []).map((option) => ({ value: option.value, color: option.color }))
   return <div className="grid gap-3">
     <div className="flex flex-wrap items-center justify-between gap-2 text-[12.5px] text-muted-foreground">

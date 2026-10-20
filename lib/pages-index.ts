@@ -13,7 +13,9 @@ import { menuCatalog, type MenuIconKey } from "@/lib/app-menu"
 import { listCustomPages } from "@/lib/custom-pages-store"
 import type { IndexSource } from "@/lib/custom-pages-data"
 import { blueprintVisibility, eraserPageBlueprint } from "@/lib/eraser-page-blueprints"
-import { escapeCell, PAGES_INDEX, PAGES_INDEX_TITLE, PAGES_TAB, pagesIndexColumns, pagesIndexHeaders, type PagesIndexRow } from "@/lib/pages-index-shared"
+import { escapeCell, PAGES_INDEX, PAGES_INDEX_TITLE, PAGES_TAB, pagesIndexColumns, pagesIndexHeaders, pagesIndexValues, type PagesIndexRow } from "@/lib/pages-index-shared"
+import { emptyFolders, folderPathLabel, type PageFolders } from "@/lib/page-folders"
+import { knownPageFolders } from "@/lib/page-folders-store"
 import { indexPages, type IndexPageKey } from "@/lib/index-pages"
 import type { AuthorizedUser } from "@/lib/server-auth"
 
@@ -66,7 +68,10 @@ function eraserEntries(role: PageRole): Array<{ path: string; title: string; ico
  * Les lignes de l'index des pages pour ce lecteur. `includeDrafts` : aussi les brouillons qu'il
  * peut modifier (l'Index des pages) ; sinon seulement les pages publiées (blocs, menus).
  */
-export function pagesIndexRows(pages: CustomPage[], account: Pick<AuthorizedUser, "uid" | "role">, campaigns: Set<string> | null, options: { includeDrafts?: boolean } = {}): PagesIndexRow[] {
+export function pagesIndexRows(pages: CustomPage[], account: Pick<AuthorizedUser, "uid" | "role">, campaigns: Set<string> | null, options: { includeDrafts?: boolean; folders?: PageFolders } = {}): PagesIndexRow[] {
+  const folders = options.folders ?? emptyFolders()
+  // La clé de rangement d'une ligne est son identifiant (« eraser:/regles », ou celui de la page).
+  const folderOf = (id: string) => folderPathLabel(folders, folders.placement[id] ?? "")
   const admin = account.role === "admin"
   const readable = pages.filter((page) => {
     if (page.trashedAt) return false
@@ -94,6 +99,7 @@ export function pagesIndexRows(pages: CustomPage[], account: Pick<AuthorizedUser
       status: "Publiée",
       origin: replaced ? "Eraser, modifiée" : "Eraser",
       updated: replaced ? day(replaced.publishedAt || replaced.updatedAt) : "",
+      folder: folderOf(`eraser:${entry.path}`),
     })
   }
   for (const page of readable) {
@@ -113,6 +119,7 @@ export function pagesIndexRows(pages: CustomPage[], account: Pick<AuthorizedUser
       status: page.status === "publiee" && page.published ? "Publiée" : "Brouillon",
       origin: "Créée",
       updated: day(page.updatedAt),
+      folder: folderOf(page.id),
     })
   }
   return rows
@@ -132,7 +139,7 @@ export function pagesIndexSourceOf(rows: PagesIndexRow[]): IndexSource {
       tabName: PAGES_TAB,
       headers: [...pagesIndexHeaders],
       rows: rows.map((row) => {
-        const values = [row.title, row.description, row.icon, row.image, row.section, row.address, row.visibility, row.status, row.origin, row.updated, row.id]
+        const values = pagesIndexValues(row)
         return { values, html: values.map(escapeCell) }
       }),
     }],
@@ -150,5 +157,6 @@ async function campaignIdsOf(account: Pick<AuthorizedUser, "uid" | "role">, page
 /** L'index des pages de ce lecteur, prêt pour un bloc Vue ou l'Index des pages. */
 export async function pagesIndexSource(account: Pick<AuthorizedUser, "uid" | "role">, options: { includeDrafts?: boolean } = {}) {
   const pages = await listCustomPages().catch(() => [] as CustomPage[])
-  return pagesIndexSourceOf(pagesIndexRows(pages, account, await campaignIdsOf(account, pages), options))
+  // Le rangement en dossiers : la copie en mémoire, sans attente du serveur partagé.
+  return pagesIndexSourceOf(pagesIndexRows(pages, account, await campaignIdsOf(account, pages), { ...options, folders: knownPageFolders() }))
 }

@@ -9,7 +9,10 @@
  *   plus est ignorée, une entrée d'Eraser absente du réglage (ajoutée par une version plus
  *   récente) apparaît à sa place d'origine ;
  * - masquer n'ouvre rien : les rôles de chaque entrée filtrent toujours ce que chacun voit ;
- * - l'admin garde toujours le Créateur de pages et l'éditeur du menu, même masqués.
+ * - l'admin garde toujours le Créateur de pages et l'éditeur du menu, même masqués ;
+ * - un dossier du créateur de pages (« dossier:… », lib/page-folders.ts) se place comme une
+ *   entrée : au premier niveau, c'est une section de ses pages (un groupe par sous-dossier) ;
+ *   dans une section, la liste de ses pages. Une page publiée qu'on y range y apparaît d'elle-même.
  */
 import type { SiteRole } from "@/lib/auth-types"
 
@@ -101,7 +104,8 @@ export type MenuLayout = { items: MenuNode[]; updatedAt: string; updatedBy: stri
 
 const MAX_NODES = 300
 const text = (value: unknown, max: number) => typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : ""
-const isCustomId = (id: string) => /^(page|lien|groupe):[A-Za-z0-9_-]{2,48}$/.test(id)
+const isCustomId = (id: string) => /^(page|lien|groupe|dossier):[A-Za-z0-9_-]{2,48}$/.test(id)
+export const isFolderNode = (id: string) => id.startsWith("dossier:")
 
 export const isSectionNode = (id: string) => id.startsWith("groupe:") || Boolean(catalogEntry(id)?.section)
 /** Les entrées qui ne vivent qu'au premier niveau (sections, entrées du compte). */
@@ -145,7 +149,7 @@ function cleanNode(input: unknown, seen: Set<string>, depth: number, count: { n:
     if (!href || !label) { seen.delete(id); count.n -= 1; return null }
     node.href = href
   }
-  if (id.startsWith("lien:") || id.startsWith("groupe:")) {
+  if (id.startsWith("lien:") || id.startsWith("groupe:") || isFolderNode(id)) {
     const roles = cleanRoles(raw.roles)
     node.roles = roles ?? ["joueur", "mj", "admin"]
   }
@@ -206,6 +210,9 @@ export function mergeMenu(items: MenuNode[] | null | undefined): MenuNode[] {
 
 export type MenuPageEntry = { title: string; href: string; icon: string; emoji: string }
 
+/** Un dossier du créateur de pages vu par un compte : son nom, ses pages lisibles (par titre), ses sous-dossiers. */
+export type MenuFolderEntry = { label: string; pages: MenuPageEntry[]; children: string[] }
+
 export type ResolvedMenuItem = {
   key: string
   label: string
@@ -215,10 +222,11 @@ export type ResolvedMenuItem = {
   emoji?: string
   href?: string
   prefix?: boolean
-  dynamic?: MenuCatalogEntry["dynamic"]
+  /** `dossier-pages` : les pages d'un dossier du créateur de pages, sous son nom (dans une section). */
+  dynamic?: MenuCatalogEntry["dynamic"] | "dossier-pages"
   section?: boolean
   action?: { href: string; label: string }
-  /** `section-pages` : les pages publiées de la section, lisibles par le compte. */
+  /** `section-pages`, `dossier-pages` : les pages publiées, lisibles par le compte. */
   pages?: MenuPageEntry[]
   /** `dossier` : les pages de chaque campagne. */
   campaignPages?: Record<string, MenuPageEntry[]>
@@ -231,13 +239,31 @@ export type ResolvedMenuItem = {
  * disparaît (sauf les sections d'Eraser qui sont aussi des pages). Un admin retrouve
  * toujours le Créateur de pages et l'éditeur du menu.
  */
-export function resolveMenu(items: MenuNode[] | null | undefined, context: { role: SiteRole; pages: Record<string, MenuPageEntry>; sectionPages?: Record<string, MenuPageEntry[]>; campaignPages?: Record<string, MenuPageEntry[]> }): ResolvedMenuItem[] {
+export function resolveMenu(items: MenuNode[] | null | undefined, context: { role: SiteRole; pages: Record<string, MenuPageEntry>; sectionPages?: Record<string, MenuPageEntry[]>; campaignPages?: Record<string, MenuPageEntry[]>; folders?: Record<string, MenuFolderEntry> }): ResolvedMenuItem[] {
   const tree = mergeMenu(items)
   const shown = new Set<string>()
-  // Les pages placées une à une dans le menu (« page:… ») ne sont pas répétées dans leur section.
+  const folders = context.folders ?? {}
+  // Une page placée une à une dans le menu (page, lien, entrée d'Eraser) n'y revient pas par son dossier.
+  const explicit = new Set<string>()
+  const walkExplicit = (nodes: MenuNode[]) => { for (const node of nodes) { const href = node.id.startsWith("page:") ? context.pages[node.id.slice(5)]?.href : node.href ?? catalogEntry(node.id)?.href; if (href && !node.hidden) explicit.add(href); if (node.children) walkExplicit(node.children) } }
+  walkExplicit(tree)
+  const folderPages = (id: string) => (folders[id]?.pages ?? []).filter((page) => !explicit.has(page.href))
+  /** Les pages d'un dossier et de tous ses sous-dossiers, sans doublon. */
+  const pagesUnder = (id: string, seen = new Set<string>()): MenuPageEntry[] => {
+    const folder = folders[id]
+    if (!folder || seen.has(id)) return []
+    seen.add(id)
+    const out = [...folderPages(id)]
+    for (const child of folder.children) out.push(...pagesUnder(child, seen))
+    return out.filter((page, at) => out.findIndex((other) => other.href === page.href) === at)
+  }
+  const folderShownTo = (node: MenuNode) => !node.hidden && (node.roles ?? []).includes(context.role)
+  // Les pages placées une à une dans le menu (« page:… ») ou par leur dossier ne sont pas répétées dans leur section.
   const placed = new Set(menuPageIds(tree).flatMap((id) => context.pages[id] ? [context.pages[id].href] : []))
+  const walkFolders = (nodes: MenuNode[]) => { for (const node of nodes) { if (isFolderNode(node.id) && folderShownTo(node)) for (const page of pagesUnder(node.id.slice(8))) placed.add(page.href); if (node.children) walkFolders(node.children) } }
+  walkFolders(tree)
   const locked = (id: string) => context.role === "admin" && Boolean(catalogEntry(id)?.locked)
-  function one(node: MenuNode): ResolvedMenuItem | null {
+  function one(node: MenuNode, depth = 0): ResolvedMenuItem | null {
     if (node.hidden && !locked(node.id)) return null
     const entry = catalogEntry(node.id)
     let item: ResolvedMenuItem | null = null
@@ -261,12 +287,35 @@ export function resolveMenu(items: MenuNode[] | null | undefined, context: { rol
     } else if (node.id.startsWith("groupe:")) {
       if (!(node.roles ?? []).includes(context.role)) return null
       item = { key: node.id, label: node.label || "Section", section: true }
+    } else if (isFolderNode(node.id)) {
+      const id = node.id.slice(8)
+      const folder = folders[id]
+      if (!folder || !folderShownTo(node)) return null
+      const label = node.label || folder.label
+      if (depth > 0) {
+        // Dans une section : ses pages (sous-dossiers compris), sous son nom.
+        const pages = pagesUnder(id)
+        if (!pages.length) return null
+        item = { key: node.id, label, dynamic: "dossier-pages", pages }
+      } else {
+        // Au premier niveau : une section, ses pages puis un groupe par sous-dossier.
+        const children: ResolvedMenuItem[] = [
+          ...folderPages(id).map((page) => ({ key: `${node.id}>${page.href}`, label: page.title, href: page.href })),
+          ...folder.children.flatMap((child) => { const pages = pagesUnder(child); return pages.length ? [{ key: `${node.id}>${child}`, label: folders[child]?.label ?? "Dossier", dynamic: "dossier-pages" as const, pages }] : [] }),
+        ]
+        if (!children.length) return null
+        item = { key: node.id, label, builtinIcon: "folder", section: true, children }
+        if (node.icon) item.icon = node.icon
+        if (node.emoji) item.emoji = node.emoji
+        shown.add(item.key)
+        return item
+      }
     }
     if (!item) return null
     if (node.icon) item.icon = node.icon
     if (node.emoji) item.emoji = node.emoji
     if (item.section) {
-      item.children = (node.children ?? []).flatMap((child) => { const resolved = one(child); return resolved ? [resolved] : [] })
+      item.children = (node.children ?? []).flatMap((child) => { const resolved = one(child, depth + 1); return resolved ? [resolved] : [] })
       if (!item.children.length && !item.href) return null
     }
     shown.add(item.key)
@@ -286,6 +335,38 @@ export function resolveMenu(items: MenuNode[] | null | undefined, context: { rol
 export function menuPageIds(items: MenuNode[] | null | undefined) {
   const ids: string[] = []
   const walk = (nodes: MenuNode[]) => { for (const node of nodes) { if (node.id.startsWith("page:")) ids.push(node.id.slice(5)); if (node.children) walk(node.children) } }
+  walk(items ?? [])
+  return ids
+}
+
+/**
+ * L'éditeur du menu montre chaque page d'une section comme une entrée à part entière, qu'on
+ * déplace, renomme ou masque comme les autres : les pages qu'une section montrait d'elle-même
+ * (`section-pages`) y deviennent des « page:… », juste avant l'entrée automatique, qui ne garde
+ * que les pages rangées là plus tard. Le menu montré ne change pas.
+ */
+export function expandSectionPages(items: MenuNode[], pagesByPlace: Record<string, string[]>): MenuNode[] {
+  const tree = JSON.parse(JSON.stringify(items)) as MenuNode[]
+  const present = new Set(menuPageIds(tree))
+  for (const node of tree) {
+    if (!node.children) continue
+    const next: MenuNode[] = []
+    for (const child of node.children) {
+      const entry = catalogEntry(child.id)
+      if (entry?.dynamic === "section-pages") {
+        for (const id of pagesByPlace[entry.place ?? ""] ?? []) if (!present.has(id)) { present.add(id); next.push({ id: `page:${id}` }) }
+      }
+      next.push(child)
+    }
+    node.children = next
+  }
+  return tree
+}
+
+/** Les dossiers du créateur de pages placés dans le menu (pour ne calculer que ceux-là). */
+export function menuFolderIds(items: MenuNode[] | null | undefined) {
+  const ids: string[] = []
+  const walk = (nodes: MenuNode[]) => { for (const node of nodes) { if (isFolderNode(node.id)) ids.push(node.id.slice(8)); if (node.children) walk(node.children) } }
   walk(items ?? [])
   return ids
 }

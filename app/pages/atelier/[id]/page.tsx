@@ -5,6 +5,8 @@ import { PageStudio } from "@/components/eraser/page-studio"
 import { canEditPage, pageSummary, studioPage, type PageViewer } from "@/lib/custom-pages"
 import { listCustomPages, pagesLinkingTo, readCustomPage } from "@/lib/custom-pages-store"
 import { campaignsOf, pageAuthor, viewerFor } from "@/lib/custom-pages-server"
+import { folderKeyOf } from "@/lib/page-folders"
+import { knownPageFolders } from "@/lib/page-folders-store"
 import { authorizedAccount } from "@/lib/server-auth"
 
 export const dynamic = "force-dynamic"
@@ -35,6 +37,8 @@ export default async function PageStudioPage({ params }: { params: Promise<{ id:
     if (!admin && (other.vis === "admin" || other.place === "administration" || (other.place === "campagne" && !campaign))) return []
     return [pageSummary(other, otherViewer)]
   }).sort((left, right) => left.title.localeCompare(right.title, "fr"))
+  // Le retour ramène au dossier de la page (copie en mémoire du rangement : rien n'est attendu).
+  const folder = knownPageFolders().placement[folderKeyOf(page)]
   return (
     <AuthenticatedShell pageLabel={`Atelier · ${page.title}`} roles={["admin"]}>
       <PageStudio
@@ -44,6 +48,7 @@ export default async function PageStudioPage({ params }: { params: Promise<{ id:
         campaigns={campaigns.filter((campaign) => admin || campaign.mine).map((campaign) => ({ id: campaign.id, name: campaign.name }))}
         linking={linking}
         role={account.role}
+        backHref={folder ? `/pages?dossier=${encodeURIComponent(folder)}` : "/pages"}
       />
     </AuthenticatedShell>
   )

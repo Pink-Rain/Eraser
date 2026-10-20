@@ -1,19 +1,37 @@
-# Eraser 0.1.1-alpha.245 — Fiche de personnage et ajouts plus rapides
+# Eraser 0.1.1-alpha.246 — Le créateur de pages rangé en dossiers
 
 Cette version arrive **sans réinstallation** (enveloppe 10, comme l'alpha 238) : Eraser la
 télécharge, redémarre son serveur et recharge la page tout seul. Rien n'est modifié dans Google
-Sheets.
+Sheets, et aucune page n'est touchée : le rangement est un réglage à part, sur le serveur
+partagé.
 
-Relevé de l'alpha 244 sur un vrai poste : les clics sont passés d'une médiane de 568 ms (pire
-1,1 s) à 144 ms (pire 0,34 s) ; « Ouvrir la fiche » d'un item 960 → 168 ms, « Suivante »
-300 ms à 1,1 s → 104 ms. Les deux lenteurs qu'il montrait encore :
+Pensé pour des centaines de pages : un explorateur avec des dossiers, une recherche qui cherche
+partout, et plus aucune différence entre les pages livrées par Eraser et les tiennes.
 
-- **Fiche de personnage** : à son ouverture, Eraser créait le moteur audio de Windows pour
-  préparer les sons (monter de niveau, choisir un sort, équiper…), ce qui figeait la page un
-  quart de seconde. Les sons sont toujours téléchargés d'avance ; le moteur n'est créé qu'au
-  premier son joué, juste après l'affichage du clic.
-- **Ajouter une ligne** (une note, un message du chat, une relation, une entrée du journal) :
-  chaque ajout relisait d'abord chez Google la description du classeur (le numéro et la
-  largeur de l'onglet), souvent plus long que l'ajout lui-même — 0,7 à 1,4 s de plus chez
-  vous. Elle est gardée en mémoire ; si l'onglet a été recréé ou rétréci ailleurs, Google
-  refuse l'ajout sans rien écrire, et Eraser le refait une fois avec la description relue.
+- **Index des pages = un explorateur.** À gauche, les dossiers, imbriqués à volonté : un clic
+  les ouvre, un double-clic les renomme, le « … » crée un sous-dossier ou supprime (ses pages et
+  sous-dossiers remontent d'un cran, rien n'est jamais perdu). À droite, le contenu du dossier
+  ouvert : ses sous-dossiers en tuiles, puis ses pages. On **glisse** une page (ou plusieurs
+  cochées) sur un dossier, une tuile ou le fil d'Ariane pour l'y ranger ; « Ranger dans… »
+  fait pareil au clavier, avec la recherche d'un dossier et sa création sur place. Le rangement
+  s'affiche aussitôt et revient en arrière, avec un message, si le serveur le refuse.
+- **Pour démarrer** : « Ranger par section » crée un dossier par section (Accueil, Règles,
+  Campagnes, Index…) et y met chaque page non rangée. À renommer, imbriquer ou supprimer ensuite.
+- **Une seule sorte de page.** Les pages d'Eraser (Accueil, Combat, Fiche de personnage,
+  Tabletop…) sont des lignes comme les autres : même icône, « Publiée », même bouton « Ouvrir »
+  (elles sont reprises dans l'atelier en coulisses, les lecteurs gardent la page d'origine
+  jusqu'à la publication). Leur partie qu'on ne refait pas en blocs s'appelle désormais par son
+  nom dans l'atelier : « Module Eraser · Tabletop », « Module Eraser · Fiche de personnage »…
+- **La recherche cherche partout** (titre, adresse, dossier), avec une colonne « Dossier » pour
+  savoir où est chaque résultat. Filtres par statut (dont « Publiées, modifiées depuis »),
+  section et visibilité ; tri par titre ou par date.
+- **Pages · Menu · Modèles** : trois onglets en tête du créateur, pour passer de l'un à l'autre.
+  L'atelier ramène au dossier de la page, et l'adresse garde le dossier ouvert.
+- **Menu** : chaque page y est une entrée à part entière, qu'on monte, descend, renomme ou masque
+  — fini le bloc « Pages créées dans… ». « Ajouter une page » cherche parmi toutes les pages,
+  rangées par dossier. **« Ajouter un dossier de pages »** met un dossier entier dans le menu :
+  au premier niveau, une section à son nom (un groupe par sous-dossier) ; dans une section, la
+  liste de ses pages. Une page publiée qu'on y range y apparaît d'elle-même, à qui peut la lire.
+  « Ouvrir » sur une entrée ouvre sa page dans l'atelier.
+- **Index des pages (moteur)** : nouvelle colonne « Dossier », pour ranger une vue par dossier ou
+  n'en montrer qu'un dans un bloc Vue d'index.

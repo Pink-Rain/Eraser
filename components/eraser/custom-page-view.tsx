@@ -15,6 +15,7 @@ import { PageBacklinksBlock, PageSearchBlock, PageSearchProvider, PageStatBlock,
 import { fillRowPage, unpackRowContext, type RowContext } from "@/lib/custom-pages-rows"
 import { arrangeLayout, resolveLayoutColor, type LayoutBlock, type LayoutField } from "@/lib/index-layouts"
 import { eraserModules, moduleSections } from "@/lib/eraser-modules"
+import { replacementLabel } from "@/lib/page-replacements"
 import { RichTextField } from "@/components/eraser/rich-text"
 import { IMAGE_LOOK_DEFAULTS, imageFadeMask, pageImageUrl, placeLabel, sectionLayouts, studioHref, type CalloutTone, type ImageRatio, type PageBlock, type PageView, type SectionLayout, type ViewedBlock, type ViewedSection } from "@/lib/custom-pages"
 
@@ -248,11 +249,13 @@ export type BlockContext = {
 }
 
 /** Un module d'Eraser là où il n'est pas rendu (atelier, adresse propre d'une page de remplacement). */
-export function ModulePlaceholder({ block }: { block: Extract<PageBlock, { type: "module" }> }) {
+/** `origin` : la page d'Eraser que la page remplace ; son contenu d'origine est le module à son nom (« Module Eraser · Tabletop »). */
+export function ModulePlaceholder({ block, origin }: { block: Extract<PageBlock, { type: "module" }>; origin?: string }) {
   const entry = eraserModules.find((item) => item.key === block.module)
+  const label = block.module === "origine" && origin ? `Module Eraser · ${replacementLabel(origin)}` : entry?.label ?? "Module d’Eraser"
   return <div className="grid gap-1 rounded-2xl border border-dashed bg-card/40 px-4 py-5 text-center">
-    <p className="flex items-center justify-center gap-2 text-sm font-semibold"><Puzzle className="size-4 text-primary" />{entry?.label ?? "Module d’Eraser"}{block.module === "pages-section" ? ` · ${moduleSections.find((item) => item.value === block.place)?.label ?? ""}` : ""}</p>
-    <p className="text-xs text-muted-foreground">{block.module === "origine" ? "Le contenu de la page d’Eraser que celle-ci remplace s’affiche ici, à son adresse d’origine." : `${entry?.hint ?? ""}. Il s’affiche sur la page elle-même.`}</p>
+    <p className="flex items-center justify-center gap-2 text-sm font-semibold"><Puzzle className="size-4 text-primary" />{label}{block.module === "pages-section" ? ` · ${moduleSections.find((item) => item.value === block.place)?.label ?? ""}` : ""}</p>
+    <p className="text-xs text-muted-foreground">{block.module === "origine" ? `${origin ? "Tout ce que fait cette page d’Eraser (ses parties qu’on ne refait pas en blocs)" : "Le contenu de la page d’Eraser que celle-ci remplace"} s’affiche ici, à son adresse. Place tes blocs autour, au-dessus, à côté.` : `${entry?.hint ?? ""}. Il s’affiche sur la page elle-même.`}</p>
   </div>
 }
 
