@@ -128,6 +128,8 @@ export type ShopSale = {
   characterName: string
   sessionId: string
   at: string
+  /** Le MJ l'a remis en vente (ou a relancé sa ligne) : la vente reste, sans ses boutons. */
+  restocked?: boolean
 }
 
 /** Le nombre d'exemplaires d'une ligne : écrit, sinon le « Nombre max » de l'item, sinon 1. */

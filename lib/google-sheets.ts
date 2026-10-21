@@ -4457,7 +4457,7 @@ function shopSalesOf(cell: string | undefined): ShopSale[] {
       const name = text(sale.name)
       const quantity = shopCount(sale.quantity)
       if (!name || !quantity) return []
-      return [{ itemId: text(sale.itemId), name, icon: text(sale.icon), type: text(sale.type), subtype: text(sale.subtype), quantity, price: text(sale.price), negotiated: sale.negotiated === true, characterId: text(sale.characterId), characterName: text(sale.characterName), sessionId: text(sale.sessionId), at: text(sale.at) }]
+      return [{ itemId: text(sale.itemId), name, icon: text(sale.icon), type: text(sale.type), subtype: text(sale.subtype), quantity, price: text(sale.price), negotiated: sale.negotiated === true, characterId: text(sale.characterId), characterName: text(sale.characterName), sessionId: text(sale.sessionId), at: text(sale.at), ...(sale.restocked === true ? { restocked: true } : {}) }]
     })
   } catch {
     return []
@@ -4479,9 +4479,19 @@ function shopCells(shop: GeneratedShop, pageLinked: string, current: SavedShopRe
     "ID PNJ lié": options.npcId ?? current?.npcId ?? "",
     "Créé le": current?.createdAt || now,
     "Modifié le": now,
-    // Les ventes ne sont écrites que par un achat (recordShopSale) : un enregistrement du MJ les garde.
-    "Ventes JSON": current?.sales?.length ? JSON.stringify(current.sales) : "",
+    "Ventes JSON": shopSalesCell(shop, current),
   }
+}
+
+/**
+ * Les ventes ne sont écrites que par un achat (takeFromShop) : un enregistrement du MJ garde
+ * celles de la feuille et peut seulement marquer « remis en vente » celles qu'il réassortit.
+ */
+function shopSalesCell(shop: GeneratedShop, current: SavedShopRecord | null) {
+  const sent = (shop as { sales?: unknown }).sales
+  const restocked = new Set((Array.isArray(sent) ? sent as Array<Partial<ShopSale> | null> : []).filter((sale) => sale?.restocked === true).map((sale) => `${sale?.at}|${sale?.itemId}`))
+  const sales = (current?.sales ?? []).map((sale) => restocked.has(`${sale.at}|${sale.itemId}`) ? { ...sale, restocked: true } : sale)
+  return sales.length ? JSON.stringify(sales) : ""
 }
 
 /** Les cases d'Eraser vidées (une ligne de magasin libérée) : les autres colonnes restent. */

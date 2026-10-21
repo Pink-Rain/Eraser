@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, type CSSProperties } from "react"
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { useRouter } from "next/navigation"
 import { LoaderCircle, Store } from "lucide-react"
 
@@ -38,6 +38,11 @@ export function JournalShopWindow({ campaignId, sessionId, sessionLabel, shopId,
   const [error, setError] = useState("")
   const [hidden, setHidden] = useState(initialHidden)
   const [saving, setSaving] = useState<string | null>(null)
+  // La fenêtre reste ouverte et se met à jour sur place : le journal derrière n'est relu
+  // qu'à sa fermeture (le relire tout de suite la refermait).
+  const changed = useRef(false)
+  const close = () => { onClose(); if (changed.current) router.refresh() }
+  const initialShops = useMemo(() => view ? [view.shop] : [], [view])
 
   useEffect(() => {
     let active = true
@@ -59,7 +64,7 @@ export function JournalShopWindow({ campaignId, sessionId, sessionLabel, shopId,
       setSaving(`shop:${id}`)
       setHidden((current) => hide ? [...current, key] : current.filter((entry) => entry !== key && entry !== `shop:${id}` && entry !== `event:shop:${id}`))
       patchSession(campaignId, sessionId, { visibility: hide ? { hide: [key] } : { reveal: [key] } })
-        .then((session) => { setHidden(session.hidden ?? []); router.refresh() })
+        .then((session) => { setHidden(session.hidden ?? []); changed.current = true })
         .catch(() => setHidden(initialHidden))
         .finally(() => setSaving(null))
     },
@@ -68,7 +73,9 @@ export function JournalShopWindow({ campaignId, sessionId, sessionLabel, shopId,
 
   const content = view && <SavedShopCollection
     single
-    initialShops={[view.shop]}
+    initialShops={initialShops}
+    salesSession={sessionId}
+    refresh={() => { changed.current = true }}
     pageLinked={campaignId}
     npcs={view.npcs}
     generatorItems={view.generatorItems}
@@ -81,14 +88,14 @@ export function JournalShopWindow({ campaignId, sessionId, sessionLabel, shopId,
       // Retirer le magasin de la session : la fenêtre se ferme, le journal se relit.
       onRemove: async (id) => {
         await patchSession(campaignId, sessionId, inEvents ? { events: { remove: [`shop:${id}`] } } : { remove: { shopIds: [id] } })
-        router.refresh()
-        onClose()
+        changed.current = true
+        close()
       },
     } : undefined}
     purchase={{ campaignId, sessionId, buyers: view.buyers }}
   />
 
-  return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+  return <Dialog open onOpenChange={(open) => { if (!open) close() }}>
     {/* Échap dans un champ (prix, exemplaires) annule la saisie, sans fermer la vitrine. */}
     <DialogContent style={style} onEscapeKeyDown={(event) => { if (document.activeElement?.closest("input, textarea, select")) event.preventDefault() }}
       className="flex max-h-[min(54rem,calc(100svh-2rem))] flex-col gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-3xl">

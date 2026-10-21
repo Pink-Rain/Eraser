@@ -1,13 +1,15 @@
 import { notFound, redirect } from "next/navigation"
 
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
-import { CampaignJournal, type JournalSessionDetail, type JournalVisual } from "@/components/eraser/campaign-journal"
+import { CampaignJournal, type JournalAuthor, type JournalSessionDetail, type JournalVisual } from "@/components/eraser/campaign-journal"
 import { OBJECT_REFERENCE_INDEX, referenceKey, type ReferenceRequest } from "@/lib/index-references"
 import { resolveReferences } from "@/lib/index-references-server"
 import type { SessionNote } from "@/lib/session-note-rules"
 import { listCampaignEvents } from "@/lib/campaign-events"
 import { listCampaignSessionsForDisplay } from "@/lib/campaign-sessions"
-import { listCampaignMembers, listCharactersForUser, listNpcs, listSavedShops } from "@/lib/google-sheets"
+import { getCampaignDashboard, listCampaignMembers, listCharactersForUser, listNpcs, listSavedShops } from "@/lib/google-sheets"
+import { identityUidsForUser } from "@/lib/identity-links"
+import { ownedBy } from "@/lib/ownership"
 import { campaignReader } from "@/lib/session-access"
 import { listSessionNotes } from "@/lib/session-notes"
 import { authorizedAccount } from "@/lib/server-auth"
@@ -54,6 +56,24 @@ async function noteVisuals(notes: SessionNote[] | null): Promise<Record<string, 
 }
 
 /**
+ * Qui a écrit les notes, pour leur étiquette : le MJ de la campagne, ou les personnages de son
+ * joueur (seulement ceux que le lecteur voit). Lu dans les index locaux et les liens d'identité.
+ */
+async function noteAuthors(campaignId: string, notes: SessionNote[], members: Array<{ id: string; name: string; ownerUid: string; updatedAt: string }>): Promise<Record<string, JournalAuthor>> {
+  const uids = [...new Set(notes.map((note) => note.authorUid).filter(Boolean))]
+  if (!uids.length) return {}
+  const campaign = await getCampaignDashboard(null, campaignId).catch(() => null)
+  const entries = await Promise.all(uids.map(async (uid): Promise<[string, JournalAuthor]> => {
+    const identities = await identityUidsForUser(uid).catch(() => [uid])
+    return [uid, {
+      mj: Boolean(campaign?.mjUid && ownedBy(campaign.mjUid, identities)),
+      characters: members.filter((member) => ownedBy(member.ownerUid, identities)).map((member) => ({ id: member.id, name: member.name, updatedAt: member.updatedAt })),
+    }]
+  }))
+  return Object.fromEntries(entries)
+}
+
+/**
  * Le journal d'une campagne : une page par session (bilan, groupe, lieux, PNJs, créatures,
  * objets, magasins, quêtes, événements) et ses notes publiques. Joueurs et MJ.
  */
@@ -85,9 +105,10 @@ export default async function CampaignJournalPage({ params, searchParams }: { pa
   const veiledCharacters = reader.manager ? new Set<string>() : new Set(hiddenCharacters.filter((characterId) => !ownIds.includes(characterId)))
   const members = listedMembers.filter((member) => !veiledCharacters.has(member.id))
   // Le joueur de chaque personnage, pour sa carte (« • Nom du joueur »), comme sur la page de campagne.
-  const [visuals, players] = await Promise.all([
+  const [visuals, players, authors] = await Promise.all([
     noteVisuals(notes),
     playerNamesFor(account, members.map((member) => member.ownerUid)).catch(() => new Map<string, string>()),
+    noteAuthors(id, notes ?? [], members),
   ])
   const ownedMembers = new Set(mine.map((character) => character.id).filter((characterId) => members.some((member) => member.id === characterId)))
   const list = (sessions ?? []).map((session) => {
@@ -143,6 +164,7 @@ export default async function CampaignJournalPage({ params, searchParams }: { pa
             npcs={shown(npcs, inSessions.npcs).map((npc) => ({ id: npc.id, name: npc.name, image: safeImage(npc.portrait), hint: [npc.title, npc.occupation].filter(Boolean).join(" · "), playerNotes: npc.playerNotes }))}
             shops={shown(shops, inSessions.shops).map((shop) => ({ id: shop.id, name: shop.name, hint: shop.cityName, items: shop.items.slice(0, 6).map((item) => ({ name: item.name, icon: item.icon, type: item.type, subtype: item.subtype })) }))}
             visuals={visuals}
+            authors={authors}
             events={shown(events, inSessions.events).map((event) => ({ id: event.id, name: event.name, image: safeImage(event.image), kind: event.kind, tag: event.tag, tagColor: event.tagColor, description: reader.manager ? event.description : "" }))}
           />}
     </AuthenticatedShell>

@@ -328,7 +328,9 @@ function writeOpened(scope: string, opened: Set<string>) {
   try { window.localStorage.setItem(openedKey(scope), JSON.stringify([...opened])) } catch { /* confort seulement */ }
 }
 
-function NoteRow({ note, sessionNumber, canEdit, linkLabel, onEdit, onDelete, onJump, onTick, expanded, onToggle, flash, order }: {
+function NoteRow({ note, sessionNumber, canEdit, linkLabel, onEdit, onDelete, onJump, onTick, expanded, onToggle, flash, order, author }: {
+  /** Qui l'a écrite, en étiquette : le personnage de l'auteur dans la session, ou « MJ - pseudo ». */
+  author: string
   note: SessionNote
   sessionNumber: (id: string) => number
   canEdit: boolean
@@ -373,11 +375,12 @@ function NoteRow({ note, sessionNumber, canEdit, linkLabel, onEdit, onDelete, on
     </div>
     {expanded && <div className="space-y-2 pb-2.5 pl-9 pr-2.5 text-sm">
       {links.length > 0 && <div className="flex flex-wrap gap-1">{links.map((link) => <LinkChip key={link.link} kind={link.kind} label={link.label} onClick={link.kind === "note" ? () => onJump(link.link.slice(5)) : undefined} />)}</div>}
-      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[11.5px] text-muted-foreground">
-        <span className="flex items-center gap-1.5"><span className="font-semibold uppercase tracking-[0.08em] text-tone">{type.label}</span>{note.authorName && <span>· {citation ? "notée" : "écrite"} par {note.authorName}</span>}</span>
-        {canEdit && <span className="-mr-1 flex gap-0.5">
-          <Button type="button" size="xs" variant="ghost" onClick={onEdit}><Pencil />Modifier</Button>
-          <Button type="button" size="xs" variant="ghost" className="text-destructive hover:text-destructive" onClick={onDelete}><Trash2 />Supprimer</Button>
+      {/* Le type est déjà le nom du groupe : seuls l'auteur et deux icônes restent. */}
+      <div className="flex items-center justify-between gap-2 text-[11.5px] text-muted-foreground">
+        {author ? <span title={`${citation ? "Notée" : "Écrite"} par ${author}`} className="inline-flex min-w-0 items-center gap-1 rounded-full bg-muted px-2 leading-5"><UserRound className="size-3 shrink-0" aria-hidden /><span className="truncate">{author}</span></span> : <span />}
+        {canEdit && <span className="-mr-1 flex shrink-0 gap-0.5">
+          <Button type="button" size="icon-xs" variant="ghost" onClick={onEdit} aria-label="Modifier la note" title="Modifier"><Pencil /></Button>
+          <Button type="button" size="icon-xs" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={onDelete} aria-label="Supprimer la note" title="Supprimer"><Trash2 /></Button>
         </span>}
       </div>
     </div>}
@@ -396,7 +399,9 @@ export type SessionNotesHandle = {
  * groupes que tu ouvres). Le journal de la campagne y range les notes publiques ; la fiche d'un
  * personnage, ses notes privées (`privateFor`).
  */
-export function SessionNotesBoard({ campaignId, sessions, sessionId, notes, onNotesChange, entities, viewer, privateFor, title = "Notes de session", className, newInLatest = false, toolbar, id, handle }: {
+export function SessionNotesBoard({ campaignId, sessions, sessionId, notes, onNotesChange, entities, viewer, privateFor, title = "Notes de session", className, newInLatest = false, toolbar, id, handle, authorLabel }: {
+  /** L'étiquette de l'auteur d'une note (le journal : son personnage dans la session) ; sinon son nom. */
+  authorLabel?: (note: SessionNote) => string
   campaignId: string
   sessions: JournalSessionRef[]
   sessionId: string
@@ -540,7 +545,7 @@ export function SessionNotesBoard({ campaignId, sessions, sessionId, notes, onNo
           </summary>
           <ul className="mb-1.5 space-y-px">{list.map((note) => <NoteRow key={note.id} note={note} sessionNumber={sessionNumber} canEdit={canEditSessionNote(note, viewer)} linkLabel={linkLabel}
             expanded={expanded.has(note.id)} onToggle={() => toggleNote(note.id)} onJump={jump} flash={flash === note.id} order={eventOrder.get(note.id) ?? 0}
-            onTick={(done) => void tick(note, done)} onEdit={() => setDraft({ ...note })} onDelete={() => void remove(note)} />)}</ul>
+            onTick={(done) => void tick(note, done)} onEdit={() => setDraft({ ...note })} onDelete={() => void remove(note)} author={authorLabel ? authorLabel(note) : note.authorName} />)}</ul>
         </details>
       </li>
     })}</ul>

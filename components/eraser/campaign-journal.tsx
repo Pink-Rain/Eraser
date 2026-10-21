@@ -44,6 +44,8 @@ export type JournalSessionDetail = JournalSession & {
 export type JournalVisual = { image?: string; type?: string; color?: string; object?: { icon: string; type: string; subtype: string } }
 /** Un personnage du groupe, avec ce qu'en montre sa carte sur la page de campagne. */
 export type JournalMember = JournalEntity & { playerName?: string; honoraryTitle?: string; classAndLevel?: string; people?: string; /** Le lecteur peut ouvrir sa fiche (MJ, ou son joueur). */ canOpen?: boolean }
+/** L'auteur d'une note : le MJ de la campagne, ou ses personnages (le plus récent d'abord à égalité). */
+export type JournalAuthor = { mj: boolean; characters: Array<{ id: string; name: string; updatedAt: string }> }
 /** Un PNJ et ses notes visibles par les joueurs (texte enrichi). */
 export type JournalNpc = JournalEntity & { playerNotes?: string }
 /** Un magasin et quelques objets de sa vitrine (icônes de l'Index des items). */
@@ -443,7 +445,9 @@ function BannerArrow({ side, session, number, onClick }: { side: "prev" | "next"
  * sessions. À gauche, les notes publiques de la session ; au centre, son récit : bilan,
  * groupe, lieux, PNJs, créatures, objets, magasins, quêtes et frise des événements.
  */
-export function CampaignJournal({ campaignId, campaignName, accentColor, sessions, initialSessionId, initialNotes, notesError = false, viewer, members, npcs, shops, events, visuals = {} }: {
+export function CampaignJournal({ campaignId, campaignName, accentColor, sessions, initialSessionId, initialNotes, notesError = false, viewer, members, npcs, shops, events, visuals = {}, authors = {} }: {
+  /** Qui a écrit les notes (par compte) : leur étiquette dans le panneau des notes. */
+  authors?: Record<string, JournalAuthor>
   campaignId: string
   campaignName: string
   accentColor: string
@@ -525,6 +529,17 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
 
   const entities: SessionNoteEntities = useMemo(() => ({ characters: members, npcs, shops, events: events.map((event) => ({ id: event.id, name: event.name, hint: event.tag })) }), [members, npcs, shops, events])
   const linkLabel = useLinkLabel(entities, notes)
+  // L'étiquette d'une note : « MJ - pseudo », ou le personnage de son joueur présent à cette
+  // session (s'il en a plusieurs, le dernier modifié) ; sinon le nom du compte.
+  const authorLabel = (note: SessionNote) => {
+    const author = authors[note.authorUid]
+    if (!author) return note.authorName
+    if (author.mj) return note.authorName ? `MJ - ${note.authorName}` : "MJ"
+    const present = new Set(sessions.find((session) => session.id === note.sessionId)?.characterIds ?? [])
+    const candidates = author.characters.filter((character) => present.has(character.id))
+    const latest = [...(candidates.length ? candidates : author.characters)].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]
+    return latest?.name ?? note.authorName
+  }
   const refs = useMemo(() => sessions.map((session) => ({ id: session.id, name: session.name, createdAt: session.createdAt })), [sessions])
   const rank = useMemo(() => new Map(sessions.map((session, position) => [session.id, position])), [sessions])
   // Où chaque élément apparaît pour la première fois : « Nouveau » ou « Depuis S3 ».
@@ -743,7 +758,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
 
           <aside className="min-w-0 lg:sticky lg:top-4 lg:col-start-1 lg:row-span-2 lg:row-start-1 lg:max-h-[calc(100svh-2rem)] lg:overflow-y-auto lg:overscroll-contain lg:rounded-2xl lg:scrollbar-thin">
             {notesError && <p className="mb-3 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive" role="alert">Les notes n’ont pas pu être lues dans Google Sheets. Actualise dans un instant.</p>}
-            <SessionNotesBoard id="journal-notes" handle={board} campaignId={campaignId} sessions={refs} sessionId={current.id} notes={notes} onNotesChange={setNotes} entities={entities} viewer={viewer} />
+            <SessionNotesBoard id="journal-notes" handle={board} authorLabel={authorLabel} campaignId={campaignId} sessions={refs} sessionId={current.id} notes={notes} onNotesChange={setNotes} entities={entities} viewer={viewer} />
           </aside>
 
           <div key={`recit-${current.id}`} className="journal-rise min-w-0 space-y-10 lg:col-start-2 lg:row-start-2">

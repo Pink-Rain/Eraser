@@ -3,7 +3,7 @@ import { NextResponse } from "next/server"
 import { addCharacterInventoryItem, readCharacterPurse, replaceCharacterPurse, takeFromShop, undoShopSale } from "@/lib/google-sheets"
 import { notifyItemReceived } from "@/lib/item-notifications"
 import { isPositionalObjectId, positionalFromShopObjectId } from "@/lib/object-item-id"
-import { shopAccess, shopBuyers, shopForPlayers } from "@/lib/shop-access"
+import { sessionShopIds, shopAccess, shopBuyers, shopForPlayers } from "@/lib/shop-access"
 import { amountInCopper, formatCoins, isCoin, planPayment, priceCoin, priceInCopper, shopItemQuantity, type ShopSale } from "@/lib/shop-purchase"
 
 export const dynamic = "force-dynamic"
@@ -41,13 +41,16 @@ export async function POST(request: Request, { params }: Params) {
   const body = await request.json().catch(() => ({})) as { characterId?: unknown; itemId?: unknown; quantity?: unknown; sessionId?: unknown; pay?: unknown; negotiated?: unknown; expectedPrice?: unknown }
   const characterId = typeof body.characterId === "string" ? body.characterId : ""
   const itemId = typeof body.itemId === "string" ? body.itemId : ""
-  const sessionId = typeof body.sessionId === "string" ? body.sessionId : ""
+  const askedSession = typeof body.sessionId === "string" ? body.sessionId : ""
   const quantity = typeof body.quantity === "number" && Number.isInteger(body.quantity) ? body.quantity : 0
   const negotiated = body.negotiated && typeof body.negotiated === "object" ? body.negotiated as { amount?: unknown; coin?: unknown } : null
   const pay = negotiated ? negotiated.coin : body.pay
   if (!itemId || quantity < 1 || !isCoin(pay)) return refused("Cet achat est incomplet.")
 
-  const buyer = (await shopBuyers(access, sessionId)).find((candidate) => candidate.id === characterId)
+  const buyer = (await shopBuyers(access, askedSession)).find((candidate) => candidate.id === characterId)
+  // La vente appartient à une session (elle ne s'affiche que là) : celle de l'achat, ou hors
+  // session (magasins sauvegardés, Événements) la dernière où le magasin apparaît.
+  const sessionId = askedSession || [...access.sessions].reverse().find((session) => sessionShopIds(session).includes(shopId))?.id || ""
   if (!buyer) return refused("Ce personnage ne peut pas acheter ici.", 403)
   const item = access.shop.items.find((candidate) => candidate.id === itemId)
   if (!item) return refused("Cet item n’est plus en vente.", 409)

@@ -94,7 +94,10 @@ aussi au tabletop et à Roll20). Chaque ligne garde ses exemplaires (`quantity` 
 (`.../buy`, `lib/shop-access.ts`) retient d'abord les exemplaires (`takeFromShop`,
 verrou « shops »), puis paie avec la bourse (`replaceCharacterPurse`) et remplit
 l'inventaire (`addCharacterInventoryItem` avec `count`) ; un refus remet tout comme
-avant. La vente est gardée dans la colonne « Ventes JSON », que seul un achat écrit.
+avant. La vente est gardée dans la colonne « Ventes JSON », que seul un achat écrit (un
+enregistrement du MJ peut seulement y marquer « remis en vente »). Elle appartient à
+une session (celle de l'achat, sinon la dernière où le magasin apparaît) et ne
+s'affiche que là. La fenêtre du journal ne relit la page qu'à sa fermeture.
 Le change : 1 PO = 100 PC, 1 PN = 150 PC (`planPayment`).
 
 Le cadrage d’un token (`components/eraser/portrait-framing.tsx`) recadre les avatars
