@@ -195,6 +195,32 @@ pour tout index. Sa page est `WorldIndexPage`. Il n’a **pas d’autre lecteur*
   genre « Arme ».
 Les vues d’avant désignaient un onglet par « fichier:sheetId » : la page les lit sous son nom.
 
+### Affichage des items (inventaire, magasin, fouille)
+
+« Index des items › Modifier › Affichage des items » (`components/eraser/item-display-editor.tsx`)
+règle, endroit par endroit (`inventory`, `shop`, `search`), les colonnes de l’item : leur zone
+(à côté du nom, sous le nom, avec la description, avec l’effet ; absente : masquée), leur ordre,
+leur style (valeur seule, « Libellé : valeur », texte, pastilles) et pour qui (tous, MJ seul,
+joueurs seuls). Modèle pur `lib/item-display.ts` ; gardé sur le Worker (portée `item-display`,
+une entrée par endroit, `lib/item-display-store.ts`) ; un endroit sans entrée garde l’affichage
+d’Eraser, reproduit à l’identique par `defaultItemPlaceDisplay`.
+- Chaque endroit garde sa forme, ses boutons et ce qui lui est propre (quantité, rareté du
+  tirage, prix modifiable…) ; une zone suit ce que l’endroit fait de sa place (description
+  repliée de l’inventaire, effet caché aux joueurs dans un magasin…). Une case vide ne s’affiche
+  jamais.
+- Les colonnes qu’Eraser lit déjà dans l’item (`itemKnownColumns` : type, sous-type, prix,
+  description, effet, valeur, traits de combat) se dessinent depuis l’item, retouches de
+  l’exemplaire comprises ; l’inventaire garde type, sous-type, description et effet modifiables.
+  Les traits se dessinent ensemble (`ObjectTraits only`). Les autres colonnes viennent de
+  `GET /api/items/display`, qui renvoie les réglages taillés pour le lecteur
+  (`itemDisplayForViewer` : rien de « MJ seul » ni de l’effet d’un magasin pour un joueur) et la
+  valeur de ces seules colonnes, lue dans `objectCatalog` (aucune lecture Google de plus).
+- Côté page (`components/eraser/item-display.tsx`) : une copie pour la session (et la dernière
+  dans le navigateur), relue en arrière-plan passé une minute et quand l’Index des items change.
+  Une colonne renommée dans « Colonnes » est suivie (`followItemDisplayRenames`).
+- La roue « Régler l’affichage » (MJ, admin) de l’inventaire, du générateur et des sauvegardes de
+  magasins et des fouilles ouvre l’éditeur sur son endroit (`?modifier=affichage-items&endroit=`).
+
 ## Rareté et emplacements, sections, listes d’index, index des pages
 
 - **« Rareté et emplacements »** (type `rarity-places`, `lib/rarity-places.ts`) :

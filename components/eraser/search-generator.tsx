@@ -1,6 +1,8 @@
 "use client"
 
-import { ObjectText, ObjectTraits } from "@/components/eraser/object-combat-details"
+import { ObjectText } from "@/components/eraser/object-combat-details"
+import { ItemDisplaySettingsLink, itemValuesOf, itemZoneParts, placeZone, useItemDisplay } from "@/components/eraser/item-display"
+import { itemFieldStyle } from "@/lib/item-display"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowLeft, Backpack, Check, CloudOff, Dices, LoaderCircle, MapPin, MoveRight, PackageOpen, Pin, RefreshCw, Search, Shuffle, UserRound, Users, X } from "lucide-react"
 
@@ -161,8 +163,18 @@ type DrawCardProps = {
 
 const DrawCard = memo(function DrawCard({ draw, indexTitles, item, fresh, targets, targetsLoading, giving, onPin, onRemove, onReroll, onElsewhere, onOpenTargets, onGive }: DrawCardProps) {
   const [moving, setMoving] = useState(false)
+  const itemDisplay = useItemDisplay()
   const result = searchResults.find((candidate) => candidate.key === draw.result)
   const name = item?.name || draw.itemName
+  // « Affichage des items » : les colonnes placées pour les fouilles, zone par zone.
+  const placed = itemDisplay.settings.search
+  const zone = item ? { item, values: itemValuesOf(itemDisplay, item.id), looks: itemDisplay.looks, richClassName: richText } : null
+  const nameParts = zone ? itemZoneParts(placeZone(placed, "name"), { ...zone, inline: true }) : []
+  const source = item?.source ? indexTitles?.[item.source] ?? item.source : ""
+  const underParts = [...(source ? [<span key="source">{source}</span>] : []), ...(zone ? itemZoneParts(placeZone(placed, "under"), { ...zone, inline: true }) : [])]
+  const descriptionParts = zone ? itemZoneParts(placeZone(placed, "description"), zone) : []
+  // L'effet en « Libellé : valeur » garde son allure d'avant : le libellé en gras, foncé.
+  const effectParts = zone ? itemZoneParts(placeZone(placed, "effect"), { ...zone, renderKnown: (key, field) => key === "effect" && itemFieldStyle(field) === "label" && (item?.effectHtml?.trim() || item?.effect) ? <p className="text-xs leading-5"><span className="font-semibold">{field.column} :</span> <ObjectText html={item?.effectHtml} text={item?.effect ?? ""} item={item!} className={richText} /></p> : undefined }) : []
   return <article className={`rounded-2xl border bg-card/80 p-4 shadow-sm transition ${fresh ? "ring-2 ring-primary/40" : ""} ${draw.pinned ? "border-primary/45" : ""}`}>
     <div className="flex flex-wrap items-center gap-1.5 text-xs">
       <Badge variant="outline" className={resultStyles[draw.result].badge}>{result?.label}</Badge>
@@ -176,11 +188,10 @@ const DrawCard = memo(function DrawCard({ draw, indexTitles, item, fresh, target
         ? <ObjectIcon icon={item.icon} name={item.name} type={item.type} subtype={item.subtype} className="size-full p-0.5" emojiClassName="text-2xl" fallback={<PackageOpen className="size-4" />} />
         : <PackageOpen className="size-4" />}</div>
       <div className="min-w-0 flex-1">
-        <p className="font-display text-lg font-semibold leading-tight">{item?.nameHtml?.trim() ? <span className={richText} dangerouslySetInnerHTML={{ __html: sanitizeRichText(item.nameHtml) }} /> : name}</p>
-        {item && <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{[item.source ? indexTitles?.[item.source] ?? item.source : "", item.type, item.subtype].filter(Boolean).join(" · ")}{item.price ? ` · ${item.price}` : ""}</p>}
-        {item && (item.descriptionHtml?.trim() || item.description) && <ObjectText as="div" html={item.descriptionHtml} text={item.description} item={item} className={`mt-1.5 text-xs leading-5 text-muted-foreground ${richText}`} />}
-        {item && (item.effectHtml?.trim() || item.effect) && <p className="mt-1 text-xs leading-5"><span className="font-semibold">Effet :</span> <ObjectText html={item.effectHtml} text={item.effect} item={item} className={richText} /></p>}
-        {item && <ObjectTraits item={item} className="mt-1.5" />}
+        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5"><p className="font-display text-lg font-semibold leading-tight">{item?.nameHtml?.trim() ? <span className={richText} dangerouslySetInnerHTML={{ __html: sanitizeRichText(item.nameHtml) }} /> : name}</p>{nameParts}</div>
+        {underParts.length > 0 && <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{underParts.map((part, index) => <span key={index}>{index > 0 && " · "}{part}</span>)}</p>}
+        {descriptionParts.length > 0 && <div className={`mt-1.5 grid gap-1 text-xs leading-5 text-muted-foreground ${richText}`}>{descriptionParts}</div>}
+        {effectParts.length > 0 && <div className="mt-1 grid gap-1.5 text-xs leading-5">{effectParts}</div>}
         {!item && <p className="mt-1 text-xs text-muted-foreground">Cet item n’est plus dans l’Index des items.</p>}
         {draw.elsewhere && <p className="mt-1.5 text-[11px] italic text-muted-foreground">Trouvé hors de ce lieu : aucun item {searchRarityLabels[draw.rarity].toLocaleLowerCase("fr")} n’y est répertorié.</p>}
         {draw.givenTo && <p className="mt-2 inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800"><Check className="size-3" />Donné à {draw.givenTo}</p>}
@@ -376,7 +387,7 @@ export function SearchGenerator({ campaignId, items, places = searchPlaces, sear
 
     <section>
       <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-        <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Tirages</p><p className="text-sm text-muted-foreground">Les {Math.min(unpinned, 20)} derniers sur 20{draws.length - unpinned ? ` · ${draws.length - unpinned} épinglé${draws.length - unpinned > 1 ? "s" : ""}` : ""}</p></div>
+        <div><p className="flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Tirages<ItemDisplaySettingsLink place="search" className="size-6" /></p><p className="text-sm text-muted-foreground">Les {Math.min(unpinned, 20)} derniers sur 20{draws.length - unpinned ? ` · ${draws.length - unpinned} épinglé${draws.length - unpinned > 1 ? "s" : ""}` : ""}</p></div>
         <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">{!shared ? <><CloudOff className="size-3" />Gardés dans ce navigateur</> : drawsUnavailable ? <span className="text-destructive">Non enregistrés</span> : saveState === "saving" ? <><LoaderCircle className="size-3 animate-spin" />Enregistrement…</> : saveState === "error" ? <span className="text-destructive">Non enregistré</span> : saveState === "saved" ? <><Check className="size-3" />Enregistré</> : null}</span>
       </div>
       {draws.length

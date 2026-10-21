@@ -36,15 +36,16 @@ function StyledValues({ values, look, fallback }: { values: string[]; look?: Obj
  * rechargement (précédée de son icône), chacune dans le style de sa colonne. La Valeur n'y est
  * pas : elle s'écrit dans l'effet ({Valeur}).
  */
-export function ObjectTraits({ item, className = "" }: { item: ObjectCombatFields; className?: string }) {
-  const attributes = splitList(item.attributes)
-  const materials = splitList(item.materials)
-  const runes = splitList(item.runes)
+export function ObjectTraits({ item, only, className = "" }: { item: ObjectCombatFields; /** Seulement ces traits (« Affichage des items ») ; absent : tous. */ only?: readonly string[]; className?: string }) {
+  const shown = (key: string) => !only || only.includes(key)
+  const attributes = shown("attributes") ? splitList(item.attributes) : []
+  const materials = shown("materials") ? splitList(item.materials) : []
+  const runes = shown("runes") ? splitList(item.runes) : []
   // Une arme à plusieurs modes (« 60 | 1 ») : une valeur par mode.
-  const reloads = objectModes(item.reload).filter(Boolean)
-  const actions = objectModes(item.action).filter(Boolean)
-  const distances = objectModes(item.distance).filter(Boolean).map(objectDistanceText)
-  const skills = splitList(item.skill)
+  const reloads = shown("reload") ? objectModes(item.reload).filter(Boolean) : []
+  const actions = shown("action") ? objectModes(item.action).filter(Boolean) : []
+  const distances = shown("distance") ? objectModes(item.distance).filter(Boolean).map(objectDistanceText) : []
+  const skills = shown("skill") ? splitList(item.skill) : []
   const looks = item.looks ?? {}
   const attributeLook = columnStyleCss(looks.attributes?.style)
   // L'icône d'un matériau ou d'une rune prend la couleur imposée à sa colonne dans l'objet.

@@ -1,12 +1,22 @@
-# Eraser 0.1.1-alpha.250 — L'œil du MJ dans le journal
+# Eraser 0.1.1-alpha.251 — Chaque item à ta façon
 
 Cette version arrive **sans réinstallation** (enveloppe 10, comme l'alpha 238) : Eraser la
 télécharge, redémarre son serveur et recharge la page tout seul. Rien n'est modifié dans Google
 Sheets.
 
-- **L'œil du Créateur de session, aussi dans le journal.** Pour le MJ, chaque carte de la session
-  (personnages du groupe, PNJ, créatures et événements de la session, magasins) a son œil en haut
-  à droite : plein, la carte est révélée aux joueurs ; barré, elle leur est cachée. Un clic la
-  révèle ou la cache, comme dans le Créateur de session, qui garde le sien. L'étiquette « caché
-  aux joueurs » disparaît. La fenêtre d'un magasin ouverte depuis le journal partage le même œil.
-- Les joueurs ne voient pas l'œil.
+- **« Affichage des items », un nouvel onglet de « Modifier » dans l'Index des items.** Pour
+  l'inventaire, le magasin et la fouille, chacun réglé à part : chaque colonne de l'index se place
+  à côté du nom, sous le nom, avec la description ou avec l'effet, ou reste masquée. Elle se
+  glisse d'une zone à l'autre, se range dans sa zone, s'écrit en valeur seule, en « Libellé :
+  valeur », en texte ou en pastilles (aux couleurs de sa liste), pour tous, pour le MJ seul ou pour
+  les joueurs seuls. L'aperçu montre l'endroit sur un vrai item, vu par un joueur ou par le MJ.
+  Enregistré aussitôt, pour tout le monde.
+- Les boutons et ce qui est propre à chaque endroit ne bougent pas (quantité, équiper, enclume,
+  rareté du tirage, prix, acheter, épingler…). Une colonne placée avec l'effet suit l'effet : dans
+  un magasin, les joueurs ne la voient jamais. Une case vide ne s'affiche jamais.
+- **Rien ne change tant qu'on n'y touche pas** : chaque endroit part de l'affichage d'avant. Une
+  colonne ajoutée à l'index arrive masquée ; une colonne renommée est suivie.
+- Le magasin n'écrit plus « Aucune description renseignée » ni « Aucun effet renseigné » : le volet
+  ne montre que ce qui est rempli, et la flèche disparaît quand il n'y a rien à déplier.
+- Une petite roue (MJ et admin) dans l'inventaire, le générateur de magasins, les magasins
+  sauvegardés et les fouilles ouvre directement ces réglages, sur le bon endroit.

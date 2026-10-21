@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useRef, useState, type DragEvent, type ReactNode } from "react"
-import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X, PanelLeftClose, PanelLeftOpen, MapPinned, ScrollText, LibraryBig } from "lucide-react"
+import { ArrowDown, PackageSearch, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X, PanelLeftClose, PanelLeftOpen, MapPinned, ScrollText, LibraryBig } from "lucide-react"
 
 import { useContainedWheel, useDockArea } from "@/components/eraser/editor-dock"
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
@@ -61,7 +61,7 @@ import { fitLayoutToColumns, isPresentationKind, namedPresentationsOf, presentat
 import { layoutIcons } from "@/components/eraser/index-windows"
 
 /** Ce que montre l'éditeur : les colonnes, le formulaire, le survol, les cartes ou une vue. */
-export type EditorMode = "columns" | LayoutKind | "cards" | `view:${PresentationKind}` | "stats"
+export type EditorMode = "columns" | LayoutKind | "cards" | `view:${PresentationKind}` | "stats" | "items"
 import {
   alignColumns,
   canonicalObjectHeader,
@@ -758,7 +758,7 @@ function useDragList<T extends { id: string }>(items: T[], onMove: (next: T[]) =
  * milieu, les réglages de la colonne choisie à droite, tous visibles. Rien n'est écrit
  * tant qu'on n'a pas enregistré ; le résumé dit exactement ce qui va changer.
  */
-export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {}, layouts = {}, onSaveLayouts, cardsIndex, cards = {}, onSaveCards, initialMode = "columns", initialTab, locks = {}, onSaveLocks, presentations = {}, onSavePresentations, viewPresets = [], onSaveViewPreset, onDeleteViewPreset, previewRows = {}, valuesOf, optionsOf, statsPanel, stats = [] }: {
+export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {}, layouts = {}, onSaveLayouts, cardsIndex, cards = {}, onSaveCards, initialMode = "columns", initialTab, locks = {}, onSaveLocks, presentations = {}, onSavePresentations, viewPresets = [], onSaveViewPreset, onDeleteViewPreset, previewRows = {}, valuesOf, optionsOf, statsPanel, itemsPanel, stats = [] }: {
   model: IndexEditorModel
   open: boolean
   pending?: boolean
@@ -804,6 +804,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   valuesOf?: (tab: string, header: string) => string[]
   /** Le constructeur des statistiques de l'index (onglet « Stats ») ; absent : pas d'onglet. */
   statsPanel?: ReactNode
+  /** « Affichage des items » (Index des items) : les colonnes dans l'inventaire, le magasin, la fouille ; absent : pas d'onglet. */
+  itemsPanel?: ReactNode
   /** Les statistiques de l'index : une tuile du tableau de bord en dessine une. */
   stats?: StatDefinition[]
   /** L'onglet ouvert d'abord (son nom). */
@@ -848,7 +850,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   ].filter(Boolean).map((problem) => `${candidate.name} : ${problem}`)), [tabs])
 
   // « Colonnes », ou la mise en page de la fiche ou du survol de l'onglet choisi.
-  const [mode, setMode] = useState<EditorMode>(() => (initialMode === "cards" && !onSaveCards) || (initialMode.startsWith("view:") && !onSavePresentations) || (initialMode === "stats" && !statsPanel) ? "columns" : initialMode)
+  const [mode, setMode] = useState<EditorMode>(() => (initialMode === "cards" && !onSaveCards) || (initialMode.startsWith("view:") && !onSavePresentations) || (initialMode === "stats" && !statsPanel) || (initialMode === "items" && !itemsPanel) ? "columns" : initialMode)
   // La Liste réunit liste, kanban et maître-détail sous un seul onglet (« view:list ») : sa version choisie dit sa forme (« forme|id »).
   const openedKind = mode.startsWith("view:") ? mode.slice(5) as PresentationKind : null
   const listFamily = openedKind !== null && LIST_FAMILY.includes(openedKind)
@@ -1190,8 +1192,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             <DialogDescription>{intro ?? (readOnly ? model.readOnlyReason : "Onglets à gauche, colonnes au milieu, réglages de la colonne choisie à droite. Rien n’est écrit dans Google Sheets avant « Enregistrer » ; ce qui est supprimé part dans la corbeille.")}</DialogDescription>
           </div>
           <span className="flex flex-wrap items-center gap-2">
-            {(layoutsEnabled || cardsEnabled || presentationsEnabled) && <span className="inline-flex flex-wrap rounded-lg border bg-muted/30 p-0.5" role="tablist" aria-label="Que modifier">
-              {([["columns", Columns3, "Colonnes"], ...(layoutsEnabled ? [["form", LayoutTemplate, "Formulaire"], ["hover", MessageSquareQuote, "Survol"]] as const : []), ...(cardsEnabled ? [["cards", LayoutGrid, "Cartes"]] as const : []), ...(presentationsEnabled ? presentationKinds.filter((kind) => kind.value === "list" || !LIST_FAMILY.includes(kind.value)).map((kind) => [`view:${kind.value}`, layoutIcons[kind.value], kind.label] as const) : []), ...(statsPanel && !readOnly ? [["stats", layoutIcons.stats, "Stats"] as const] : [])] as Array<readonly [EditorMode, LucideIcon, string]>).map(([key, Icon, label]) => <Button key={key} type="button" role="tab" aria-selected={mode === key || (key === "view:list" && listFamily)} size="sm" variant={mode === key || (key === "view:list" && listFamily) ? "default" : "ghost"} className="h-7" onClick={() => setMode(key)}><Icon />{label}</Button>)}
+            {(layoutsEnabled || cardsEnabled || presentationsEnabled || (itemsPanel && !readOnly)) && <span className="inline-flex flex-wrap rounded-lg border bg-muted/30 p-0.5" role="tablist" aria-label="Que modifier">
+              {([["columns", Columns3, "Colonnes"], ...(layoutsEnabled ? [["form", LayoutTemplate, "Formulaire"], ["hover", MessageSquareQuote, "Survol"]] as const : []), ...(cardsEnabled ? [["cards", LayoutGrid, "Cartes"]] as const : []), ...(presentationsEnabled ? presentationKinds.filter((kind) => kind.value === "list" || !LIST_FAMILY.includes(kind.value)).map((kind) => [`view:${kind.value}`, layoutIcons[kind.value], kind.label] as const) : []), ...(statsPanel && !readOnly ? [["stats", layoutIcons.stats, "Stats"] as const] : []), ...(itemsPanel && !readOnly ? [["items", PackageSearch, "Affichage des items"] as const] : [])] as Array<readonly [EditorMode, LucideIcon, string]>).map(([key, Icon, label]) => <Button key={key} type="button" role="tab" aria-selected={mode === key || (key === "view:list" && listFamily)} size="sm" variant={mode === key || (key === "view:list" && listFamily) ? "default" : "ghost"} className="h-7" onClick={() => setMode(key)}><Icon />{label}</Button>)}
             </span>}
           </span>
         </div>
@@ -1384,6 +1386,13 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             Les <b className="text-foreground">statistiques</b> de cet index, sur tous ses onglets. Une statistique <b className="text-foreground">épinglée</b> s’affiche dans les onglets stat de l’index. Enregistrées aussitôt dans Eraser, pour tout le monde.
           </div>
           {statsPanel}
+        </section>}
+
+        {mode === "items" && itemsPanel && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
+          <div className="rounded-xl border bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
+            Ce que montrent <b className="text-foreground">l’inventaire</b>, <b className="text-foreground">le magasin</b> et <b className="text-foreground">la fouille</b> de chaque item, endroit par endroit, pour tous les onglets. Les boutons de chaque endroit restent à leur place. Enregistré aussitôt dans Eraser, pour tout le monde ; une colonne ajoutée ici apparaît après « Enregistrer ».
+          </div>
+          {itemsPanel}
         </section>}
 
         {viewKind && tab && (() => {

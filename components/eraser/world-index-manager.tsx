@@ -19,6 +19,9 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useEditorDock } from "@/components/eraser/editor-dock"
 import { OwnerSelector } from "@/components/eraser/owner-selector"
 import type { EditorMode } from "@/components/eraser/index-editor"
+import { followItemDisplayRenames, ItemDisplayEditor, type ItemDisplayColumn } from "@/components/eraser/item-display-editor"
+import { ITEM_DISPLAY_EDITOR_PARAM } from "@/components/eraser/item-display"
+import { isItemPlace, type ItemPlace } from "@/lib/item-display"
 import { SavedViewDialog, savedViewMark, useIndexSettings } from "@/components/eraser/index-windows"
 import { IndexPresentation } from "@/components/eraser/index-presentation"
 import { IndexStats, TAB_PSEUDO } from "@/components/eraser/index-stats"
@@ -1648,6 +1651,28 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     setPending("")
   }
 
+  // « ?modifier=affichage-items&endroit=… » (la roue de l'inventaire, du magasin, de la fouille) :
+  // « Modifier › Affichage des items » s'ouvre sur cet endroit ; l'adresse redevient celle de l'index.
+  const [itemsPlace, setItemsPlace] = useState<ItemPlace>("inventory")
+  useEffect(() => {
+    if (embed || !isObjects) return
+    const read = () => {
+      const url = new URL(window.location.href)
+      if (url.searchParams.get("modifier") !== ITEM_DISPLAY_EDITOR_PARAM) return
+      const place = url.searchParams.get("endroit")
+      if (isItemPlace(place)) setItemsPlace(place)
+      for (const key of ["modifier", "endroit"]) url.searchParams.delete(key)
+      replaceAppUrl(url.pathname + url.search, { record: false })
+      void openEditor("items")
+    }
+    // À l'arrivée sur la page, et quand l'adresse change alors que la page est déjà ouverte (onglet gardé).
+    const timer = window.setTimeout(read, 0)
+    window.addEventListener(URL_CHANGE_EVENT, read)
+    window.addEventListener("popstate", read)
+    return () => { window.clearTimeout(timer); window.removeEventListener(URL_CHANGE_EVENT, read); window.removeEventListener("popstate", read) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- une vue intégrée le reste pour toute sa vie
+  }, [])
+
   /** Met l'index (créé dans Eraser) à la corbeille, puis revient à la page des index. */
   async function deleteIndex() {
     setPending("schema"); setEditorError("")
@@ -1668,6 +1693,12 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       if (!response.ok || !payload.data) throw new Error(payload.error || "Les changements n’ont pas pu être écrits.")
       applyData(payload.data, seq)
       announceWorldIndexChange([indexKey], origin)
+      if (isObjects) {
+        // « Affichage des items » suit une colonne renommée, quand plus aucun onglet n'a l'ancien nom.
+        const remaining = new Set(Object.values(payload.data.columns).flat().map((column) => foldName(column.header)))
+        const renames = operations.flatMap((operation) => operation.op === "rename" && !remaining.has(foldName(operation.header)) && remaining.has(foldName(operation.to)) ? [{ from: operation.header, to: operation.to }] : [])
+        void followItemDisplayRenames(renames.filter((rename, index) => renames.findIndex((other) => foldName(other.from) === foldName(rename.from)) === index))
+      }
       closeEditor()
     } catch (reason) {
       setEditorError(reason instanceof Error ? reason.message : "Les changements n’ont pas pu être écrits.")
@@ -1684,6 +1715,10 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     const rowsOf = (count: number) => Object.fromEntries(tables.map((owner) => [owner.tabName, owner.rows.slice(0, count).map((row) => Object.fromEntries(owner.headers.map((header, index) => [header, row.values[index] ?? ""])))]))
     return { sample: rowsOf(3), preview: rowsOf(40) }
   }, [editorOpen, tables])
+  // « Affichage des items » : les colonnes de tous les onglets (le type du premier qui l'a) et des lignes pour l'aperçu.
+  const itemsEditor = isObjects && editorOpen && shell?.viewRole !== "joueur"
+  const itemDisplayColumns = useMemo((): ItemDisplayColumn[] => !itemsEditor ? [] : tables.flatMap((owner) => (data?.columns[owner.tabName] ?? []).map((column) => ({ header: column.header, spec: column.spec }))), [data, itemsEditor, tables])
+  const itemDisplayRows = useMemo(() => !itemsEditor || !editorSamples ? [] : Object.values(editorSamples.preview).flat(), [editorSamples, itemsEditor])
   const editorNode = editor ? <IndexEditor
         model={editor}
         sampleRows={editorSamples?.sample}
@@ -1711,6 +1746,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         optionsOf={(tabName, header) => (specOf(tabName, header).options ?? []).map((option) => ({ value: option.value, color: option.color }))}
         stats={indexStats}
         statsPanel={<IndexStats stats={indexStats} groups={settings.statGroups} rows={statRowKeys} columns={statHeaders} tabs={statTabs} valueOf={statValueOf} tabOf={statTabOf} nameOf={layoutNameOf} optionsOf={statOptionsOf} separatorOf={statSeparatorOf} rarityColumns={statRarityColumns} onOpen={(rowKey, list) => { setSheetError(""); setStatSheetRows(list ?? null); setDetails(rowKey) }} canEdit={!busy} onSave={saveStats} />}
+        itemsPanel={itemsEditor ? <ItemDisplayEditor columns={itemDisplayColumns} rows={itemDisplayRows} initialPlace={itemsPlace} canEdit={!busy} /> : undefined}
         initialMode={editorMode}
         initialTab={table?.tabName}
       /> : null
