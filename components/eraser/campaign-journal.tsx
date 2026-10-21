@@ -1,7 +1,8 @@
 "use client"
 
 import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
-import { BookOpen, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Feather, Lock, NotebookPen, Plus, type LucideIcon } from "lucide-react"
+import Link from "next/link"
+import { ArrowUpRight, BookOpen, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleUserRound, Feather, Lock, NotebookPen, NotebookText, Plus, Store, type LucideIcon } from "lucide-react"
 
 import { replaceAppUrl } from "@/components/eraser/app-tabs"
 import { RichTextView } from "@/components/eraser/rich-text"
@@ -19,6 +20,7 @@ import {
   type SessionNotesHandle,
 } from "@/components/eraser/session-notes"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { sessionNoteLabel, sessionNoteType, type SessionLinkKind, type SessionNote, type SessionNoteType } from "@/lib/session-note-rules"
 import { ObjectIcon } from "@/components/eraser/object-icon"
@@ -34,6 +36,10 @@ export type JournalSessionDetail = JournalSession & {
 }
 /** Ce que l'index montre d'un lieu, d'une créature ou d'un objet cité par une note (« place:Nom »). */
 export type JournalVisual = { image?: string; type?: string; color?: string; object?: { icon: string; type: string; subtype: string } }
+/** Un personnage du groupe, avec ce qu'en montre sa carte sur la page de campagne. */
+export type JournalMember = JournalEntity & { playerName?: string; honoraryTitle?: string; classAndLevel?: string; people?: string; /** Le lecteur peut ouvrir sa fiche (MJ, ou son joueur). */ canOpen?: boolean }
+/** Un PNJ et ses notes visibles par les joueurs (texte enrichi). */
+export type JournalNpc = JournalEntity & { playerNotes?: string }
 /** Un magasin et quelques objets de sa vitrine (icônes de l'Index des items). */
 export type JournalShop = JournalEntity & { items?: Array<{ name: string; icon: string; type: string; subtype: string }> }
 export type JournalEvent = JournalEntity & { kind: string; tag: string; tagColor: string; description: string }
@@ -80,9 +86,11 @@ function Avatar({ name, image, icon: Icon, color, square = false, muted = false,
   const ring = "ring-2 ring-card shadow-[0_0_0_3px_var(--border)]"
   if (media && !(image && broken !== image)) return <span className={cn("flex size-12 shrink-0 items-center justify-center overflow-hidden bg-tone/10 p-1", shape, ring, muted && "opacity-50 grayscale")} style={tone(color)} aria-hidden>{media}</span>
   if (image && broken !== image) {
-    // eslint-disable-next-line @next/next/no-img-element -- portraits servis par l'app ou Google Drive
-    return <img src={image} alt="" loading="lazy" onError={() => setBroken(image)} ref={(node) => { if (node?.complete && !node.naturalWidth) setBroken(image) }}
-      className={cn("size-12 shrink-0 bg-muted object-cover", shape, ring, muted && "opacity-50 grayscale")} />
+    // Le cadre rogne l'image : le cadrage du token (PortraitFramingEffect) l'agrandit et la décale.
+    return <span className={cn("block size-12 shrink-0 overflow-hidden bg-muted", shape, ring, muted && "opacity-50 grayscale")}>
+      {/* eslint-disable-next-line @next/next/no-img-element -- portraits servis par l'app ou Google Drive */}
+      <img src={image} alt="" loading="lazy" onError={() => setBroken(image)} ref={(node) => { if (node?.complete && !node.naturalWidth) setBroken(image) }} className="size-full object-cover" />
+    </span>
   }
   return <span className={cn("flex size-10 shrink-0 items-center justify-center bg-tone font-display text-[15px] font-semibold text-white", shape, ring, muted && "opacity-45 grayscale")} style={tone(color)} aria-hidden>
     {Icon ? <Icon className="size-[18px]" /> : initials(name)}
@@ -117,6 +125,8 @@ function Section({ id, icon: Icon, title, count, action, children }: { id: strin
 }
 
 const cardGrid = "grid gap-2.5 grid-cols-[repeat(auto-fill,minmax(min(100%,14.5rem),1fr))]"
+/** Les cartes du groupe, un peu plus larges : portrait, joueur, titre, classe et niveau. */
+const groupGrid = "grid gap-2.5 grid-cols-[repeat(auto-fill,minmax(min(100%,16.5rem),1fr))]"
 
 /* ---------- Cartes et notes liées ---------- */
 
@@ -157,7 +167,38 @@ function useHoverPopover(enabled: boolean) {
   }
 }
 
-function EntityCard({ name, hint, image, media, kind, link, color, icon, square, tags, absent = false, children }: {
+/** La pastille « n notes » d'une carte : survolée, cliquée ou au clavier, elle déroule ses notes liées. */
+function NotesBadge({ name, kind, related, hover }: { name: string; kind: SessionLinkKind; related: SessionNote[]; hover: ReturnType<typeof useHoverPopover> }) {
+  const journal = useJournal()
+  const meta = linkKindLabels[kind]
+  const here = related.filter((note) => note.sessionId === journal.currentId).length
+  if (!related.length) return null
+  return <Popover open={hover.open} onOpenChange={hover.setOpen}>
+    <PopoverTrigger asChild>
+      <button type="button" onClick={hover.onTrigger} aria-label={`${related.length} note${related.length > 1 ? "s" : ""} liée${related.length > 1 ? "s" : ""} à ${name}`} title={here === related.length ? undefined : here ? `${here} dans cette session, ${related.length} en tout` : "Notes d’autres sessions"}
+        className={cn("mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 text-[11px] font-semibold leading-5 tabular-nums outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",
+          // Aucune note de cette session : la pastille reste discrète.
+          here ? "bg-journal/10 text-journal-ink hover:bg-journal/20 data-[state=open]:bg-journal/20" : "bg-muted text-muted-foreground hover:bg-accent data-[state=open]:bg-accent")}>
+        <NotebookPen className="size-3" aria-hidden />{related.length}
+      </button>
+    </PopoverTrigger>
+    <PopoverContent align="end" sideOffset={8} onOpenAutoFocus={hover.content.onOpenAutoFocus} onPointerEnter={hover.content.onPointerEnter} onPointerLeave={hover.content.onPointerLeave}
+      style={{ ...journal.vars, ...tone(meta.color) }} className="w-[min(21rem,calc(100vw-1rem))] rounded-xl border-border/80 p-1.5 shadow-[0_18px_44px_rgb(33_30_26/0.18)]">
+      <LinkedNotesList name={name} kindLabel={meta.one} icon={meta.icon} notes={related} onPick={(noteId) => { hover.setOpen(false); journal.openNote(noteId) }} />
+    </PopoverContent>
+  </Popover>
+}
+
+/** Un petit bouton posé sous une carte (« Ouvrir le magasin », « Notes ») : un lien ou une action. */
+function CardButton({ icon: Icon, href, onClick, label, children }: { icon: LucideIcon; href?: string; onClick?: () => void; /** Le nom complet pour un lecteur d'écran. */ label?: string; children: ReactNode }) {
+  const className = "inline-flex h-6 items-center gap-1 rounded-full border border-border/80 bg-background/70 px-2 text-[11.5px] font-medium text-foreground/85 outline-none transition-colors hover:border-tone/55 hover:bg-tone/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+  const body = <><Icon className="size-3 text-tone" strokeWidth={2.3} aria-hidden />{children}</>
+  return href
+    ? <Link href={href} prefetch={false} aria-label={label} className={className}>{body}</Link>
+    : <button type="button" onClick={onClick} aria-label={label} className={className}>{body}</button>
+}
+
+function EntityCard({ name, hint, image, media, kind, link, color, icon, square, tags, absent = false, actions, children }: {
   name: string
   hint?: string
   image?: string
@@ -170,13 +211,14 @@ function EntityCard({ name, hint, image, media, kind, link, color, icon, square,
   square?: boolean
   tags?: ReactNode
   absent?: boolean
+  /** Les petits boutons du bas de la carte (CardButton). */
+  actions?: ReactNode
   children?: ReactNode
 }) {
   const journal = useJournal()
   const meta = linkKindLabels[kind]
   const related = link ? journal.notesFor(typeof link === "string" ? [link] : link) : []
   const hover = useHoverPopover(related.length > 0)
-  const here = related.filter((note) => note.sessionId === journal.currentId).length
   return <div {...hover.card} style={tone(meta.color)} className={cn(
     "group/card relative flex min-w-0 items-start gap-3 rounded-xl border p-3 transition-[border-color,box-shadow,transform] duration-200",
     absent ? "border-dashed border-border bg-transparent" : "border-border/70 bg-card shadow-[0_1px_2px_rgb(67_50_31/0.05)] hover:-translate-y-px hover:border-tone/45 hover:shadow-[0_6px_18px_rgb(67_50_31/0.09)]",
@@ -185,26 +227,56 @@ function EntityCard({ name, hint, image, media, kind, link, color, icon, square,
     <div className="min-w-0 flex-1">
       <div className="flex items-start gap-2">
         <p className={cn("min-w-0 flex-1 font-display text-[15.5px] font-semibold leading-snug [overflow-wrap:anywhere]", absent && "text-muted-foreground")}>{name}</p>
-        {related.length > 0 && <Popover open={hover.open} onOpenChange={hover.setOpen}>
-          <PopoverTrigger asChild>
-            <button type="button" onClick={hover.onTrigger} aria-label={`${related.length} note${related.length > 1 ? "s" : ""} liée${related.length > 1 ? "s" : ""} à ${name}`} title={here === related.length ? undefined : here ? `${here} dans cette session, ${related.length} en tout` : "Notes d’autres sessions"}
-              className={cn("mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 text-[11px] font-semibold leading-5 tabular-nums outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",
-                // Aucune note de cette session : la pastille reste discrète.
-                here ? "bg-journal/10 text-journal-ink hover:bg-journal/20 data-[state=open]:bg-journal/20" : "bg-muted text-muted-foreground hover:bg-accent data-[state=open]:bg-accent")}>
-              <NotebookPen className="size-3" aria-hidden />{related.length}
-            </button>
-          </PopoverTrigger>
-          <PopoverContent align="end" sideOffset={8} onOpenAutoFocus={hover.content.onOpenAutoFocus} onPointerEnter={hover.content.onPointerEnter} onPointerLeave={hover.content.onPointerLeave}
-            style={{ ...journal.vars, ...tone(meta.color) }} className="w-[min(21rem,calc(100vw-1rem))] rounded-xl border-border/80 p-1.5 shadow-[0_18px_44px_rgb(33_30_26/0.18)]">
-            <LinkedNotesList name={name} kindLabel={meta.one} icon={meta.icon} notes={related} onPick={(noteId) => { hover.setOpen(false); journal.openNote(noteId) }} />
-          </PopoverContent>
-        </Popover>}
+        <NotesBadge name={name} kind={kind} related={related} hover={hover} />
       </div>
       {hint && <p className="truncate text-xs text-muted-foreground">{hint}</p>}
       {tags && <div className="mt-1.5 flex flex-wrap gap-1">{tags}</div>}
       {children}
+      {actions && <div className="mt-2 flex flex-wrap gap-1.5">{actions}</div>}
     </div>
   </div>
+}
+
+/**
+ * Un personnage du groupe : la carte de la page de campagne en plus petit (portrait, joueur,
+ * titre honorifique, classe et niveau, peuple). Sa fiche s'ouvre pour le MJ, et pour le
+ * joueur sur ses propres personnages.
+ */
+function CharacterCard({ member, absent = false, tags }: { member: JournalMember; absent?: boolean; tags?: ReactNode }) {
+  const journal = useJournal()
+  const meta = linkKindLabels.character
+  const related = journal.notesFor([`character:${member.id}`])
+  const hover = useHoverPopover(related.length > 0)
+  const [broken, setBroken] = useState("")
+  const image = member.image && broken !== member.image ? member.image : ""
+  return <article {...hover.card} style={tone(meta.color)} className={cn(
+    "group/card relative grid min-w-0 grid-cols-[4.75rem_minmax(0,1fr)] overflow-hidden rounded-xl border transition-[border-color,box-shadow,transform] duration-200",
+    absent ? "border-dashed border-border bg-transparent" : "border-border/70 bg-card shadow-[0_1px_2px_rgb(67_50_31/0.05)] hover:-translate-y-px hover:border-tone/45 hover:shadow-[0_6px_18px_rgb(67_50_31/0.09)]",
+  )}>
+    <div className={cn("relative min-h-[6.5rem] overflow-hidden bg-muted", absent && "opacity-50 grayscale")}>
+      <div className="absolute inset-0 grid place-items-center text-journal-ink/25" aria-hidden><CircleUserRound className="size-8" /></div>
+      {/* eslint-disable-next-line @next/next/no-img-element -- portrait servi par l'app */}
+      {image && <img src={image} alt={`Portrait de ${member.name}`} loading="lazy" decoding="async" onError={() => setBroken(image)} ref={(node) => { if (node?.complete && !node.naturalWidth) setBroken(image) }}
+        className="absolute inset-0 size-full object-cover transition-[scale] duration-300 group-hover/card:scale-[1.03]" />}
+    </div>
+    <div className="min-w-0 px-3 py-2.5">
+      <div className="flex items-start gap-1.5">
+        <div className="min-w-0 flex-1">
+          <h3 className={cn("font-display text-[15.5px] font-semibold leading-tight [overflow-wrap:anywhere]", absent && "text-muted-foreground")}>{member.name}</h3>
+          {member.playerName && <p className="truncate text-[11.5px] text-muted-foreground">{member.playerName}</p>}
+        </div>
+        <NotesBadge name={member.name} kind="character" related={related} hover={hover} />
+        {member.canOpen && <Link href={`/personnage/${encodeURIComponent(member.id)}`} prefetch={false} aria-label={`Ouvrir la fiche de ${member.name}`} title="Ouvrir la fiche"
+          className="-mr-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-md border border-border/80 bg-background/70 text-muted-foreground outline-none transition-colors hover:border-tone/55 hover:bg-tone/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50">
+          <ArrowUpRight className="size-3.5" aria-hidden />
+        </Link>}
+      </div>
+      {member.honoraryTitle && <p className="mt-0.5 text-xs font-medium leading-snug text-journal-ink">{member.honoraryTitle}</p>}
+      {member.classAndLevel && <p className="mt-1.5 text-[12.5px] font-semibold leading-snug text-foreground/80">{member.classAndLevel}</p>}
+      {(member.people || member.hint) && <p className="text-xs leading-snug text-muted-foreground">{member.people || member.hint}</p>}
+      {tags && <div className="mt-1.5 flex flex-wrap gap-1">{tags}</div>}
+    </div>
+  </article>
 }
 
 function LinkedNotesList({ name, kindLabel, icon: Icon, notes, onPick }: { name: string; kindLabel: string; icon: LucideIcon; notes: SessionNote[]; onPick: (noteId: string) => void }) {
@@ -229,6 +301,79 @@ function LinkedNotesList({ name, kindLabel, icon: Icon, notes, onPick }: { name:
     })}</ul>
     <p className="px-2 pb-1 pt-0.5 text-[11px] text-muted-foreground">Une note s’ouvre dans le panneau des notes.</p>
   </div>
+}
+
+/* ---------- Un PNJ au fil des sessions ---------- */
+
+/** Le PNJ dont la fenêtre « Notes » est ouverte. */
+type NpcHistory = { name: string; hint?: string; image?: string; color: string; /** Absentes pour un PNJ venu d'un événement : il n'a pas de notes pour les joueurs. */ playerNotes?: string; link: string }
+/** Une session où le PNJ apparaît, ou qu'une note lui lie. */
+type NpcHistoryRow = { session: JournalSessionDetail; number: number; notes: SessionNote[]; appeared: boolean }
+
+/**
+ * Les notes d'un PNJ que voient les joueurs, puis toutes les sessions où il est passé, dans
+ * leur ordre, avec les notes qui le citent (une apparition sans note reste dans la liste).
+ */
+function NpcHistoryDialog({ npc, rows, onClose, onGoSession }: { npc: NpcHistory | null; rows: NpcHistoryRow[]; onClose: () => void; onGoSession: (sessionId: string) => void }) {
+  const journal = useJournal()
+  // Une note choisie prend le focus dans le panneau des notes : la fenêtre ne le rend pas au bouton.
+  const picked = useRef(false)
+  const pick = (noteId: string) => { picked.current = true; onClose(); journal.openNote(noteId) }
+  return <Dialog open={Boolean(npc)} onOpenChange={(open) => { if (!open) onClose() }}>
+    <DialogContent style={{ ...journal.vars, ...tone(linkKindLabels.npc.color) }} onCloseAutoFocus={(event) => { if (picked.current) { event.preventDefault(); picked.current = false } }}
+      className="flex max-h-[min(46rem,calc(100svh-2rem))] flex-col gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-lg">
+      {npc && <>
+        <DialogHeader className="flex-row items-center gap-3 border-b border-border/70 px-5 py-4 pr-12 text-left">
+          <Avatar name={npc.name} image={npc.image} color={npc.color} square />
+          <div className="min-w-0">
+            <DialogTitle className="font-display text-xl leading-tight [overflow-wrap:anywhere]">{npc.name}</DialogTitle>
+            <DialogDescription className="truncate">{npc.hint || "PNJ"}</DialogDescription>
+          </div>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-5 pb-5 pt-4 scrollbar-thin">
+          {npc.playerNotes !== undefined && <section aria-labelledby="pnj-notes-joueurs">
+            <h3 id="pnj-notes-joueurs" className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.09em] text-muted-foreground">Notes visibles par les joueurs</h3>
+            {npc.playerNotes ? <RichTextView html={npc.playerNotes} className="rounded-xl border border-border/70 bg-card px-3.5 py-2.5 text-sm leading-6" />
+              : <p className="text-sm text-muted-foreground">Aucune note pour les joueurs.</p>}
+          </section>}
+          <section aria-labelledby="pnj-sessions">
+            <h3 id="pnj-sessions" className="mb-2.5 text-[10.5px] font-bold uppercase tracking-[0.09em] text-muted-foreground">Au fil des sessions</h3>
+            {rows.length ? <ol className="space-y-0">{rows.map((row, position) => {
+              const current = row.session.id === journal.currentId
+              const last = position === rows.length - 1
+              return <li key={row.session.id} className="grid grid-cols-[2.25rem_minmax(0,1fr)] gap-x-3">
+                <div className="flex flex-col items-center" aria-hidden>
+                  <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-full border-[1.5px] font-display text-[13px] font-semibold tabular-nums", current ? "border-journal bg-journal/10 text-journal-ink" : "border-border bg-card text-muted-foreground")}>S{row.number}</span>
+                  {!last && <span className="my-1 w-[1.5px] flex-1 rounded-full bg-border" />}
+                </div>
+                <div className={cn("min-w-0 pt-1.5", !last && "pb-4")}>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <button type="button" onClick={() => { onClose(); onGoSession(row.session.id) }} disabled={current} title={current ? undefined : "Aller à cette session"}
+                      className="min-w-0 rounded-sm text-left font-display text-[15px] font-semibold leading-snug outline-none [overflow-wrap:anywhere] enabled:hover:underline enabled:hover:underline-offset-4 focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-default">
+                      <span className="sr-only">Session {row.number} : </span>{row.session.name}
+                    </button>
+                    {current && <Tag fresh>Cette session</Tag>}
+                  </div>
+                  {row.notes.length ? <ul className="mt-1.5 space-y-1">{row.notes.map((note) => {
+                    const type = sessionNoteType(note.type)
+                    const TypeIcon = noteTypeIcons[note.type]
+                    return <li key={note.id}>
+                      <button type="button" onClick={() => pick(note.id)} style={tone(type.color)}
+                        className="grid w-full grid-cols-[1rem_minmax(0,1fr)] gap-x-2 rounded-lg border border-border/60 bg-card px-2.5 py-1.5 text-left outline-none transition-colors hover:border-tone/45 hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/40">
+                        <TypeIcon className="row-span-2 mt-0.5 size-3.5 text-tone" aria-hidden />
+                        <span className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-tone">{type.label}{note.authorName && <span className="font-medium normal-case tracking-normal text-muted-foreground"> · {note.authorName}</span>}</span>
+                        <span className={cn("line-clamp-3 text-[13px] leading-snug", note.type === "citation" && "font-display italic")}>{note.type === "citation" ? `« ${note.text} »` : note.title && note.text ? `${note.title} — ${note.text}` : note.title || note.text}</span>
+                      </button>
+                    </li>
+                  })}</ul> : <p className="mt-0.5 text-[13px] italic text-muted-foreground">Apparu dans cette session, sans note.</p>}
+                </div>
+              </li>
+            })}</ol> : <p className="text-sm text-muted-foreground">Aucune apparition ni note pour l’instant.</p>}
+          </section>
+        </div>
+      </>}
+    </DialogContent>
+  </Dialog>
 }
 
 /* ---------- Bannière ---------- */
@@ -302,8 +447,8 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
   initialNotes: SessionNote[]
   notesError?: boolean
   viewer: { uid: string; manager: boolean; characterIds: string[] }
-  members: JournalEntity[]
-  npcs: JournalEntity[]
+  members: JournalMember[]
+  npcs: JournalNpc[]
   shops: JournalShop[]
   events: JournalEvent[]
   /** Images et icônes des lieux, créatures et objets cités par les notes, lues dans leurs index. */
@@ -327,6 +472,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
   const [brokenBanner, setBrokenBanner] = useState("")
   const [toast, setToast] = useState("")
   const [openLinks, setOpenLinks] = useState<Set<string>>(new Set())
+  const [npcHistory, setNpcHistory] = useState<NpcHistory | null>(null)
   const toastTimer = useRef(0)
   const board = useRef<SessionNotesHandle>(null)
   const menu = useRef<HTMLDivElement>(null)
@@ -435,6 +581,13 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
   const timeline = here.filter((note) => note.type === "evenement")
   const summaries = here.filter((note) => note.type === "resume")
   const isNew = (key: string) => firstSeen.get(key) === index
+  // La fenêtre « Notes » d'un PNJ : chaque session où il apparaît ou qu'une note lui lie, dans l'ordre.
+  const npcHistoryRows: NpcHistoryRow[] = npcHistory ? sessions.flatMap((session, position) => {
+    const linked = notes.filter((note) => note.sessionId === session.id && note.links.includes(npcHistory.link))
+    const appeared = npcHistory.link.startsWith("npc:") ? session.npcIds.includes(npcHistory.link.slice(4)) : session.eventIds.includes(npcHistory.link.slice(6))
+    return linked.length || appeared ? [{ session, number: position + 1, notes: linked, appeared }] : []
+  }) : []
+  const shopHref = (shopId: string) => `/campagne/${encodeURIComponent(campaignId)}/magasin-et-fouille/sauvegardes?shop=${encodeURIComponent(shopId)}`
   // Le MJ voit ce que les joueurs ne voient pas encore (caché dans le Créateur de session).
   const hiddenHere = new Set(current.hidden ?? [])
   const veilTag = (key: string) => hiddenHere.has(key) || (key.startsWith("shop:") && hiddenHere.has(`event:${key}`)) ? <Tag>caché aux joueurs</Tag> : null
@@ -589,9 +742,9 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
 
           <div key={`recit-${current.id}`} className="journal-rise min-w-0 space-y-10 lg:col-start-2 lg:row-start-2">
             <Section id="journal-groupe" icon={linkKindLabels.character.icon} title="Le groupe" count={absents.length ? `${group.length} · ${plural(absents.length, "absent", "absents")}` : group.length}>
-              {group.length + absents.length ? <div className={cardGrid}>
-                {group.map((member) => <EntityCard key={member.id} kind="character" name={member.name} hint={member.hint} image={member.image} color={avatarColor(member.name)} link={`character:${member.id}`} tags={veilTag(`character:${member.id}`)} />)}
-                {absents.map((member) => <EntityCard key={member.id} kind="character" name={member.name} hint={member.hint} image={member.image} color={avatarColor(member.name)} link={`character:${member.id}`} absent tags={<Tag>absent</Tag>} />)}
+              {group.length + absents.length ? <div className={groupGrid}>
+                {group.map((member) => <CharacterCard key={member.id} member={member} tags={veilTag(`character:${member.id}`)} />)}
+                {absents.map((member) => <CharacterCard key={member.id} member={member} absent tags={<Tag>absent</Tag>} />)}
               </div> : <EmptyHint icon={linkKindLabels.character.icon}>Personne n’a été ajouté à cette session.</EmptyHint>}
             </Section>
 
@@ -606,9 +759,11 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
 
             <Section id="journal-pnjs" icon={linkKindLabels.npc.icon} title="PNJs" count={npcCount}>
               {npcCount ? <div className={cardGrid}>
-                {sessionNpcs.map((npc) => <EntityCard key={npc.id} kind="npc" name={npc.name} hint={npc.hint} image={npc.image} color={avatarColor(npc.name)} square link={`npc:${npc.id}`} tags={seenTag(`npc:${npc.id}`)} />)}
+                {sessionNpcs.map((npc) => <EntityCard key={npc.id} kind="npc" name={npc.name} hint={npc.hint} image={npc.image} color={avatarColor(npc.name)} square link={`npc:${npc.id}`} tags={seenTag(`npc:${npc.id}`)}
+                  actions={<CardButton icon={NotebookText} label={`Notes de ${npc.name}`} onClick={() => setNpcHistory({ name: npc.name, hint: npc.hint, image: npc.image, color: avatarColor(npc.name), playerNotes: npc.playerNotes ?? "", link: `npc:${npc.id}` })}>Notes</CardButton>} />)}
                 {npcEvents.map((event) => <EntityCard key={event.id} kind="npc" name={event.name} hint={event.tag ? undefined : "PNJ"} image={event.image} color={avatarColor(event.name)} square link={`event:${event.id}`}
-                  tags={<>{event.tag && <Tag dot={event.tagColor || linkKindLabels.npc.color}>{event.tag}</Tag>}{seenTag(`event:${event.id}`)}</>} />)}
+                  tags={<>{event.tag && <Tag dot={event.tagColor || linkKindLabels.npc.color}>{event.tag}</Tag>}{seenTag(`event:${event.id}`)}</>}
+                  actions={<CardButton icon={NotebookText} label={`Notes de ${event.name}`} onClick={() => setNpcHistory({ name: event.name, hint: event.tag || "PNJ", image: event.image, color: avatarColor(event.name), link: `event:${event.id}` })}>Notes</CardButton>} />)}
               </div> : <EmptyHint icon={linkKindLabels.npc.icon}>Aucun PNJ dans cette session.</EmptyHint>}
             </Section>
 
@@ -632,7 +787,8 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
             </Section>
 
             <Section id="journal-magasins" icon={linkKindLabels.shop.icon} title="Magasins" count={sessionShops.length}>
-              {sessionShops.length ? <div className={cardGrid}>{sessionShops.map((shop) => <EntityCard key={shop.id} kind="shop" name={shop.name} hint={shop.hint} media={shop.items?.[0] ? <ObjectIcon icon={shop.items[0].icon} name={shop.items[0].name} type={shop.items[0].type} subtype={shop.items[0].subtype} className="size-full" emojiClassName="text-xl leading-none" /> : undefined} icon={linkKindLabels.shop.icon} square link={`shop:${shop.id}`} tags={seenTag(`shop:${shop.id}`)}>
+              {sessionShops.length ? <div className={cardGrid}>{sessionShops.map((shop) => <EntityCard key={shop.id} kind="shop" name={shop.name} hint={shop.hint} media={shop.items?.[0] ? <ObjectIcon icon={shop.items[0].icon} name={shop.items[0].name} type={shop.items[0].type} subtype={shop.items[0].subtype} className="size-full" emojiClassName="text-xl leading-none" /> : undefined} icon={linkKindLabels.shop.icon} square link={`shop:${shop.id}`} tags={seenTag(`shop:${shop.id}`)}
+                actions={<CardButton icon={Store} href={shopHref(shop.id)} label={`Ouvrir le magasin ${shop.name}`}>Ouvrir le magasin</CardButton>}>
                 {(shop.items?.length ?? 0) > 1 && <ul aria-label="En vitrine" className="mt-2 flex flex-wrap gap-1">{shop.items!.slice(0, 6).map((item, position) => <li key={`${item.name}:${position}`} title={item.name} className="flex size-7 items-center justify-center overflow-hidden rounded-md border border-border/70 bg-background/60 p-0.5"><ObjectIcon icon={item.icon} name={item.name} type={item.type} subtype={item.subtype} className="size-full" emojiClassName="text-sm leading-none" fallback={<span className="text-[10px] font-semibold text-muted-foreground">{item.name.slice(0, 1)}</span>} /></li>)}</ul>}
               </EntityCard>)}</div>
                 : <EmptyHint icon={linkKindLabels.shop.icon}>Aucun magasin dans cette session.</EmptyHint>}
@@ -700,6 +856,13 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
           </button>)}
         </nav>
       </div>
+
+      <NpcHistoryDialog npc={npcHistory} rows={npcHistoryRows} onClose={() => setNpcHistory(null)} onGoSession={(sessionId) => {
+        const position = sessions.findIndex((session) => session.id === sessionId)
+        if (position < 0) return
+        go(position)
+        scrollTo("journal-pnjs")
+      }} />
 
       <div role="status" aria-live="polite" className={cn("pointer-events-none fixed bottom-5 left-1/2 z-50 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-xl bg-foreground px-3.5 py-2 text-[13px] text-background shadow-[0_18px_44px_rgb(33_30_26/0.25)] transition-[opacity,transform] duration-200", toast ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0")}>{toast}</div>
     </div>

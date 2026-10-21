@@ -48,6 +48,15 @@ function frame(image: HTMLImageElement) {
 
 type Framed = { image: HTMLImageElement; key: string; style: ReturnType<typeof framedImageStyle> | null }
 
+/** L'image remplit un parent qui la rogne : seul cas où l'agrandir ne déborde pas. */
+function clipped(image: HTMLImageElement) {
+  const parent = image.parentElement
+  if (!parent) return false
+  const overflow = getComputedStyle(parent)
+  const clips = (value: string) => value !== "visible"
+  return clips(overflow.overflowX) && clips(overflow.overflowY) && Math.abs(parent.clientWidth - image.clientWidth) <= 2 && Math.abs(parent.clientHeight - image.clientHeight) <= 2
+}
+
 function flush() {
   scheduled = 0
   const images = [...queued]
@@ -64,7 +73,10 @@ function flush() {
       continue
     }
     if (!image.naturalWidth) { image.addEventListener("load", () => frame(image), { once: true }); continue }
-    plans.push({ image, key, style: framedImageStyle(framing, { width: image.clientWidth, height: image.clientHeight }, { width: image.naturalWidth, height: image.naturalHeight }) })
+    const style = framedImageStyle(framing, { width: image.clientWidth, height: image.clientHeight }, { width: image.naturalWidth, height: image.naturalHeight })
+    // Le resserrement agrandit et décale l'image elle-même : sans cadre qui la rogne, elle
+    // débordait sur la page (un avatar rond devenait un grand disque). On garde alors le point de vue.
+    plans.push({ image, key, style: style.transform && !clipped(image) ? { ...style, objectPosition: `${(framing.x * 100).toFixed(1)}% ${(framing.y * 100).toFixed(1)}%`, transformOrigin: "", transform: "" } : style })
   }
   // … puis toutes les écritures.
   for (const { image, key, style } of plans) {

@@ -13,6 +13,9 @@ import { listSessionNotes } from "@/lib/session-notes"
 import { authorizedAccount } from "@/lib/server-auth"
 import { revealedSession } from "@/lib/session-reveal"
 import { hiddenCampaignCharacters } from "@/lib/campaign-hidden-characters"
+import { playerNamesFor } from "@/lib/chat-accounts"
+import { NO_CLASS } from "@/lib/class-visibility"
+import { parseListCell } from "@/lib/multiple-values"
 
 export const dynamic = "force-dynamic"
 
@@ -76,12 +79,17 @@ export default async function CampaignJournalPage({ params, searchParams }: { pa
     listCampaignEvents(id).catch(() => []),
     hiddenCampaignCharacters(id),
   ])
-  const visuals = await noteVisuals(notes)
   // Un joueur ne voit que ce que le MJ a révélé dans chaque session (Créateur de session), et
   // pas les personnages que le MJ cache aux autres joueurs (les siens restent visibles).
   const ownIds = mine.map((character) => character.id)
   const veiledCharacters = reader.manager ? new Set<string>() : new Set(hiddenCharacters.filter((characterId) => !ownIds.includes(characterId)))
   const members = listedMembers.filter((member) => !veiledCharacters.has(member.id))
+  // Le joueur de chaque personnage, pour sa carte (« • Nom du joueur »), comme sur la page de campagne.
+  const [visuals, players] = await Promise.all([
+    noteVisuals(notes),
+    playerNamesFor(account, members.map((member) => member.ownerUid)).catch(() => new Map<string, string>()),
+  ])
+  const ownedMembers = new Set(mine.map((character) => character.id).filter((characterId) => members.some((member) => member.id === characterId)))
   const list = (sessions ?? []).map((session) => {
     if (reader.manager) return session
     const shown = revealedSession(session)
@@ -117,9 +125,21 @@ export default async function CampaignJournalPage({ params, searchParams }: { pa
             initialSessionId={query.session}
             initialNotes={notes ?? []}
             notesError={notes === null}
-            viewer={{ uid: account.uid, manager: reader.manager, characterIds: mine.filter((character) => members.some((member) => member.id === character.id)).map((character) => character.id) }}
-            members={members.map((member) => ({ id: member.id, name: member.name, hint: member.subtitle, image: `/api/characters/portrait/${encodeURIComponent(member.id)}` }))}
-            npcs={shown(npcs, inSessions.npcs).map((npc) => ({ id: npc.id, name: npc.name, image: safeImage(npc.portrait), hint: [npc.title, npc.occupation].filter(Boolean).join(" · ") }))}
+            viewer={{ uid: account.uid, manager: reader.manager, characterIds: [...ownedMembers] }}
+            members={members.map((member) => {
+              // La même carte que sur la page de campagne : joueur, titre honorifique, classe et niveau, peuple.
+              const classes = parseListCell(member.classes).entries.join(" · ")
+              return {
+                id: member.id, name: member.name, hint: member.subtitle, image: `/api/characters/portrait/${encodeURIComponent(member.id)}`,
+                playerName: players.get(member.ownerUid) ?? "",
+                honoraryTitle: parseListCell(member.honoraryTitle).selected,
+                classAndLevel: [classes || NO_CLASS, member.level ? `Niveau ${member.level}` : ""].filter(Boolean).join(" · "),
+                people: parseListCell(member.people).entries.join(" · "),
+                // La fiche s'ouvre pour le MJ, et pour le joueur sur ses propres personnages.
+                canOpen: reader.manager || ownedMembers.has(member.id),
+              }
+            })}
+            npcs={shown(npcs, inSessions.npcs).map((npc) => ({ id: npc.id, name: npc.name, image: safeImage(npc.portrait), hint: [npc.title, npc.occupation].filter(Boolean).join(" · "), playerNotes: npc.playerNotes }))}
             shops={shown(shops, inSessions.shops).map((shop) => ({ id: shop.id, name: shop.name, hint: shop.cityName, items: shop.items.slice(0, 6).map((item) => ({ name: item.name, icon: item.icon, type: item.type, subtype: item.subtype })) }))}
             visuals={visuals}
             events={shown(events, inSessions.events).map((event) => ({ id: event.id, name: event.name, image: safeImage(event.image), kind: event.kind, tag: event.tag, tagColor: event.tagColor, description: reader.manager ? event.description : "" }))}

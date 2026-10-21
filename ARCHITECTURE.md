@@ -83,7 +83,15 @@ Ce que les joueurs voient d’une session est réglé dans la colonne « Cachés
 (`lib/session-reveal.ts`, clés `character:ID`, `npc:ID`, `shop:ID`, `event:ID`) :
 toute chose ajoutée arrive cachée, l’œil du Créateur la révèle, le journal des
 joueurs ne montre que ce qui est révélé (`revealedSession`). Une case vide (sessions
-d’avant l’alpha 237) ne cache rien ; une case illisible cache tout.
+d’avant l’alpha 237) ne cache rien ; une case illisible cache tout. La vitrine d’un
+magasin (`magasin-et-fouille/sauvegardes?shop=ID`, bouton « Ouvrir le magasin » du
+journal) applique la même règle à un joueur.
+
+Le cadrage d’un token (`components/eraser/portrait-framing.tsx`) recadre les avatars
+partout : sous 72 px, il agrandit et décale l’image elle-même, et ne le fait donc
+que si son parent la rogne exactement (sinon, seul le point de vue change). Un avatar
+doit être une `<img>` pleine dans un cadre `overflow-hidden`, pas une image arrondie
+toute seule.
 
 Un MJ peut aussi cacher un personnage joueur aux autres joueurs de la campagne
 (tableau de bord) : portée Worker `campaign-hidden-characters`, une entrée par

@@ -1,37 +1,22 @@
-# Eraser 0.1.1-alpha.246 — Le créateur de pages rangé en dossiers
+# Eraser 0.1.1-alpha.247 — Le journal remis d'aplomb
 
 Cette version arrive **sans réinstallation** (enveloppe 10, comme l'alpha 238) : Eraser la
 télécharge, redémarre son serveur et recharge la page tout seul. Rien n'est modifié dans Google
-Sheets, et aucune page n'est touchée : le rangement est un réglage à part, sur le serveur
-partagé.
+Sheets.
 
-Pensé pour des centaines de pages : un explorateur avec des dossiers, une recherche qui cherche
-partout, et plus aucune différence entre les pages livrées par Eraser et les tiennes.
-
-- **Index des pages = un explorateur.** À gauche, les dossiers, imbriqués à volonté : un clic
-  les ouvre, un double-clic les renomme, le « … » crée un sous-dossier ou supprime (ses pages et
-  sous-dossiers remontent d'un cran, rien n'est jamais perdu). À droite, le contenu du dossier
-  ouvert : ses sous-dossiers en tuiles, puis ses pages. On **glisse** une page (ou plusieurs
-  cochées) sur un dossier, une tuile ou le fil d'Ariane pour l'y ranger ; « Ranger dans… »
-  fait pareil au clavier, avec la recherche d'un dossier et sa création sur place. Le rangement
-  s'affiche aussitôt et revient en arrière, avec un message, si le serveur le refuse.
-- **Pour démarrer** : « Ranger par section » crée un dossier par section (Accueil, Règles,
-  Campagnes, Index…) et y met chaque page non rangée. À renommer, imbriquer ou supprimer ensuite.
-- **Une seule sorte de page.** Les pages d'Eraser (Accueil, Combat, Fiche de personnage,
-  Tabletop…) sont des lignes comme les autres : même icône, « Publiée », même bouton « Ouvrir »
-  (elles sont reprises dans l'atelier en coulisses, les lecteurs gardent la page d'origine
-  jusqu'à la publication). Leur partie qu'on ne refait pas en blocs s'appelle désormais par son
-  nom dans l'atelier : « Module Eraser · Tabletop », « Module Eraser · Fiche de personnage »…
-- **La recherche cherche partout** (titre, adresse, dossier), avec une colonne « Dossier » pour
-  savoir où est chaque résultat. Filtres par statut (dont « Publiées, modifiées depuis »),
-  section et visibilité ; tri par titre ou par date.
-- **Pages · Menu · Modèles** : trois onglets en tête du créateur, pour passer de l'un à l'autre.
-  L'atelier ramène au dossier de la page, et l'adresse garde le dossier ouvert.
-- **Menu** : chaque page y est une entrée à part entière, qu'on monte, descend, renomme ou masque
-  — fini le bloc « Pages créées dans… ». « Ajouter une page » cherche parmi toutes les pages,
-  rangées par dossier. **« Ajouter un dossier de pages »** met un dossier entier dans le menu :
-  au premier niveau, une section à son nom (un groupe par sous-dossier) ; dans une section, la
-  liste de ses pages. Une page publiée qu'on y range y apparaît d'elle-même, à qui peut la lire.
-  « Ouvrir » sur une entrée ouvre sa page dans l'atelier.
-- **Index des pages (moteur)** : nouvelle colonne « Dossier », pour ranger une vue par dossier ou
-  n'en montrer qu'un dans un bloc Vue d'index.
+- **Portraits du journal réparés.** Un personnage dont le token avait été recadré (fiche ›
+  token) voyait son portrait déborder de sa carte : un grand disque par-dessus la page, ou une
+  image glissée vers le haut. Le recadrage reste (le visage choisi est bien celui affiché), mais
+  dans le cadre de l'avatar. Partout dans Eraser, ce zoom ne s'applique plus qu'à une image
+  rognée par son cadre : il ne peut plus déborder ailleurs.
+- **Le groupe a les cartes de la page de campagne**, en plus petit : portrait, joueur, titre
+  honorifique, classe et niveau, peuple. Le petit bouton ↗ ouvre la fiche : sur tous les
+  personnages pour le MJ, sur ses propres personnages pour un joueur. Les absents restent
+  grisés, la pastille des notes liées est toujours là.
+- **Magasins : « Ouvrir le magasin ».** Un petit bouton sur chaque magasin de la session ouvre
+  sa vitrine, en lecture seule pour les joueurs. Un joueur n'y voit que les magasins entrés dans
+  une session et révélés par le MJ, et plus les notes MJ des marchands.
+- **PNJs : « Notes ».** Un petit bouton ouvre une fenêtre avec les notes du PNJ visibles par les
+  joueurs, puis toutes les sessions où il est passé, dans l'ordre, avec les notes de la campagne
+  qui le citent (un clic ouvre la note, quitte à changer de session). Une session où il est
+  apparu sans note reste dans la liste. Les PNJ venus d'un événement ont la même fenêtre.
