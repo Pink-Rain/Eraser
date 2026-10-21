@@ -6,6 +6,8 @@ import dynamic from "next/dynamic"
 import { ArrowUpRight, BookOpen, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleUserRound, Feather, Lock, NotebookPen, NotebookText, Plus, Store, type LucideIcon } from "lucide-react"
 
 import { replaceAppUrl } from "@/components/eraser/app-tabs"
+import { RevealToggle, SessionRevealProvider } from "@/components/eraser/session-reveal"
+import { patchSession } from "@/components/eraser/session-picker"
 import { RichTextView } from "@/components/eraser/rich-text"
 import {
   EmptyHint,
@@ -24,6 +26,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { sessionNoteLabel, sessionNoteType, type SessionLinkKind, type SessionNote, type SessionNoteType } from "@/lib/session-note-rules"
+import type { SessionRevealKind } from "@/lib/session-reveal"
 import { ObjectIcon } from "@/components/eraser/object-icon"
 import { cn } from "@/lib/utils"
 
@@ -197,6 +200,9 @@ function NotesBadge({ name, kind, related, hover }: { name: string; kind: Sessio
   </Popover>
 }
 
+/** L'œil du Créateur de session, à la taille des icônes des cartes. */
+const eyeClass = "-mr-1 size-6 shrink-0 rounded-md [&_svg]:size-[15px]"
+
 /**
  * L'action d'une carte, en haut à droite à côté de la pastille des notes : une icône seule,
  * sans cadre, qui ne prend pas de place (fiche, notes d'un PNJ, vitrine d'un magasin).
@@ -209,7 +215,9 @@ function CornerButton({ icon: Icon, href, onClick, label }: { icon: LucideIcon; 
     : <button type="button" onClick={onClick} aria-label={label} title={label} className={className}>{body}</button>
 }
 
-function EntityCard({ name, hint, image, media, kind, link, color, icon, square, tags, absent = false, action, children }: {
+function EntityCard({ name, hint, image, media, kind, link, color, icon, square, tags, absent = false, action, reveal, children }: {
+  /** L'œil du MJ (chose de la session) : révéler ou cacher aux joueurs, comme dans le Créateur de session. */
+  reveal?: { kind: SessionRevealKind; id: string }
   name: string
   hint?: string
   image?: string
@@ -240,6 +248,7 @@ function EntityCard({ name, hint, image, media, kind, link, color, icon, square,
         <p className={cn("min-w-0 flex-1 font-display text-[15.5px] font-semibold leading-snug [overflow-wrap:anywhere]", absent && "text-muted-foreground")}>{name}</p>
         <NotesBadge name={name} kind={kind} related={related} hover={hover} />
         {action}
+        {reveal && <RevealToggle kind={reveal.kind} id={reveal.id} name={name} className={eyeClass} />}
       </div>
       {hint && <p className="truncate text-xs text-muted-foreground">{hint}</p>}
       {tags && <div className="mt-1.5 flex flex-wrap gap-1">{tags}</div>}
@@ -253,7 +262,7 @@ function EntityCard({ name, hint, image, media, kind, link, color, icon, square,
  * titre honorifique, classe et niveau, peuple). Sa fiche s'ouvre pour le MJ, et pour le
  * joueur sur ses propres personnages.
  */
-function CharacterCard({ member, absent = false, tags }: { member: JournalMember; absent?: boolean; tags?: ReactNode }) {
+function CharacterCard({ member, absent = false, tags, reveal = false }: { member: JournalMember; absent?: boolean; tags?: ReactNode; /** L'œil du MJ : le personnage est de la session. */ reveal?: boolean }) {
   const journal = useJournal()
   const meta = linkKindLabels.character
   const related = journal.notesFor([`character:${member.id}`])
@@ -278,6 +287,7 @@ function CharacterCard({ member, absent = false, tags }: { member: JournalMember
         </div>
         <NotesBadge name={member.name} kind="character" related={related} hover={hover} />
         {member.canOpen && <CornerButton icon={ArrowUpRight} href={`/personnage/${encodeURIComponent(member.id)}`} label={`Ouvrir la fiche de ${member.name}`} />}
+        {reveal && <RevealToggle kind="character" id={member.id} name={member.name} className={eyeClass} />}
       </div>
       {member.honoraryTitle && <p className="mt-0.5 text-xs font-medium leading-snug text-journal-ink">{member.honoraryTitle}</p>}
       {member.classAndLevel && <p className="mt-1.5 text-[12.5px] font-semibold leading-snug text-foreground/80">{member.classAndLevel}</p>}
@@ -484,6 +494,9 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
   const [openLinks, setOpenLinks] = useState<Set<string>>(new Set())
   const [npcHistory, setNpcHistory] = useState<NpcHistory | null>(null)
   const [openShop, setOpenShop] = useState("")
+  // Ce que le MJ vient de révéler ou cacher, par session (la page n'est pas relue pour si peu).
+  const [hiddenBySession, setHiddenBySession] = useState<Record<string, string[]>>({})
+  const [savingReveal, setSavingReveal] = useState<string | null>(null)
   const toastTimer = useRef(0)
   const board = useRef<SessionNotesHandle>(null)
   const menu = useRef<HTMLDivElement>(null)
@@ -610,13 +623,30 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
     return linked.length || appeared ? [{ session, number: position + 1, notes: linked, appeared }] : []
   }) : []
   // Le MJ voit ce que les joueurs ne voient pas encore (caché dans le Créateur de session).
-  const hiddenHere = new Set(current.hidden ?? [])
-  const veilTag = (key: string) => hiddenHere.has(key) || (key.startsWith("shop:") && hiddenHere.has(`event:${key}`)) ? <Tag>caché aux joueurs</Tag> : null
+  // L'œil du MJ sur chaque chose de la session, comme dans le Créateur de session. Un marché
+  // ambulant (rangé parmi les événements) se cache sous « event:shop:ID ».
+  const hiddenKeys = hiddenBySession[current.id] ?? current.hidden ?? []
+  const markets = new Set(current.marketIds ?? [])
+  const isHidden = (kind: SessionRevealKind, id: string) => kind === "shop" ? hiddenKeys.includes(`shop:${id}`) || hiddenKeys.includes(`event:shop:${id}`) : hiddenKeys.includes(`${kind}:${id}`)
+  const reveal = viewer.manager ? {
+    isHidden,
+    toggle: (kind: SessionRevealKind, id: string) => {
+      const key = kind === "shop" && markets.has(id) ? `event:shop:${id}` : `${kind}:${id}`
+      const hide = !isHidden(kind, id)
+      const sessionId = current.id
+      const before = hiddenKeys
+      setHiddenBySession((all) => ({ ...all, [sessionId]: hide ? [...before, key] : before.filter((entry) => entry !== key && !(kind === "shop" && (entry === `shop:${id}` || entry === `event:shop:${id}`))) }))
+      setSavingReveal(`${kind}:${id}`)
+      patchSession(campaignId, sessionId, { visibility: hide ? { hide: [key] } : { reveal: [key] } })
+        .then((session) => setHiddenBySession((all) => ({ ...all, [sessionId]: session.hidden ?? [] })))
+        .catch(() => { setHiddenBySession((all) => ({ ...all, [sessionId]: before })); say("La visibilité n’a pas pu être enregistrée.") })
+        .finally(() => setSavingReveal(null))
+    },
+    saving: savingReveal,
+  } : null
   const seenTag = (key: string) => {
     const first = firstSeen.get(key)
-    const seen = first === undefined || first > index ? null : first === index ? <Tag fresh>Nouveau</Tag> : <Tag>Depuis S{first + 1}</Tag>
-    const veil = veilTag(key)
-    return veil ? <>{seen}{veil}</> : seen
+    return first === undefined || first > index ? null : first === index ? <Tag fresh>Nouveau</Tag> : <Tag>Depuis S{first + 1}</Tag>
   }
   const countNew = (keys: string[]) => keys.filter(isNew).length
   const plural = (count: number, one: string, many: string) => `${count} ${count > 1 ? many : one}`
@@ -658,7 +688,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
     else if (event.key === "End") move(items.length - 1)
   }
 
-  return <JournalCtx.Provider value={journal}>
+  return <JournalCtx.Provider value={journal}><SessionRevealProvider value={reveal}>
     <div className="journal w-full flex-1 px-4 pb-12 pt-6 sm:px-6 md:pt-8 lg:px-8" style={vars}>
       <div className="mx-auto max-w-[76rem]">
         {/* Bannière : l'image de la session, ou à défaut (ou si elle ne charge pas) les couleurs de la campagne. */}
@@ -764,7 +794,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
           <div key={`recit-${current.id}`} className="journal-rise min-w-0 space-y-10 lg:col-start-2 lg:row-start-2">
             <Section id="journal-groupe" icon={linkKindLabels.character.icon} title="Le groupe" count={absents.length ? `${group.length} · ${plural(absents.length, "absent", "absents")}` : group.length}>
               {group.length + absents.length ? <div className={groupGrid}>
-                {group.map((member) => <CharacterCard key={member.id} member={member} tags={veilTag(`character:${member.id}`)} />)}
+                {group.map((member) => <CharacterCard key={member.id} member={member} reveal />)}
                 {absents.map((member) => <CharacterCard key={member.id} member={member} absent tags={<Tag>absent</Tag>} />)}
               </div> : <EmptyHint icon={linkKindLabels.character.icon}>Personne n’a été ajouté à cette session.</EmptyHint>}
             </Section>
@@ -780,9 +810,9 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
 
             <Section id="journal-pnjs" icon={linkKindLabels.npc.icon} title="PNJs" count={npcCount}>
               {npcCount ? <div className={cardGrid}>
-                {sessionNpcs.map((npc) => <EntityCard key={npc.id} kind="npc" name={npc.name} hint={npc.hint} image={npc.image} color={avatarColor(npc.name)} square link={`npc:${npc.id}`} tags={seenTag(`npc:${npc.id}`)}
+                {sessionNpcs.map((npc) => <EntityCard key={npc.id} kind="npc" name={npc.name} hint={npc.hint} image={npc.image} color={avatarColor(npc.name)} square link={`npc:${npc.id}`} tags={seenTag(`npc:${npc.id}`)} reveal={{ kind: "npc", id: npc.id }}
                   action={<CornerButton icon={NotebookText} label={`Notes de ${npc.name}`} onClick={() => setNpcHistory({ name: npc.name, hint: npc.hint, image: npc.image, color: avatarColor(npc.name), playerNotes: npc.playerNotes ?? "", link: `npc:${npc.id}` })} />} />)}
-                {npcEvents.map((event) => <EntityCard key={event.id} kind="npc" name={event.name} hint={event.tag ? undefined : "PNJ"} image={event.image} color={avatarColor(event.name)} square link={`event:${event.id}`}
+                {npcEvents.map((event) => <EntityCard key={event.id} kind="npc" name={event.name} hint={event.tag ? undefined : "PNJ"} image={event.image} color={avatarColor(event.name)} square link={`event:${event.id}`} reveal={{ kind: "event", id: event.id }}
                   tags={<>{event.tag && <Tag dot={event.tagColor || linkKindLabels.npc.color}>{event.tag}</Tag>}{seenTag(`event:${event.id}`)}</>}
                   action={<CornerButton icon={NotebookText} label={`Notes de ${event.name}`} onClick={() => setNpcHistory({ name: event.name, hint: event.tag || "PNJ", image: event.image, color: avatarColor(event.name), link: `event:${event.id}` })} />} />)}
               </div> : <EmptyHint icon={linkKindLabels.npc.icon}>Aucun PNJ dans cette session.</EmptyHint>}
@@ -790,7 +820,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
 
             <Section id="journal-creatures" icon={linkKindLabels.creature.icon} title="Créatures" count={creatureEvents.length + creatures.length}>
               {creatureEvents.length + creatures.length ? <div className={cardGrid}>
-                {creatureEvents.map((event) => <EntityCard key={event.id} kind="creature" name={event.name} image={event.image || visualOf(`creature:${event.name}`)?.image} icon={linkKindLabels.creature.icon} square link={[`event:${event.id}`, `creature:${event.name}`]}
+                {creatureEvents.map((event) => <EntityCard key={event.id} kind="creature" name={event.name} image={event.image || visualOf(`creature:${event.name}`)?.image} icon={linkKindLabels.creature.icon} square link={[`event:${event.id}`, `creature:${event.name}`]} reveal={{ kind: "event", id: event.id }}
                   tags={<>{event.tag && <Tag dot={event.tagColor || linkKindLabels.creature.color}>{event.tag}</Tag>}{seenTag(`event:${event.id}`)}</>} />)}
                 {creatures.map((name) => <EntityCard key={name} kind="creature" name={name} hint={visualOf(`creature:${name}`)?.type} image={visualOf(`creature:${name}`)?.image} icon={linkKindLabels.creature.icon} square link={`creature:${name}`} tags={seenTag(`creature:${name}`)} />)}
               </div> : <EmptyHint icon={linkKindLabels.creature.icon}>Aucune créature dans cette session.</EmptyHint>}
@@ -808,7 +838,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
             </Section>
 
             <Section id="journal-magasins" icon={linkKindLabels.shop.icon} title="Magasins" count={sessionShops.length}>
-              {sessionShops.length ? <div className={cardGrid}>{sessionShops.map((shop) => <EntityCard key={shop.id} kind="shop" name={shop.name} hint={shop.hint} media={shop.items?.[0] ? <ObjectIcon icon={shop.items[0].icon} name={shop.items[0].name} type={shop.items[0].type} subtype={shop.items[0].subtype} className="size-full" emojiClassName="text-xl leading-none" /> : undefined} icon={linkKindLabels.shop.icon} square link={`shop:${shop.id}`} tags={seenTag(`shop:${shop.id}`)}
+              {sessionShops.length ? <div className={cardGrid}>{sessionShops.map((shop) => <EntityCard key={shop.id} kind="shop" name={shop.name} hint={shop.hint} media={shop.items?.[0] ? <ObjectIcon icon={shop.items[0].icon} name={shop.items[0].name} type={shop.items[0].type} subtype={shop.items[0].subtype} className="size-full" emojiClassName="text-xl leading-none" /> : undefined} icon={linkKindLabels.shop.icon} square link={`shop:${shop.id}`} tags={seenTag(`shop:${shop.id}`)} reveal={{ kind: "shop", id: shop.id }}
                 action={<CornerButton icon={Store} label={`Ouvrir le magasin ${shop.name}`} onClick={() => setOpenShop(shop.id)} />}>
                 {(shop.items?.length ?? 0) > 1 && <ul aria-label="En vitrine" className="mt-2 flex flex-wrap gap-1">{shop.items!.slice(0, 6).map((item, position) => <li key={`${item.name}:${position}`} title={item.name} className="flex size-7 items-center justify-center overflow-hidden rounded-md border border-border/70 bg-background/60 p-0.5"><ObjectIcon icon={item.icon} name={item.name} type={item.type} subtype={item.subtype} className="size-full" emojiClassName="text-sm leading-none" fallback={<span className="text-[10px] font-semibold text-muted-foreground">{item.name.slice(0, 1)}</span>} /></li>)}</ul>}
               </EntityCard>)}</div>
@@ -821,7 +851,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
 
             <Section id="journal-evenements" icon={linkKindLabels.event.icon} title="Événements" count={otherEvents.length + timeline.length} action={<HeadAction color={eventColor} onClick={() => newNote("evenement")}>Événement</HeadAction>}>
               {otherEvents.length + timeline.length ? <div className="space-y-5">
-                {otherEvents.length > 0 && <div className={cardGrid}>{otherEvents.map((event) => <EntityCard key={event.id} kind="event" name={event.name} image={event.image} icon={linkKindLabels.event.icon} square link={`event:${event.id}`}
+                {otherEvents.length > 0 && <div className={cardGrid}>{otherEvents.map((event) => <EntityCard key={event.id} kind="event" name={event.name} image={event.image} icon={linkKindLabels.event.icon} square link={`event:${event.id}`} reveal={{ kind: "event", id: event.id }}
                   tags={<>{event.tag && <Tag dot={event.tagColor || eventColor}>{event.tag}</Tag>}{seenTag(`event:${event.id}`)}</>}>
                   {event.description && <RichTextView html={event.description} className="mt-1.5 text-[13px] text-muted-foreground" />}
                 </EntityCard>)}</div>}
@@ -879,7 +909,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
       </div>
 
       {openShop && <JournalShopWindow key={`${current.id}:${openShop}`} campaignId={campaignId} sessionId={current.id} sessionLabel={`S${index + 1} - ${current.name}`} shopId={openShop}
-        inEvents={Boolean(current.marketIds?.includes(openShop))} hidden={current.hidden ?? []} style={vars} onClose={() => setOpenShop("")} />}
+        inEvents={Boolean(current.marketIds?.includes(openShop))} style={vars} onClose={() => setOpenShop("")} />}
       <NpcHistoryDialog npc={npcHistory} rows={npcHistoryRows} onClose={() => setNpcHistory(null)} onGoSession={(sessionId) => {
         const position = sessions.findIndex((session) => session.id === sessionId)
         if (position < 0) return
@@ -889,5 +919,5 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
 
       <div role="status" aria-live="polite" className={cn("pointer-events-none fixed bottom-5 left-1/2 z-50 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-xl bg-foreground px-3.5 py-2 text-[13px] text-background shadow-[0_18px_44px_rgb(33_30_26/0.25)] transition-[opacity,transform] duration-200", toast ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0")}>{toast}</div>
     </div>
-  </JournalCtx.Provider>
+  </SessionRevealProvider></JournalCtx.Provider>
 }

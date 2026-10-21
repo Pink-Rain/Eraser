@@ -20,7 +20,8 @@ type SessionReveal = {
 
 const SessionRevealContext = createContext<SessionReveal | null>(null)
 
-export function SessionRevealProvider({ value, children }: { value: SessionReveal; children: ReactNode }) {
+/** `null` : pas d'œil (un joueur dans le journal). */
+export function SessionRevealProvider({ value, children }: { value: SessionReveal | null; children: ReactNode }) {
   return <SessionRevealContext.Provider value={value}>{children}</SessionRevealContext.Provider>
 }
 
