@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
 import Link from "next/link"
+import dynamic from "next/dynamic"
 import { ArrowUpRight, BookOpen, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleUserRound, Feather, Lock, NotebookPen, NotebookText, Plus, Store, type LucideIcon } from "lucide-react"
 
 import { replaceAppUrl } from "@/components/eraser/app-tabs"
@@ -26,9 +27,14 @@ import { sessionNoteLabel, sessionNoteType, type SessionLinkKind, type SessionNo
 import { ObjectIcon } from "@/components/eraser/object-icon"
 import { cn } from "@/lib/utils"
 
+// La vitrine d'un magasin n'est chargée qu'à son ouverture : le journal reste léger.
+const JournalShopWindow = dynamic(() => import("@/components/eraser/journal-shop-window").then((module) => module.JournalShopWindow))
+
 export type JournalSession = { id: string; name: string; createdAt: string }
 export type JournalSessionDetail = JournalSession & {
   bannerUrl: string; characterIds: string[]; npcIds: string[]; shopIds: string[]; eventIds: string[]; places: string
+  /** Les marchés ambulants de la session (rangés parmi ses événements), aussi dans `shopIds`. */
+  marketIds?: string[]
   /** Pour le MJ : ce que le Créateur de session cache encore aux joueurs (« npc:ID », « event:shop:ID »…). */
   hidden?: string[]
   /** Pour un joueur : les personnages de la session qu'on ne lui montre pas (ni dans le groupe, ni parmi les absents). */
@@ -189,16 +195,19 @@ function NotesBadge({ name, kind, related, hover }: { name: string; kind: Sessio
   </Popover>
 }
 
-/** Un petit bouton posé sous une carte (« Ouvrir le magasin », « Notes ») : un lien ou une action. */
-function CardButton({ icon: Icon, href, onClick, label, children }: { icon: LucideIcon; href?: string; onClick?: () => void; /** Le nom complet pour un lecteur d'écran. */ label?: string; children: ReactNode }) {
-  const className = "inline-flex h-6 items-center gap-1 rounded-full border border-border/80 bg-background/70 px-2 text-[11.5px] font-medium text-foreground/85 outline-none transition-colors hover:border-tone/55 hover:bg-tone/5 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
-  const body = <><Icon className="size-3 text-tone" strokeWidth={2.3} aria-hidden />{children}</>
+/**
+ * L'action d'une carte, en haut à droite à côté de la pastille des notes : une icône seule,
+ * sans cadre, qui ne prend pas de place (fiche, notes d'un PNJ, vitrine d'un magasin).
+ */
+function CornerButton({ icon: Icon, href, onClick, label }: { icon: LucideIcon; href?: string; onClick?: () => void; label: string }) {
+  const className = "-mr-1 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/80 outline-none transition-colors hover:bg-tone/10 hover:text-tone focus-visible:ring-2 focus-visible:ring-ring/50"
+  const body = <Icon className="size-[15px]" strokeWidth={2.1} aria-hidden />
   return href
-    ? <Link href={href} prefetch={false} aria-label={label} className={className}>{body}</Link>
-    : <button type="button" onClick={onClick} aria-label={label} className={className}>{body}</button>
+    ? <Link href={href} prefetch={false} aria-label={label} title={label} className={className}>{body}</Link>
+    : <button type="button" onClick={onClick} aria-label={label} title={label} className={className}>{body}</button>
 }
 
-function EntityCard({ name, hint, image, media, kind, link, color, icon, square, tags, absent = false, actions, children }: {
+function EntityCard({ name, hint, image, media, kind, link, color, icon, square, tags, absent = false, action, children }: {
   name: string
   hint?: string
   image?: string
@@ -211,8 +220,8 @@ function EntityCard({ name, hint, image, media, kind, link, color, icon, square,
   square?: boolean
   tags?: ReactNode
   absent?: boolean
-  /** Les petits boutons du bas de la carte (CardButton). */
-  actions?: ReactNode
+  /** L'action de la carte, en haut à droite (CornerButton). */
+  action?: ReactNode
   children?: ReactNode
 }) {
   const journal = useJournal()
@@ -228,11 +237,11 @@ function EntityCard({ name, hint, image, media, kind, link, color, icon, square,
       <div className="flex items-start gap-2">
         <p className={cn("min-w-0 flex-1 font-display text-[15.5px] font-semibold leading-snug [overflow-wrap:anywhere]", absent && "text-muted-foreground")}>{name}</p>
         <NotesBadge name={name} kind={kind} related={related} hover={hover} />
+        {action}
       </div>
       {hint && <p className="truncate text-xs text-muted-foreground">{hint}</p>}
       {tags && <div className="mt-1.5 flex flex-wrap gap-1">{tags}</div>}
       {children}
-      {actions && <div className="mt-2 flex flex-wrap gap-1.5">{actions}</div>}
     </div>
   </div>
 }
@@ -266,10 +275,7 @@ function CharacterCard({ member, absent = false, tags }: { member: JournalMember
           {member.playerName && <p className="truncate text-[11.5px] text-muted-foreground">{member.playerName}</p>}
         </div>
         <NotesBadge name={member.name} kind="character" related={related} hover={hover} />
-        {member.canOpen && <Link href={`/personnage/${encodeURIComponent(member.id)}`} prefetch={false} aria-label={`Ouvrir la fiche de ${member.name}`} title="Ouvrir la fiche"
-          className="-mr-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-md border border-border/80 bg-background/70 text-muted-foreground outline-none transition-colors hover:border-tone/55 hover:bg-tone/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50">
-          <ArrowUpRight className="size-3.5" aria-hidden />
-        </Link>}
+        {member.canOpen && <CornerButton icon={ArrowUpRight} href={`/personnage/${encodeURIComponent(member.id)}`} label={`Ouvrir la fiche de ${member.name}`} />}
       </div>
       {member.honoraryTitle && <p className="mt-0.5 text-xs font-medium leading-snug text-journal-ink">{member.honoraryTitle}</p>}
       {member.classAndLevel && <p className="mt-1.5 text-[12.5px] font-semibold leading-snug text-foreground/80">{member.classAndLevel}</p>}
@@ -473,6 +479,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
   const [toast, setToast] = useState("")
   const [openLinks, setOpenLinks] = useState<Set<string>>(new Set())
   const [npcHistory, setNpcHistory] = useState<NpcHistory | null>(null)
+  const [openShop, setOpenShop] = useState("")
   const toastTimer = useRef(0)
   const board = useRef<SessionNotesHandle>(null)
   const menu = useRef<HTMLDivElement>(null)
@@ -587,7 +594,6 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
     const appeared = npcHistory.link.startsWith("npc:") ? session.npcIds.includes(npcHistory.link.slice(4)) : session.eventIds.includes(npcHistory.link.slice(6))
     return linked.length || appeared ? [{ session, number: position + 1, notes: linked, appeared }] : []
   }) : []
-  const shopHref = (shopId: string) => `/campagne/${encodeURIComponent(campaignId)}/magasin-et-fouille/sauvegardes?shop=${encodeURIComponent(shopId)}`
   // Le MJ voit ce que les joueurs ne voient pas encore (caché dans le Créateur de session).
   const hiddenHere = new Set(current.hidden ?? [])
   const veilTag = (key: string) => hiddenHere.has(key) || (key.startsWith("shop:") && hiddenHere.has(`event:${key}`)) ? <Tag>caché aux joueurs</Tag> : null
@@ -760,10 +766,10 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
             <Section id="journal-pnjs" icon={linkKindLabels.npc.icon} title="PNJs" count={npcCount}>
               {npcCount ? <div className={cardGrid}>
                 {sessionNpcs.map((npc) => <EntityCard key={npc.id} kind="npc" name={npc.name} hint={npc.hint} image={npc.image} color={avatarColor(npc.name)} square link={`npc:${npc.id}`} tags={seenTag(`npc:${npc.id}`)}
-                  actions={<CardButton icon={NotebookText} label={`Notes de ${npc.name}`} onClick={() => setNpcHistory({ name: npc.name, hint: npc.hint, image: npc.image, color: avatarColor(npc.name), playerNotes: npc.playerNotes ?? "", link: `npc:${npc.id}` })}>Notes</CardButton>} />)}
+                  action={<CornerButton icon={NotebookText} label={`Notes de ${npc.name}`} onClick={() => setNpcHistory({ name: npc.name, hint: npc.hint, image: npc.image, color: avatarColor(npc.name), playerNotes: npc.playerNotes ?? "", link: `npc:${npc.id}` })} />} />)}
                 {npcEvents.map((event) => <EntityCard key={event.id} kind="npc" name={event.name} hint={event.tag ? undefined : "PNJ"} image={event.image} color={avatarColor(event.name)} square link={`event:${event.id}`}
                   tags={<>{event.tag && <Tag dot={event.tagColor || linkKindLabels.npc.color}>{event.tag}</Tag>}{seenTag(`event:${event.id}`)}</>}
-                  actions={<CardButton icon={NotebookText} label={`Notes de ${event.name}`} onClick={() => setNpcHistory({ name: event.name, hint: event.tag || "PNJ", image: event.image, color: avatarColor(event.name), link: `event:${event.id}` })}>Notes</CardButton>} />)}
+                  action={<CornerButton icon={NotebookText} label={`Notes de ${event.name}`} onClick={() => setNpcHistory({ name: event.name, hint: event.tag || "PNJ", image: event.image, color: avatarColor(event.name), link: `event:${event.id}` })} />} />)}
               </div> : <EmptyHint icon={linkKindLabels.npc.icon}>Aucun PNJ dans cette session.</EmptyHint>}
             </Section>
 
@@ -788,7 +794,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
 
             <Section id="journal-magasins" icon={linkKindLabels.shop.icon} title="Magasins" count={sessionShops.length}>
               {sessionShops.length ? <div className={cardGrid}>{sessionShops.map((shop) => <EntityCard key={shop.id} kind="shop" name={shop.name} hint={shop.hint} media={shop.items?.[0] ? <ObjectIcon icon={shop.items[0].icon} name={shop.items[0].name} type={shop.items[0].type} subtype={shop.items[0].subtype} className="size-full" emojiClassName="text-xl leading-none" /> : undefined} icon={linkKindLabels.shop.icon} square link={`shop:${shop.id}`} tags={seenTag(`shop:${shop.id}`)}
-                actions={<CardButton icon={Store} href={shopHref(shop.id)} label={`Ouvrir le magasin ${shop.name}`}>Ouvrir le magasin</CardButton>}>
+                action={<CornerButton icon={Store} label={`Ouvrir le magasin ${shop.name}`} onClick={() => setOpenShop(shop.id)} />}>
                 {(shop.items?.length ?? 0) > 1 && <ul aria-label="En vitrine" className="mt-2 flex flex-wrap gap-1">{shop.items!.slice(0, 6).map((item, position) => <li key={`${item.name}:${position}`} title={item.name} className="flex size-7 items-center justify-center overflow-hidden rounded-md border border-border/70 bg-background/60 p-0.5"><ObjectIcon icon={item.icon} name={item.name} type={item.type} subtype={item.subtype} className="size-full" emojiClassName="text-sm leading-none" fallback={<span className="text-[10px] font-semibold text-muted-foreground">{item.name.slice(0, 1)}</span>} /></li>)}</ul>}
               </EntityCard>)}</div>
                 : <EmptyHint icon={linkKindLabels.shop.icon}>Aucun magasin dans cette session.</EmptyHint>}
@@ -857,6 +863,8 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
         </nav>
       </div>
 
+      {openShop && <JournalShopWindow key={`${current.id}:${openShop}`} campaignId={campaignId} sessionId={current.id} sessionLabel={`S${index + 1} - ${current.name}`} shopId={openShop}
+        inEvents={Boolean(current.marketIds?.includes(openShop))} hidden={current.hidden ?? []} style={vars} onClose={() => setOpenShop("")} />}
       <NpcHistoryDialog npc={npcHistory} rows={npcHistoryRows} onClose={() => setNpcHistory(null)} onGoSession={(sessionId) => {
         const position = sessions.findIndex((session) => session.id === sessionId)
         if (position < 0) return

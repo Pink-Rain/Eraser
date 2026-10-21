@@ -99,6 +99,9 @@ export type TabletopShopDetail = {
     price: string
     icon: string
     rarity: "very-common" | "common" | "rare" | "very-rare" | "ultimate"
+    /** Les exemplaires en vente (absent : le « Nombre max » de l'item, sinon 1). */
+    quantity?: number
+    maxQuantity?: number
   } & ObjectCombatFields>
 }
 

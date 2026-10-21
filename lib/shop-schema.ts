@@ -5,6 +5,7 @@ import { objectLocationColumns } from "@/lib/object-combat"
 import { shopObjectId } from "@/lib/object-item-id"
 import { columnOfKind, objectTableSpecs } from "@/lib/index-kinds-server"
 import { rarityPlacePairs } from "@/lib/rarity-places"
+import type { ShopSale } from "@/lib/shop-purchase"
 
 export type ShopRarity = "very-common" | "common" | "rare" | "very-rare" | "ultimate"
 export type { ShopKey, VisualShopKey } from "@/lib/shop-keys"
@@ -38,9 +39,12 @@ export type ShopGeneratorItem = {
    * anciennes colonnes, reconnues par les « Emplacements » des magasins).
    */
   locations: Array<{ place: string; rarity: string; exact?: boolean }>
+  /** « Nombre max » de l'Index des items : les exemplaires mis en vente au tirage. */
+  maxQuantity?: number
 } & ObjectCombatFields
 
-export type GeneratedShopItem = ShopGeneratorItem & { rarity: ShopRarity }
+/** `quantity` : les exemplaires en vente (absent : le « Nombre max » de l'item, sinon 1). */
+export type GeneratedShopItem = ShopGeneratorItem & { rarity: ShopRarity; quantity?: number }
 
 export type GeneratedShop = {
   id: string
@@ -58,6 +62,8 @@ export type SavedShopRecord = GeneratedShop & {
   npcId: string
   createdAt: string
   updatedAt: string
+  /** Ce que les joueurs y ont acheté, du plus ancien au plus récent. */
+  sales?: ShopSale[]
 }
 
 export type CampaignNpcRecord = {
@@ -110,6 +116,12 @@ function cell(headers: string[], values: string[], aliases: string[]) {
   return index >= 0 ? values[index] || "" : ""
 }
 
+/** Le « Nombre max » d'un item, s'il en a un (entier de 1 à 9 999). */
+function stackLimit(value: string) {
+  const count = Math.floor(Number(value.replace(",", ".").trim()))
+  return Number.isFinite(count) && count >= 1 ? { maxQuantity: Math.min(9999, count) } : {}
+}
+
 export async function loadShopGeneratorItems() {
   const tables = await objectCatalog()
   return tables.flatMap<ShopGeneratorItem>((table) => {
@@ -142,6 +154,7 @@ export async function loadShopGeneratorItems() {
       price: objectIndexPrice(table, row),
       icon: cell(table.headers, row.values, ["Icône", "Icone", "Icon"]),
       locations,
+      ...stackLimit(cell(table.headers, row.values, ["Nombre max", "Quantité max", "Quantite max", "Maximum", "Max"])),
       ...objectCombatFields(table, row),
     }]
     })

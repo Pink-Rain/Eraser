@@ -295,7 +295,7 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
           ids: session.shopIds,
           onAdd: (ids) => change({ add: { shopIds: ids } }),
           onRemove: (id) => change({ remove: { shopIds: [id] } }),
-        }} />
+        }} purchase={{ campaignId, sessionId: session.id, buyers: (players.length ? players : members).map((member) => ({ id: member.id, name: member.name })) }} />
       </section>
 
       <section className="border-t pt-8">

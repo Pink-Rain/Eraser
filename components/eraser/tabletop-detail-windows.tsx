@@ -13,6 +13,7 @@ import { RichTextView, sanitizeRichText } from "@/components/eraser/rich-text"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { TabletopEntityRecord, TabletopNpcDetail, TabletopShopDetail } from "@/lib/tabletop-schema"
+import { shopItemQuantity } from "@/lib/shop-purchase"
 
 const CharacterInventory = dynamic(() => import("@/components/eraser/character-inventory").then((module) => module.CharacterInventory), {
   loading: () => <div className="min-h-20 animate-pulse rounded-xl border border-dashed bg-muted/20" />,
@@ -89,7 +90,7 @@ function ShopContent({ shop }: { shop: TabletopShopDetail | null }) {
           <div className="flex items-start gap-2.5">
             <span className="grid size-8 shrink-0 place-items-center rounded-lg border bg-background text-sm">{item.icon || "◇"}</span>
             <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-1.5"><p className="font-semibold">{item.nameHtml?.trim() ? <span className={detailRichText} dangerouslySetInnerHTML={{ __html: sanitizeRichText(item.nameHtml) }} /> : item.name}</p><Badge variant="outline" className="text-[9px]">{rarityLabels[item.rarity]}</Badge></div>
+              <div className="flex flex-wrap items-center gap-1.5"><p className="font-semibold">{item.nameHtml?.trim() ? <span className={detailRichText} dangerouslySetInnerHTML={{ __html: sanitizeRichText(item.nameHtml) }} /> : item.name}</p><Badge variant="outline" className="text-[9px]">{rarityLabels[item.rarity]}</Badge>{shopItemQuantity(item) > 1 && <span className="rounded-md border bg-muted/60 px-1.5 py-px text-[10px] font-bold tabular-nums text-foreground/75">×{shopItemQuantity(item)}</span>}</div>
               <p className="text-[10px] text-muted-foreground">{[item.type, item.subtype].filter(Boolean).join(" · ")}</p>
               {(item.descriptionHtml?.trim() || item.description) && <ObjectText as="div" html={item.descriptionHtml} text={item.description} item={item} className={`mt-1 text-xs leading-5 text-muted-foreground ${detailRichText}`} />}
               {(item.effectHtml?.trim() || item.effect) && <p className="mt-1 text-xs leading-5"><span className="font-semibold">Effet :</span> <ObjectText html={item.effectHtml} text={item.effect} item={item} className={detailRichText} /></p>}

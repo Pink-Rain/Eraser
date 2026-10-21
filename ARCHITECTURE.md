@@ -84,8 +84,18 @@ Ce que les joueurs voient d’une session est réglé dans la colonne « Cachés
 toute chose ajoutée arrive cachée, l’œil du Créateur la révèle, le journal des
 joueurs ne montre que ce qui est révélé (`revealedSession`). Une case vide (sessions
 d’avant l’alpha 237) ne cache rien ; une case illisible cache tout. La vitrine d’un
-magasin (`magasin-et-fouille/sauvegardes?shop=ID`, bouton « Ouvrir le magasin » du
-journal) applique la même règle à un joueur.
+magasin (`magasin-et-fouille/sauvegardes?shop=ID`, la fenêtre du journal
+`/api/campaigns/[id]/shops/[shopId]`) applique la même règle à un joueur.
+
+Les magasins sont les mêmes partout (`ShopCards`) : le MJ voit l'effet des items, un
+joueur seulement leur description (`shopForPlayers`, `lib/shop-purchase.ts`, appliqué
+aussi au tabletop et à Roll20). Chaque ligne garde ses exemplaires (`quantity` dans
+« Objets JSON » ; absent : le « Nombre max » de l'item, sinon 1). Un achat
+(`.../buy`, `lib/shop-access.ts`) retient d'abord les exemplaires (`takeFromShop`,
+verrou « shops »), puis paie avec la bourse (`replaceCharacterPurse`) et remplit
+l'inventaire (`addCharacterInventoryItem` avec `count`) ; un refus remet tout comme
+avant. La vente est gardée dans la colonne « Ventes JSON », que seul un achat écrit.
+Le change : 1 PO = 100 PC, 1 PN = 150 PC (`planPayment`).
 
 Le cadrage d’un token (`components/eraser/portrait-framing.tsx`) recadre les avatars
 partout : sous 72 px, il agrandit et décale l’image elle-même, et ne le fait donc

@@ -106,6 +106,7 @@ export default async function CampaignJournalPage({ params, searchParams }: { pa
     characterIds: session.characterIds,
     npcIds: session.npcIds,
     shopIds: [...session.shopIds, ...session.eventIds.filter((entry) => entry.startsWith("shop:")).map((entry) => entry.slice(5))],
+    marketIds: session.eventIds.filter((entry) => entry.startsWith("shop:")).map((entry) => entry.slice(5)),
     eventIds: session.eventIds.filter((entry) => !entry.startsWith("shop:")),
     // Les lieux notés par le MJ en préparant la session : à lui seul.
     places: reader.manager ? session.places : "",

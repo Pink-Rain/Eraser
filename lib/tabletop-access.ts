@@ -14,6 +14,7 @@ import { chatAccountsForCampaign, chatAuthorName, listDirectoryAccounts } from "
 import { ownedBy } from "@/lib/ownership"
 import { sheetNumber } from "@/lib/google-sheet-values"
 import { visualShopKey } from "@/lib/shop-keys"
+import { shopForPlayers } from "@/lib/shop-purchase"
 
 export function canManageTabletop(account: AuthorizedUser) { return account.role === "admin" || account.role === "mj" }
 
@@ -88,7 +89,9 @@ export async function getTabletopShopDetail(account: AuthorizedUser, mapId: stri
   const shop = shops.find((candidate) => candidate.id === shopId)
   if (!shop) return null
   const npc = npcs.find((candidate) => candidate.id === shop.npcId)
-  return { id: shop.id, key: visualShopKey(shop.key), name: shop.name, size: shop.size, cityName: shop.cityName, linkedNpcName: npc?.name || "", portrait: npc?.portrait || "", items: shop.items }
+  // Les joueurs ne lisent que la description des items, jamais leur effet (comme dans le journal).
+  const items = await canManageTabletopPage(account, map.pageLinked) ? shop.items : shopForPlayers(shop).items
+  return { id: shop.id, key: visualShopKey(shop.key), name: shop.name, size: shop.size, cityName: shop.cityName, linkedNpcName: npc?.name || "", portrait: npc?.portrait || "", items }
 }
 
 export async function getTabletopNpcDetail(account: AuthorizedUser, mapId: string, npcId: string, roomKey = ""): Promise<TabletopNpcDetail | null> {

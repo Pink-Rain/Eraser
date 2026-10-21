@@ -1,22 +1,30 @@
-# Eraser 0.1.1-alpha.247 — Le journal remis d'aplomb
+# Eraser 0.1.1-alpha.248 — On fait ses courses
 
 Cette version arrive **sans réinstallation** (enveloppe 10, comme l'alpha 238) : Eraser la
-télécharge, redémarre son serveur et recharge la page tout seul. Rien n'est modifié dans Google
-Sheets.
+télécharge, redémarre son serveur et recharge la page tout seul. Dans Google Sheets, la feuille
+« Magasins » gagne une colonne « Ventes JSON » à son premier achat ; rien d'autre ne change.
 
-- **Portraits du journal réparés.** Un personnage dont le token avait été recadré (fiche ›
-  token) voyait son portrait déborder de sa carte : un grand disque par-dessus la page, ou une
-  image glissée vers le haut. Le recadrage reste (le visage choisi est bien celui affiché), mais
-  dans le cadre de l'avatar. Partout dans Eraser, ce zoom ne s'applique plus qu'à une image
-  rognée par son cadre : il ne peut plus déborder ailleurs.
-- **Le groupe a les cartes de la page de campagne**, en plus petit : portrait, joueur, titre
-  honorifique, classe et niveau, peuple. Le petit bouton ↗ ouvre la fiche : sur tous les
-  personnages pour le MJ, sur ses propres personnages pour un joueur. Les absents restent
-  grisés, la pastille des notes liées est toujours là.
-- **Magasins : « Ouvrir le magasin ».** Un petit bouton sur chaque magasin de la session ouvre
-  sa vitrine, en lecture seule pour les joueurs. Un joueur n'y voit que les magasins entrés dans
-  une session et révélés par le MJ, et plus les notes MJ des marchands.
-- **PNJs : « Notes ».** Un petit bouton ouvre une fenêtre avec les notes du PNJ visibles par les
-  joueurs, puis toutes les sessions où il est passé, dans l'ordre, avec les notes de la campagne
-  qui le citent (un clic ouvre la note, quitte à changer de session). Une session où il est
-  apparu sans note reste dans la liste. Les PNJ venus d'un événement ont la même fenêtre.
+- **Journal : des boutons discrets.** Sur les cartes des PNJ et des magasins, une simple icône en
+  haut à droite (sans cadre) ouvre leurs notes ou leur vitrine. Celle de la fiche d'un
+  personnage prend le même style.
+- **La vitrine s'ouvre en fenêtre** par-dessus le journal. Le MJ y a les mêmes choix que dans le
+  Créateur de session : relancer une ligne ou tout le magasin, choisir un item, changer un prix,
+  les exemplaires, le nom, le vendeur, l'œil des joueurs, retirer de la session.
+- **Les joueurs ne voient plus l'effet des items**, seulement leur description, partout : journal,
+  magasins sauvegardés, tabletop et fiche Roll20. Le MJ voit tout, partout.
+- **Exemplaires.** Chaque ligne a son nombre d'exemplaires (« ×20 ») : au tirage, le « Nombre
+  max » de l'item ; le MJ clique dessus pour le changer, dans le générateur comme dans les
+  magasins sauvegardés. Les magasins enregistrés avant gardent un exemplaire par ligne.
+- **Acheter.** Chaque item a un bouton Acheter : pour quel personnage (celui présent à la
+  session ; s'il y en a plusieurs, on choisit), combien, et avec quelles pièces (le prix est
+  converti au taux habituel : 1 PO = 100 PC, 1 PN = 1,5 PO). La fenêtre montre la bourse, ce
+  qui sera donné et la monnaie rendue : sans cuivre, une pièce d'or est cassée et le reste
+  rendu en PC. « Acheter » retire l'argent, met l'objet dans l'inventaire et le retire du
+  magasin (la ligne disparaît quand il n'en reste plus). Si quoi que ce soit refuse, rien n'est
+  pris.
+- **Négocier.** Le prix se décide à l'oral avec le MJ : le joueur note le montant et les pièces
+  avec lesquelles il paie, puis Acheter ou Annuler.
+- **Ventes.** Sous chaque magasin, ce qui est parti : quoi, combien, à quel prix (avec
+  « négocié »), et par qui.
+- **Le MJ peut faire acheter un joueur** (choix du personnage), dans le journal, le Créateur de
+  session, les magasins sauvegardés et la page Événements : son joueur est prévenu.

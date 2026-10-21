@@ -9,6 +9,7 @@ import { readToken, tokenVersion, type TokenKind } from "@/lib/tokens"
 import { readNpcPortrait } from "@/lib/npc-portraits"
 import type { AuthorizedUser } from "@/lib/server-auth"
 import { listCampaignSessions } from "@/lib/campaign-sessions"
+import { shopForPlayers } from "@/lib/shop-purchase"
 
 function bytesToBase64Url(bytes: Uint8Array) {
   let binary = ""
@@ -161,7 +162,8 @@ export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$in
     shops: await Promise.all(shops.map(async (shop) => {
       const seller = npcById.get(shop.npcId)
       return {
-        ...shop,
+        // La fiche du magasin est lue par les joueurs dans Roll20 : la description des items, pas leur effet.
+        ...shopForPlayers(shop),
         // La fiche Roll20 du magasin prend le portrait du vendeur et le token de la devanture.
         portraitUrl: seller ? portraitUrl(seller.id, seller.portrait) : "",
         tokenUrl: await tokenUrl("shop", shop.id),

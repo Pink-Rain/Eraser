@@ -28,6 +28,7 @@ import { genericNpcIndexPage } from "@/lib/npc-pages"
 import type { CampaignNpcRecord, SavedShopRecord, ShopGeneratorItem } from "@/lib/shop-schema"
 import { builtinShopTypes, type ShopTypeDefinition } from "@/lib/shop-types"
 import { drawEncounter, encounterPool, encounterRarityLabels, type EncounterCandidate } from "@/lib/environment-draws"
+import type { ShopBuyer } from "@/lib/shop-access"
 
 /*
  * Les événements d'une campagne. La page Événements (menu › Créateur de session) les crée,
@@ -251,7 +252,7 @@ function EnvironmentEncounter({ items, environments, indexTitles, pending, onKee
  * nommés, avec leur image), et les marchés ambulants (des magasins). Chacun s'envoie dans
  * une session du Créateur de session.
  */
-export function CampaignEventManager({ campaignId, initialEvents, shops, npcs, generatorItems, shopTypes = builtinShopTypes, environments = [], indexTitles = {}, loadError = "" }: { campaignId: string; initialEvents: CampaignEvent[]; shops: SavedShopRecord[]; npcs: CampaignNpcRecord[]; generatorItems: ShopGeneratorItem[]; shopTypes?: ShopTypeDefinition[]; /** Lieux › Environnement : les index de chaque colonne « Événement ». */ environments?: EventEnvironment[]; indexTitles?: Record<string, string>; loadError?: string }) {
+export function CampaignEventManager({ campaignId, initialEvents, shops, npcs, generatorItems, shopTypes = builtinShopTypes, environments = [], indexTitles = {}, loadError = "", buyers = [] }: { /** Pour qui le MJ peut faire acheter dans un marché : les personnages de la campagne. */ buyers?: ShopBuyer[]; campaignId: string; initialEvents: CampaignEvent[]; shops: SavedShopRecord[]; npcs: CampaignNpcRecord[]; generatorItems: ShopGeneratorItem[]; shopTypes?: ShopTypeDefinition[]; /** Lieux › Environnement : les index de chaque colonne « Événement ». */ environments?: EventEnvironment[]; indexTitles?: Record<string, string>; loadError?: string }) {
   const router = useRouter()
   const [events, setEvents] = useState<SessionEvent[]>(initialEvents)
   const [creating, setCreating] = useState<CreatableKind | null>(null)
@@ -341,7 +342,7 @@ export function CampaignEventManager({ campaignId, initialEvents, shops, npcs, g
         {eventType.count && <NativeSelect value={count} onChange={(event) => setCount(event.target.value)} aria-label="Nombre d’items" className="w-full sm:w-auto"><NativeSelectOption value="random">Au hasard ({eventType.count.min} à {eventType.count.max} items)</NativeSelectOption>{countChoices(eventType).map((value) => <NativeSelectOption key={value} value={String(value)}>{value} items</NativeSelectOption>)}</NativeSelect>}
         <Button type="button" disabled={pending || !generatorItems.length} onClick={() => void generateMarket()}>{pending ? <LoaderCircle className="animate-spin" /> : <Dices />}Générer : {eventType.name}</Button>
       </div>
-      <SavedShopCollection initialShops={shops} pageLinked={campaignId} npcs={npcs} generatorItems={generatorItems} types={shopTypes} only={(shop) => eventKeys.has(shop.key)} sessionList="events" emptyLabel={`Aucun ${eventType.name.toLocaleLowerCase("fr")} sauvegardé`} />
+      <SavedShopCollection initialShops={shops} pageLinked={campaignId} npcs={npcs} generatorItems={generatorItems} types={shopTypes} only={(shop) => eventKeys.has(shop.key)} sessionList="events" emptyLabel={`Aucun ${eventType.name.toLocaleLowerCase("fr")} sauvegardé`} purchase={{ campaignId, sessionId: "", buyers }} />
     </section>}
 
     <Dialog open={Boolean(creating)} onOpenChange={(open) => { if (!open && !pending) setCreating(null) }}>

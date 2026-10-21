@@ -93,6 +93,7 @@ import { ownedBy, ownersCell, ownersOf } from "@/lib/ownership"
 import { companionsOfTabs, isCompanionInventoryOwner } from "@/lib/companions"
 import { displayedMultipleValue } from "@/lib/multiple-values"
 import type { CampaignNpcRecord, CityKey, GeneratedShop, SavedShopRecord, ShopSize } from "@/lib/shop-schema"
+import type { ShopSale } from "@/lib/shop-purchase"
 import { isShopKey } from "@/lib/shop-keys"
 import type { TabletopActivityRecord, TabletopEntityRecord, TabletopFolderRecord, TabletopMapRecord, TabletopTokenRecord } from "@/lib/tabletop-schema"
 import { matchValueRanges, normalizeGoogleSheetRows, sheetNumber, sheetRangeStartRow, textCell, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
@@ -434,7 +435,7 @@ async function campaignsSource() {
 /** La feuille « Personnages des campagnes » : un lien par ligne. */
 const campaignCharacterHeaders = ["ID campagne", "ID personnage"]
 /** Les colonnes de la feuille Magasins, lues par leur nom. */
-const shopSheetHeaders = ["ID", "Page lié", "Ville", "Taille de ville", "Type de magasin", "Nom du magasin", "Taille du magasin", "Objets JSON", "Ajouté à la campagne", "ID PNJ lié", "Créé le", "Modifié le"]
+const shopSheetHeaders = ["ID", "Page lié", "Ville", "Taille de ville", "Type de magasin", "Nom du magasin", "Taille du magasin", "Objets JSON", "Ajouté à la campagne", "ID PNJ lié", "Créé le", "Modifié le", "Ventes JSON"]
 
 /** La to-do de l'administration. */
 const todoSheetHeaders = ["ID", "ID admin", "Admin créateur", "Nom", "Contenu", "Priorité", "Étiquette", "Couleur", "Réalisée", "Créée le", "Modifiée le", "Supprimée le"]
@@ -3136,7 +3137,7 @@ export const jdrSheetDefinitions: StructuredSheetDefinition[] = [
     tabName: "Magasins",
     frozenColumns: 2,
     headers: shopSheetHeaders,
-    columnWidths: [180, 190, 170, 150, 170, 220, 150, 520, 160, 180, 170, 170],
+    columnWidths: [180, 190, 170, 150, 170, 220, 150, 520, 160, 180, 170, 170, 360],
   },
   // Le vocabulaire est un index du monde (lib/world-index-definitions.ts) : déclaré plus bas.
   // Index du monde (Ressources) : colonnes, onglets supplémentaires et liens entre
@@ -4413,6 +4414,9 @@ function savedShopFromRow(cells: readonly (string | undefined)[], columns: Sheet
         ...(typeof item.source === "string" && item.source ? { source: item.source } : {}),
         locations: Array.isArray(item.locations) ? item.locations as Array<{ place: string; rarity: string }> : [],
         rarity,
+        // Les exemplaires en vente : écrits par le MJ ou un achat ; sinon le « Nombre max » de l'item.
+        ...(shopCount(item.quantity) !== undefined ? { quantity: shopCount(item.quantity) } : {}),
+        ...(shopCount(item.maxQuantity) ? { maxQuantity: shopCount(item.maxQuantity) } : {}),
       }]
     })
   } catch {
@@ -4431,6 +4435,32 @@ function savedShopFromRow(cells: readonly (string | undefined)[], columns: Sheet
     npcId: row[9] || "",
     createdAt: row[10] || "",
     updatedAt: row[11] || "",
+    sales: shopSalesOf(row[12]),
+  }
+}
+
+/** Un nombre d'exemplaires lu dans « Objets JSON » : entier, positif ou nul. */
+function shopCount(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.min(9999, Math.floor(value)) : undefined
+}
+
+/** Les ventes d'un magasin (« Ventes JSON ») : ce qui est parti, à quel prix, à qui. */
+function shopSalesOf(cell: string | undefined): ShopSale[] {
+  if (!cell?.trim()) return []
+  try {
+    const parsed = JSON.parse(cell) as unknown
+    if (!Array.isArray(parsed)) return []
+    const text = (value: unknown) => typeof value === "string" ? value : ""
+    return parsed.flatMap((value): ShopSale[] => {
+      if (!value || typeof value !== "object") return []
+      const sale = value as Record<string, unknown>
+      const name = text(sale.name)
+      const quantity = shopCount(sale.quantity)
+      if (!name || !quantity) return []
+      return [{ itemId: text(sale.itemId), name, icon: text(sale.icon), type: text(sale.type), subtype: text(sale.subtype), quantity, price: text(sale.price), negotiated: sale.negotiated === true, characterId: text(sale.characterId), characterName: text(sale.characterName), sessionId: text(sale.sessionId), at: text(sale.at) }]
+    })
+  } catch {
+    return []
   }
 }
 
@@ -4449,6 +4479,8 @@ function shopCells(shop: GeneratedShop, pageLinked: string, current: SavedShopRe
     "ID PNJ lié": options.npcId ?? current?.npcId ?? "",
     "Créé le": current?.createdAt || now,
     "Modifié le": now,
+    // Les ventes ne sont écrites que par un achat (recordShopSale) : un enregistrement du MJ les garde.
+    "Ventes JSON": current?.sales?.length ? JSON.stringify(current.sales) : "",
   }
 }
 
@@ -4616,6 +4648,61 @@ async function writeShopRows(pageLinked: string, shops: GeneratedShop[], options
     ...await updateShopRows(sheet.spreadsheetId, updates),
     ...await placeShopRows(sheet.spreadsheetId, sheet.tabName, columns, additions, freeShopRows(rows, startRow, reserved)),
   ]
+}
+
+/**
+ * Un achat dans un magasin : `quantity` exemplaires quittent la ligne de l'item (la ligne s'en
+ * va quand il n'en reste plus) et la vente est gardée dans « Ventes JSON ». Le magasin est relu
+ * frais sous le verrou des magasins : deux joueurs ne peuvent pas acheter le même dernier
+ * exemplaire. Seules ces deux cases (et « Modifié le ») sont écrites.
+ */
+export async function takeFromShop(pageLinked: string, shopId: string, itemId: string, quantity: number, sale: ShopSale) {
+  return withAsyncLock("shops", async () => {
+    const { sheet, columns, shop, rowNumber } = await shopRowFor(pageLinked, shopId)
+    const index = shop.items.findIndex((item) => item.id === itemId)
+    if (index < 0) throw new Error("SHOP_ITEM_NOT_FOUND")
+    const item = shop.items[index]
+    const left = (item.quantity ?? item.maxQuantity ?? 1) - quantity
+    if (left < 0) throw new Error("SHOP_ITEM_SOLD_OUT")
+    const items = left ? shop.items.map((candidate, position) => position === index ? { ...candidate, quantity: left } : candidate) : shop.items.filter((_, position) => position !== index)
+    const sales = [...(shop.sales ?? []), sale].slice(-200)
+    await writeShopSale(sheet, columns, rowNumber, items, sales)
+    return { shop: { ...shop, items, sales }, item, position: index }
+  })
+}
+
+/** Annule `takeFromShop` (le paiement a échoué) : les exemplaires reviennent, la vente s'efface. */
+export async function undoShopSale(pageLinked: string, shopId: string, item: GeneratedShop["items"][number], position: number, quantity: number, saleAt: string) {
+  return withAsyncLock("shops", async () => {
+    const { sheet, columns, shop, rowNumber } = await shopRowFor(pageLinked, shopId)
+    const current = shop.items.find((candidate) => candidate.id === item.id)
+    const items = current
+      ? shop.items.map((candidate) => candidate.id === item.id ? { ...candidate, quantity: (candidate.quantity ?? candidate.maxQuantity ?? 1) + quantity } : candidate)
+      : [...shop.items.slice(0, position), { ...item, quantity }, ...shop.items.slice(position)]
+    const sales = (shop.sales ?? []).filter((sale) => !(sale.at === saleAt && sale.itemId === item.id))
+    await writeShopSale(sheet, columns, rowNumber, items, sales)
+  })
+}
+
+async function shopRowFor(pageLinked: string, shopId: string) {
+  const sheet = await ensureJdrSheet("shops")
+  if (!sheet) throw new Error("SHOPS_SHEET_UNAVAILABLE")
+  clearSpreadsheetReadCache(sheet.spreadsheetId)
+  const read = await readShopSheet(sheet)
+  const columns = await ensureNamedColumns(sheet.spreadsheetId, sheet.tabName, read.columns)
+  const offset = read.rows.findIndex((row) => columns.get(row, "ID") === shopId)
+  const shop = offset >= 0 ? savedShopFromRow(read.rows[offset], columns) : null
+  if (!shop || shop.pageLinked !== pageLinked) throw new Error("SHOP_NOT_FOUND")
+  if (unreadableShopItems(columns.get(read.rows[offset], "Objets JSON"))) throw new Error("SHOP_ITEMS_UNREADABLE")
+  return { sheet, columns, shop, rowNumber: offset + 2 }
+}
+
+async function writeShopSale(sheet: JdrSheetRecord, columns: SheetColumns, rowNumber: number, items: GeneratedShop["items"], sales: ShopSale[]) {
+  await updateShopRows(sheet.spreadsheetId, namedRowWrites(sheet.tabName, columns, rowNumber, {
+    "Objets JSON": JSON.stringify(items),
+    "Ventes JSON": sales.length ? JSON.stringify(sales) : "",
+    "Modifié le": new Date().toISOString(),
+  }))
 }
 
 export async function deleteSavedShops(pageLinked: string, shopIds: string[]) {
@@ -7494,7 +7581,11 @@ function unchangedSource(workbook: InventoryWorkbook, source: StoredInventoryCon
 /** Ce qu'une modification de l'inventaire renvoie, avec « posé au sol » quand la place manquait. */
 export type InventoryChangeResult = CharacterInventoryRecord & { landedOnGround?: boolean }
 
-export async function addCharacterInventoryItem(characterId: string, itemId: string, requestedContainerId?: string, mode: InventoryOwnerMode = "character"): Promise<InventoryChangeResult> {
+/**
+ * `count` exemplaires (un achat en magasin) : les piles se remplissent jusqu'au « Nombre max »,
+ * puis les cases libres, sans relire la feuille entre deux.
+ */
+export async function addCharacterInventoryItem(characterId: string, itemId: string, requestedContainerId?: string, mode: InventoryOwnerMode = "character", count = 1): Promise<InventoryChangeResult> {
   return withInventoryLock(async () => {
     // Le texte de l'objet est recopié dans la case : le catalogue à jour, pas la copie d'affichage.
     const read = () => readInventoryWorkbook(true, { fresh: true, currentCatalog: true })
@@ -7521,50 +7612,59 @@ export async function addCharacterInventoryItem(characterId: string, itemId: str
     if (!containers.length && !ground) throw new Error("INVENTORY_NO_COMPATIBLE_CONTAINER")
 
     const containerIds = new Set(containers.map((container) => container.id))
-    const compatibleContents = workbook.contents
-      .filter((content) => content.characterId === characterId && containerIds.has(content.containerId))
-      .filter((content) => {
-        const container = containers.find((candidate) => candidate.id === content.containerId)
-        return Boolean(container && (isUnlimitedInventoryCategory(inventoryContainerCategory(container, typeById)) || content.index <= container.capacity))
-      })
-      .sort((left, right) => {
-        const leftOrder = containers.find((container) => container.id === left.containerId)?.order ?? 0
-        const rightOrder = containers.find((container) => container.id === right.containerId)?.order ?? 0
-        return leftOrder - rightOrder || left.index - right.index
-      })
-    let stacked = Boolean(compatibleContents.find((content) => content.itemId === item.id && content.quantity < item.maxQuantity))
-    let target = compatibleContents.find((content) => content.itemId === item.id && content.quantity < item.maxQuantity) ?? compatibleContents.find((content) => !content.itemId && !content.customName)
+    let remaining = Math.max(1, Math.floor(count))
     let landedOnGround = false
-    if (!target) {
-      // Plus de place : un contenant sans limite visé (ou l'esthétique) grandit, sinon l'objet tombe au sol.
-      const unlimitedContainer = containers.find((container) => isUnlimitedInventoryCategory(inventoryContainerCategory(container, typeById)))
-      const destination = unlimitedContainer ?? ground
-      if (!destination) throw new Error("INVENTORY_FULL")
-      const placed = await unlimitedSlot(workbook, characterId, destination, { itemId: item.id, quantity: 1, maxQuantity: item.maxQuantity }, read)
-      workbook = placed.workbook
-      target = placed.target
-      stacked = placed.stacked
-      landedOnGround = destination.id === ground?.id && !unlimitedContainer
+    let inventory: CharacterInventoryRecord | null = null
+    while (remaining > 0) {
+      const compatibleContents = workbook.contents
+        .filter((content) => content.characterId === characterId && containerIds.has(content.containerId))
+        .filter((content) => {
+          const container = containers.find((candidate) => candidate.id === content.containerId)
+          return Boolean(container && (isUnlimitedInventoryCategory(inventoryContainerCategory(container, typeById)) || content.index <= container.capacity))
+        })
+        .sort((left, right) => {
+          const leftOrder = containers.find((container) => container.id === left.containerId)?.order ?? 0
+          const rightOrder = containers.find((container) => container.id === right.containerId)?.order ?? 0
+          return leftOrder - rightOrder || left.index - right.index
+        })
+      let stacked = Boolean(compatibleContents.find((content) => content.itemId === item.id && content.quantity < item.maxQuantity))
+      let target = compatibleContents.find((content) => content.itemId === item.id && content.quantity < item.maxQuantity) ?? compatibleContents.find((content) => !content.itemId && !content.customName)
+      if (!target) {
+        // Plus de place : un contenant sans limite visé (ou l'esthétique) grandit, sinon l'objet tombe au sol.
+        const unlimitedContainer = containers.find((container) => isUnlimitedInventoryCategory(inventoryContainerCategory(container, typeById)))
+        const destination = unlimitedContainer ?? ground
+        if (!destination) throw new Error("INVENTORY_FULL")
+        const placed = await unlimitedSlot(workbook, characterId, destination, { itemId: item.id, quantity: 1, maxQuantity: item.maxQuantity }, read)
+        workbook = placed.workbook
+        target = placed.target
+        stacked = placed.stacked
+        landedOnGround ||= destination.id === ground?.id && !unlimitedContainer
+      }
+      const now = new Date().toISOString()
+      // Ce que la case accepte encore : la pile jusqu'au « Nombre max », ou une case neuve.
+      const placedHere = Math.max(1, Math.min(remaining, Math.max(1, item.maxQuantity) - (stacked ? target.quantity : 0)))
+      remaining -= placedHere
+      // Un exemplaire de plus sur une pile : seul le nombre change, la case garde son texte.
+      const updated: StoredInventoryContent = stacked
+        ? { ...target, quantity: target.quantity + placedHere, updatedAt: now }
+        : {
+            ...target,
+            itemId: item.id,
+            quantity: placedHere,
+            customName: item.name,
+            customDescription: item.description,
+            type: item.type,
+            subtype: item.subtype,
+            effect: item.effect,
+            nameHtml: item.nameHtml,
+            descriptionHtml: item.descriptionHtml,
+            effectHtml: item.effectHtml,
+            updatedAt: now,
+          }
+      workbook = await writeInventoryChanges(workbook, { contents: [[target, updated]] })
+      inventory = buildCharacterInventory(characterId, workbook)
     }
-    const now = new Date().toISOString()
-    // Un exemplaire de plus sur une pile : seul le nombre change, la case garde son texte.
-    const updated: StoredInventoryContent = stacked
-      ? { ...target, quantity: target.quantity + 1, updatedAt: now }
-      : {
-          ...target,
-          itemId: item.id,
-          quantity: 1,
-          customName: item.name,
-          customDescription: item.description,
-          type: item.type,
-          subtype: item.subtype,
-          effect: item.effect,
-          nameHtml: item.nameHtml,
-          descriptionHtml: item.descriptionHtml,
-          effectHtml: item.effectHtml,
-          updatedAt: now,
-        }
-    const inventory = buildCharacterInventory(characterId, await writeInventoryChanges(workbook, { contents: [[target, updated]] }))
+    if (!inventory) throw new Error("INVENTORY_FULL")
     // Un objet arrivé dans l'inventaire d'un personnage (pas le coffre de campagne ni un PNJ).
     if (mode === "character" && !isCampaignInventoryOwner(characterId)) void noteCharacterEvent(characterId, { kind: "objet", at: new Date().toISOString(), name: item.name, ...(item.rarity ? { rarity: item.rarity } : {}) })
     return landedOnGround ? { ...inventory, landedOnGround } : inventory
@@ -7844,6 +7944,55 @@ export async function setCharacterInventoryCurrency(characterId: string, contain
     const otherAmount = rows.filter((content) => content.id !== target.id).reduce((total, content) => total + content.quantity, 0)
     const nextAmount = Math.max(0, Math.min(container.capacity - otherAmount, Math.trunc(amount)))
     return buildCharacterInventory(characterId, await writeInventoryChanges(workbook, { contents: [[target, { ...target, quantity: nextAmount, updatedAt: new Date().toISOString() }]] }))
+  })
+}
+
+/**
+ * Les bourses d'un personnage (PO, PC, PN) dans leur ordre, avec leurs lignes de monnaie.
+ * Lu frais : une bourse sert à payer.
+ */
+function characterPurses(characterId: string, workbook: InventoryWorkbook) {
+  const typeById = new Map(workbook.containerTypes.map((type) => [type.id, type]))
+  return workbook.containers
+    .filter((container) => container.characterId === characterId && !container.deletedAt && inventoryContainerCategory(container, typeById) === "Bourse")
+    .sort((left, right) => left.order - right.order)
+    .map((container) => {
+      const rows = workbook.contents.filter((content) => content.containerId === container.id)
+      const row = (currency: string) => rows.find((content) => inventoryCurrencyKey(content.customName || content.subtype) === currency)
+      const coinRows = { or: row("or"), cuivre: row("cuivre"), orNoir: row("or noir") }
+      const purse = { or: coinRows.or?.quantity ?? 0, cuivre: coinRows.cuivre?.quantity ?? 0, orNoir: coinRows.orNoir?.quantity ?? 0 }
+      return { container, coinRows, purse }
+    })
+}
+
+/** La bourse d'un personnage (la première, comme sur sa fiche) ; `null` : il n'en a pas. */
+export async function readCharacterPurse(characterId: string) {
+  const workbook = await ensureCharacterInventoryStorage(characterId, true, { fresh: true })
+  return characterPurses(characterId, workbook)[0]?.purse ?? null
+}
+
+/**
+ * Remplace le contenu de la bourse d'un personnage par `after`, si elle contient toujours
+ * `before` (sinon INVENTORY_CHANGED : un autre achat ou une saisie est passé entre-temps).
+ * Les trois monnaies sont écrites ensemble. Sert à payer un achat, et à rembourser.
+ */
+export async function replaceCharacterPurse(characterId: string, before: { or: number; cuivre: number; orNoir: number }, after: { or: number; cuivre: number; orNoir: number }) {
+  return withInventoryLock(async () => {
+    const workbook = await ensureCharacterInventoryStorage(characterId, true, { fresh: true })
+    const found = characterPurses(characterId, workbook)[0]
+    if (!found) throw new Error("INVENTORY_NO_PURSE")
+    if (found.purse.or !== before.or || found.purse.cuivre !== before.cuivre || found.purse.orNoir !== before.orNoir) throw new Error("INVENTORY_CHANGED")
+    const now = new Date().toISOString()
+    const changes: Array<[StoredInventoryContent, StoredInventoryContent]> = []
+    for (const key of ["or", "cuivre", "orNoir"] as const) {
+      const row = found.coinRows[key]
+      const amount = Math.max(0, Math.trunc(after[key]))
+      if (amount === found.purse[key]) continue
+      if (!row) throw new Error("INVENTORY_CURRENCY_NOT_FOUND")
+      changes.push([row, { ...row, quantity: amount, updatedAt: now }])
+    }
+    if (!changes.length) return buildCharacterInventory(characterId, workbook)
+    return buildCharacterInventory(characterId, await writeInventoryChanges(workbook, { contents: changes }))
   })
 }
 
