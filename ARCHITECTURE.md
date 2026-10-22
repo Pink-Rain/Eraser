@@ -329,6 +329,16 @@ n'est pas compilé et garde son comportement.
   `vite.config.ts`) ; `react-remove-scroll-bar` est remplacé par `lib/vendor/remove-scroll-bar.ts`
   (`<body>` ne défile jamais) ; plus de `body:has(…)` (attribut `data-tabletop-windows`), ni de
   `:has()` sur la coque de la barre latérale.
+- Porte du quota (`lib/google-quota.ts`) : des requêtes refusées ensemble (429) ne comptent que
+  pour un refus ; la pause ne s'allonge que pour un refus arrivé après la fin de la précédente.
+- Lectures partagées (`lib/shared-reads.ts`) : une page n'attend la copie d'une autre
+  installation que 6 s (l'arrière-plan, 80 s), puis lit Google elle-même ; une installation en
+  pause de quota ne prend pas de bail, et son bail renouvelé le dit (`paused`) : personne ne
+  l'attend.
+- Salon en direct (chat, tabletop) : trystero préparait vingt connexions pair à pair d'un coup
+  (1,5 à 2 s de gel au lancement et à chaque changement de salon). `vite.config.ts`
+  (`eraserTrysteroPool`) les fait préparer une à une, au repos, six au plus. À vérifier à toute
+  montée de version de trystero (la compilation prévient).
 - `components/eraser/fold-section.tsx` : une partie de page repliable. Avec `serverOpen`, ses
   parties dépliées sont dans l'adresse (`?ouvert=…`, `lib/open-sections.ts`) et le serveur ne
   calcule que celles-là (page Google Drive et Sheets).

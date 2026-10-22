@@ -123,6 +123,34 @@ test("après « Actualiser », une lecture commencée avant le clic n'est pas at
   assert.ok(Date.now() - started < 1_500, `attendu ${Date.now() - started} ms une copie qui ne pouvait pas convenir`);
 });
 
+test("l'installation qui lit est en pause de quota : on ne l'attend pas, Google est lu aussitôt", async () => {
+  const id = fresh("bail-en-pause");
+  google.addSpreadsheet(id, [{ title: "Feuille", grid: [["ID", "Nom"], ["1", "Google"]] }]);
+  await shared.writeSharedRecord(scopeOf(id), "lease", JSON.stringify({ by: "autre-installation", at: Date.now(), since: Date.now(), paused: 1 }));
+  const started = Date.now();
+  assert.deepEqual(await sheets.readRange(id, RANGE), [["ID", "Nom"], ["1", "Google"]]);
+  assert.equal(googleReads(id), 1);
+  assert.ok(Date.now() - started < 1_500, `attendu ${Date.now() - started} ms une installation en pause`);
+});
+
+test("une page n'attend que quelques secondes la copie d'une installation retenue, puis lit Google", async () => {
+  const id = fresh("bail-sans-fin");
+  google.addSpreadsheet(id, [{ title: "Feuille", grid: [["ID", "Nom"], ["1", "Google"]] }]);
+  // L'autre installation renouvelle son bail sans jamais déposer sa copie (file d'attente, quota).
+  const renew = () => shared.writeSharedRecord(scopeOf(id), "lease", JSON.stringify({ by: "autre-installation", at: Date.now(), since: Date.now() }));
+  await renew();
+  const beat = setInterval(() => { void renew(); }, 1_000);
+  try {
+    const started = Date.now();
+    assert.deepEqual(await sheets.readRange(id, RANGE), [["ID", "Nom"], ["1", "Google"]]);
+    const waited = Date.now() - started;
+    assert.equal(googleReads(id), 1);
+    assert.ok(waited >= 5_000 && waited < 9_000, `attendu ${waited} ms`);
+  } finally {
+    clearInterval(beat);
+  }
+});
+
 test("un refus de Google n'est pas relancé par le partage : une seule requête, l'erreur remonte", async () => {
   const id = fresh("refus");
   google.addSpreadsheet(id, [{ title: "Feuille", grid: [["ID", "Nom"], ["1", "Google"]] }]);

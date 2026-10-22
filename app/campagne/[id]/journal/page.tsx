@@ -83,13 +83,14 @@ export default async function CampaignJournalPage({ params, searchParams }: { pa
   const [{ id }, query] = await Promise.all([params, searchParams])
   const reader = await campaignReader(id)
   if (!reader) notFound()
-  const sessions = await listCampaignSessionsForDisplay(id).catch((error) => {
-    console.error("JOURNAL_SESSIONS_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
-    return null
-  })
   const viewer = { uid: account.uid, manager: reader.manager }
   // Chaque lecture peut manquer (feuille pas encore créée, Google indisponible) : le reste s'affiche.
-  const [notes, listedMembers, mine, npcs, shops, events, hiddenCharacters] = await Promise.all([
+  // Les sessions sont lues avec le reste : avant, toutes les autres lectures les attendaient.
+  const [sessions, notes, listedMembers, mine, npcs, shops, events, hiddenCharacters] = await Promise.all([
+    listCampaignSessionsForDisplay(id).catch((error) => {
+      console.error("JOURNAL_SESSIONS_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+      return null
+    }),
     // Le journal ne montre que les notes de session (publiques) ; les notes privées restent dans la fiche.
     listSessionNotes(id, viewer).then((notes) => notes.filter((note) => !note.private)).catch(() => null),
     listCampaignMembers(id).catch(() => []),

@@ -131,3 +131,14 @@ test("journal des erreurs : une erreur d'Eraser qui cite un code de flux reste d
   const journal = await vite.ssrLoadModule("/lib/error-journal.ts");
   assert.equal(journal.isJournaledError("DRIVE_MEDIA_STREAM_FAILED ERR_STREAM_PREMATURE_CLOSE"), true);
 });
+
+test("des requêtes refusées ensemble ne comptent que pour un refus : la pause ne s'emballe pas", () => {
+  quota.noteQuotaSuccess();
+  // Six requêtes parties ensemble, refusées ensemble : avant, la pause doublait à chacune (32 s et plus).
+  for (let index = 0; index < 4; index += 1) quota.noteQuotaRefusal(null);
+  const pause = quota.googleQuotaPauseMs();
+  assert.ok(pause > 3_000 && pause <= 6_000, `pause de ${pause} ms`);
+  // Une durée demandée par Google prolonge toujours la pause en cours.
+  quota.noteQuotaRefusal("20");
+  assert.ok(quota.googleQuotaPauseMs() > 15_000);
+});

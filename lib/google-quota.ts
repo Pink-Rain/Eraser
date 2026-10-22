@@ -44,11 +44,20 @@ export function googleQuotaPauseMs() {
   return Math.max(0, pausedUntil - Date.now())
 }
 
-/** Google a refusé pour quota : toutes les requêtes Sheets de l'installation attendent. */
+/**
+ * Google a refusé pour quota : toutes les requêtes Sheets de l'installation attendent.
+ * Les requêtes parties ensemble (six à la fois) reviennent refusées ensemble : c'est un seul
+ * refus. Avant, chacune doublait la pause (4, 8, 16, 32 s…) et quatre refus d'une même rafale
+ * faisaient attendre une demi-minute chaque page, et les autres installations avec elle. La
+ * pause ne s'allonge donc que pour un refus arrivé après la fin de la précédente.
+ */
 export function noteQuotaRefusal(retryAfter?: string | null) {
-  refusals += 1
   const hinted = Number.parseFloat(retryAfter ?? "")
-  const pause = Number.isFinite(hinted) && hinted > 0
+  const hintedOk = Number.isFinite(hinted) && hinted > 0
+  // Déjà en pause : seule une durée demandée par Google peut la prolonger.
+  if (googleQuotaPauseMs() > 0 && !hintedOk) return
+  if (googleQuotaPauseMs() === 0) refusals += 1
+  const pause = hintedOk
     ? Math.min(MAX_PAUSE_MS, hinted * 1_000)
     : Math.min(MAX_PAUSE_MS, FIRST_PAUSE_MS * 2 ** (refusals - 1))
   // Un écart au hasard (jusqu'à la moitié de la pause) : les installations refusées au même

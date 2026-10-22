@@ -129,7 +129,7 @@
   de lecture qui attend le Worker toutes les 30 s.
 - Pas de `:has()` sur `body` ni sur un grand conteneur (coque, barre latérale), et pas de style
   posé sur `<body>` à l'ouverture d'une fenêtre : chacun refait le style de toute la page. Les
-  retouches de Radix dans `vite.config.ts` sont à vérifier à toute montée de version.
+  retouches de Radix et de trystero dans `vite.config.ts` sont à vérifier à toute montée de version.
 
 ## Tabletop et Roll20
 

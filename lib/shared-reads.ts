@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import { promisify } from "node:util"
 import { gunzip as gunzipCallback, gzip as gzipCallback } from "node:zlib"
 
+import { googleQuotaPauseMs, isBackgroundGoogleWork } from "@/lib/google-quota"
 import { freshAfter } from "@/lib/request-freshness"
 import { listSharedRecords, readSharedRecord, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
 
@@ -52,6 +53,13 @@ const LEASE_MS = 8_000
  */
 /** Au plus, le temps d'attendre la copie d'une installation qui lit encore (la patience de la porte du quota). */
 const WAIT_MS = 80_000
+/**
+ * Une page n'attend la copie d'une autre installation que ce temps-là, puis lit Google elle-même.
+ * Une lecture prend moins de deux secondes : au-delà, l'autre installation est retenue (sa file
+ * d'attente, une pause de quota) et la page attendait avec elle, jusqu'à 30 s pour une fiche.
+ * Le travail d'arrière-plan, que personne ne regarde, garde la longue attente (WAIT_MS).
+ */
+const PAGE_WAIT_MS = 6_000
 /** Le serveur partagé est interrogé souvent au début de l'attente, puis plus calmement. */
 const POLL_MS = [300, 400, 600, 900, 1_300, 2_000]
 /**
@@ -158,10 +166,11 @@ export async function markSpreadsheetChanged(spreadsheetId: string) {
 type Manifest = { v: string; at: number; parts: number; sum: string }
 /**
  * `at` : dernier renouvellement ; `since` : début de la lecture, qui dit pour qui sa copie vaudra.
+ * `paused` : l'installation qui lit est en pause de quota ; sa copie ne viendra pas de sitôt.
  * `big` : le bail rendu parce que la réponse était trop grosse pour être partagée (l'instant) :
  * les autres installations lisent alors Google directement, sans reprendre le bail.
  */
-type Lease = { by: string; at: number; since: number; big?: number }
+type Lease = { by: string; at: number; since: number; big?: number; paused?: 1 }
 
 function parseJson<T>(value: string | undefined): T | null {
   try {
@@ -270,7 +279,8 @@ async function sharedSheetReadOnce(spreadsheetId: string, scope: string, after: 
   // Une autre installation lit Google, son bail est encore renouvelé, et sa lecture a commencé
   // après « Actualiser » : sa copie conviendra. Commencée avant le clic, elle ne conviendrait
   // pas : inutile de l'attendre.
-  const worthWaiting = (lease: Lease | null) => Boolean(lease && lease.by !== INSTALLATION && Date.now() - lease.at < LEASE_MS && (lease.since ?? 0) >= after)
+  // Une installation en pause de quota ne lira pas Google avant longtemps : on ne l'attend pas.
+  const worthWaiting = (lease: Lease | null) => Boolean(lease && lease.by !== INSTALLATION && !lease.paused && Date.now() - lease.at < LEASE_MS && (lease.since ?? 0) >= after)
   let ownLease: Lease | null = null
   try {
     const [currentVersion, found] = await withTimeout(Promise.all([versionOf(spreadsheetId), lookUp(scope)]), LOOKUP_TIMEOUT_MS)
@@ -281,7 +291,9 @@ async function sharedSheetReadOnce(spreadsheetId: string, scope: string, after: 
     // Google n'est jamais lu dans ce bloc : une erreur de Google y serait prise pour une panne
     // du serveur partagé, et Google relu une seconde fois.
     if (markedOversize(holder)) rememberOversize(scope)
-    else if (!worthWaiting(holder)) {
+    // En pause de quota, cette installation ne lira pas Google tout de suite : elle ne prend pas
+    // de bail, qui ferait attendre les autres pour rien.
+    else if (!worthWaiting(holder) && googleQuotaPauseMs() === 0) {
       // Personne ne lit pour nous : on pose son bail (sans l'attendre, voir plus haut) et on
       // lit Google tout de suite. Les autres installations voient le bail et attendent la copie.
       const since = Date.now()
@@ -292,7 +304,7 @@ async function sharedSheetReadOnce(spreadsheetId: string, scope: string, after: 
     // Une autre installation lit Google : sa copie arrive dès qu'elle a sa réponse. On
     // l'attend tant que son bail est renouvelé ; rendu, abandonné, ou rendu parce que la
     // réponse était trop grosse pour être partagée, on lit soi-même.
-    const deadline = Date.now() + WAIT_MS
+    const deadline = Date.now() + (isBackgroundGoogleWork() ? WAIT_MS : PAGE_WAIT_MS)
     for (let round = 0; !ownLease && !knownOversize(scope) && worthWaiting(holder) && Date.now() < deadline; round += 1) {
       await sleep(POLL_MS[Math.min(round, POLL_MS.length - 1)])
       const polled = await lookUp(scope)
@@ -321,7 +333,9 @@ async function readAndPublish(scope: string, version: string, lease: Lease | nul
   const write = (value: Lease) => { void writeSharedRecord(scope, "lease", JSON.stringify(value)).catch(() => undefined) }
   const release = () => { if (lease) write({ by: INSTALLATION, at: 0, since: 0, ...(knownOversize(scope) ? { big: Date.now() } : {}) }) }
   const startedAt = Date.now()
-  const beat = lease ? setInterval(() => write({ ...lease, at: Date.now() }), LEASE_BEAT_MS) : undefined
+  // Le bail renouvelé dit si cette installation est en pause de quota : les autres lisent alors
+  // Google elles-mêmes au lieu d'attendre.
+  const beat = lease ? setInterval(() => write({ ...lease, at: Date.now(), ...(googleQuotaPauseMs() > 0 ? { paused: 1 as const } : {}) }), LEASE_BEAT_MS) : undefined
   let text: string
   try {
     text = await readGoogle()

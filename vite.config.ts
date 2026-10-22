@@ -64,6 +64,52 @@ const radixLayerPatches: Array<{ file: RegExp; find: string; replace: string }> 
   },
 ]
 
+/**
+ * Le salon en direct (chat, tabletop) prépare d'avance des connexions pair à pair : trystero en
+ * créait vingt d'un coup en rejoignant un salon. Chacune coûte des dizaines de millisecondes sous
+ * Windows : l'écran gelait 1,5 à 2 s au lancement d'Eraser, et encore à chaque changement de
+ * salon. Elles sont maintenant préparées une à une, quand la page est au repos, et six suffisent
+ * (une par joueur ; au-delà, trystero en crée une à l'arrivée du pair, comme avant).
+ */
+const trysteroPoolPatches: Array<{ file: RegExp; find: string; replace: string }> = [
+  {
+    file: /@trystero-p2p[\\/]core[\\/]dist[\\/]offer-pool\.mjs$/,
+    find: "\t\talloc(poolSize, this.makeOffer).forEach((p) => this.push(p));\n\t\tthis.active = true;",
+    replace: [
+      "\t\tthis.active = true;",
+      "\t\tconst eraserRound = this.eraserRound = (this.eraserRound ?? 0) + 1;",
+      "\t\tconst eraserFill = (left) => {",
+      "\t\t\tif (!this.active || this.eraserRound !== eraserRound || left <= 0) return;",
+      "\t\t\tif (this.pool.length < 6) this.push(this.makeOffer());",
+      "\t\t\tconst next = () => eraserFill(left - 1);",
+      "\t\t\tif (typeof requestIdleCallback === \"function\") requestIdleCallback(next, { timeout: 3000 });",
+      "\t\t\telse setTimeout(next, 60);",
+      "\t\t};",
+      "\t\teraserFill(6);",
+    ].join("\n"),
+  },
+]
+
+function eraserTrysteroPool(): Plugin {
+  return {
+    name: "eraser-trystero-pool",
+    transform(code, id) {
+      const path = id.split("?")[0]
+      const patches = trysteroPoolPatches.filter((patch) => patch.file.test(path))
+      if (!patches.length) return null
+      let next = code
+      for (const patch of patches) {
+        if (!next.includes(patch.find)) {
+          this.warn(`trystero a changé (${patch.find.slice(0, 60)}…) : ses connexions sont de nouveau préparées toutes d'un coup.`)
+          return null
+        }
+        next = next.replace(patch.find, patch.replace)
+      }
+      return next
+    },
+  }
+}
+
 function eraserRadixLayers(): Plugin {
   return {
     name: "eraser-radix-layers",
@@ -118,5 +164,5 @@ export default defineConfig({
   },
   // Le React Compiler mémorise chaque composant et chaque calcul de rendu : un clic ne
   // redessine plus que ce qui a vraiment changé, sans memo/useMemo écrits à la main.
-  plugins: [vinext(), babel({ presets: [reactCompilerPreset()] }), eraserVinextRouter(), eraserRadixLayers()],
+  plugins: [vinext(), babel({ presets: [reactCompilerPreset()] }), eraserVinextRouter(), eraserRadixLayers(), eraserTrysteroPool()],
 });

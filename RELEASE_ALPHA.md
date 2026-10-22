@@ -1,22 +1,23 @@
-# Eraser 0.1.1-alpha.251 — Chaque item à ta façon
+# Eraser 0.1.1-alpha.252 — Plus d'attente pour les autres
 
 Cette version arrive **sans réinstallation** (enveloppe 10, comme l'alpha 238) : Eraser la
 télécharge, redémarre son serveur et recharge la page tout seul. Rien n'est modifié dans Google
 Sheets.
 
-- **« Affichage des items », un nouvel onglet de « Modifier » dans l'Index des items.** Pour
-  l'inventaire, le magasin et la fouille, chacun réglé à part : chaque colonne de l'index se place
-  à côté du nom, sous le nom, avec la description ou avec l'effet, ou reste masquée. Elle se
-  glisse d'une zone à l'autre, se range dans sa zone, s'écrit en valeur seule, en « Libellé :
-  valeur », en texte ou en pastilles (aux couleurs de sa liste), pour tous, pour le MJ seul ou pour
-  les joueurs seuls. L'aperçu montre l'endroit sur un vrai item, vu par un joueur ou par le MJ.
-  Enregistré aussitôt, pour tout le monde.
-- Les boutons et ce qui est propre à chaque endroit ne bougent pas (quantité, équiper, enclume,
-  rareté du tirage, prix, acheter, épingler…). Une colonne placée avec l'effet suit l'effet : dans
-  un magasin, les joueurs ne la voient jamais. Une case vide ne s'affiche jamais.
-- **Rien ne change tant qu'on n'y touche pas** : chaque endroit part de l'affichage d'avant. Une
-  colonne ajoutée à l'index arrive masquée ; une colonne renommée est suivie.
-- Le magasin n'écrit plus « Aucune description renseignée » ni « Aucun effet renseigné » : le volet
-  ne montre que ce qui est rempli, et la flèche disparaît quand il n'y a rien à déplier.
-- Une petite roue (MJ et admin) dans l'inventaire, le générateur de magasins, les magasins
-  sauvegardés et les fouilles ouvre directement ces réglages, sur le bon endroit.
+Faite d'après les trois relevés « Fluidité » de la séance du 22 octobre (MJ et deux joueurs).
+
+- **Plus de gel au lancement.** Le chat en direct préparait vingt connexions d'un coup en
+  arrivant : l'écran figeait 1,5 à 2 s au démarrage d'Eraser, et encore une demi-seconde à chaque
+  changement de salon (en entrant dans une campagne). Elles se préparent maintenant une à une,
+  quand l'application est au repos, et six suffisent pour la table.
+- **Une fiche qui ne met plus 30 s à s'ouvrir.** Quand plusieurs joueurs ouvrent la même chose,
+  une seule installation lit Google et les autres reprennent sa copie. Si celle-ci était retenue
+  (Google qui fait patienter), les autres l'attendaient jusqu'à 80 s : 30 s pour un inventaire,
+  26 s pour les références, 13 s pour les modificateurs d'armes, 20 s pour le journal. Une page
+  n'attend plus que 6 s au plus, puis lit Google elle-même ; une installation que Google fait
+  patienter le dit, et personne ne l'attend.
+- **Moins de pauses imposées par Google.** Quand Google refusait plusieurs lectures parties
+  ensemble, chaque refus doublait la pause : quatre refus d'une même rafale faisaient attendre
+  32 s ou plus. Une rafale ne compte plus que pour un refus (4 à 6 s).
+- **Journal de campagne** : les sessions sont lues en même temps que les notes, PNJ, magasins et
+  événements, au lieu d'avant eux.
