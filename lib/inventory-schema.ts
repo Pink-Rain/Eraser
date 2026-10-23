@@ -113,6 +113,108 @@ export type InventoryContainerRecord = {
   isBase: boolean
   used: number
   slots: InventorySlotRecord[]
+  /** Un inventaire sur mesure (le + sous les deux colonnes) : sa couleur, son icône, ce qu'il accepte. */
+  custom?: CustomInventoryLook
+}
+
+/**
+ * Un inventaire sur mesure est un contenant « Inventaire » qui a une couleur (colonnes
+ * « Couleur », « Icône », « Contenu accepté » de « Contenants personnages ») : une version
+ * plus ancienne d'Eraser le voit comme un sac ordinaire.
+ */
+export type CustomInventoryLook = { color: string; icon: string; accepts: string }
+
+/** Les icônes proposées (noms d'icônes lucide, gardés tels quels dans la feuille). */
+export const customInventoryIcons = [
+  "backpack", "briefcase", "package", "archive", "shopping-bag", "gem", "flask-conical", "book-open",
+  "scroll", "leaf", "apple", "wrench", "hammer", "key", "feather", "sparkles", "skull", "shirt", "music", "map",
+] as const
+
+export type CustomInventoryIcon = (typeof customInventoryIcons)[number]
+
+export const defaultCustomInventoryIcon: CustomInventoryIcon = "backpack"
+
+export function customInventoryIcon(value: string | undefined): CustomInventoryIcon {
+  return (customInventoryIcons as readonly string[]).includes(value ?? "") ? value as CustomInventoryIcon : defaultCustomInventoryIcon
+}
+
+/** Une couleur « #rrggbb » (minuscules), ou "" si la valeur n'en est pas une. */
+export function customInventoryColor(value: string | undefined) {
+  const trimmed = (value ?? "").trim().toLowerCase()
+  if (/^#[0-9a-f]{6}$/.test(trimmed)) return trimmed
+  if (/^#[0-9a-f]{3}$/.test(trimmed)) return `#${[...trimmed.slice(1)].map((digit) => digit + digit).join("")}`
+  return ""
+}
+
+/** Les familles qu'un inventaire sur mesure peut accepter, et leur nom dans la feuille. */
+export const customInventoryFamilies = [
+  { category: "Armes", label: "Armes" },
+  { category: "Équipement", label: "Équipement" },
+  { category: "Inventaire", label: "Objets" },
+] as const satisfies ReadonlyArray<{ category: InventoryCategory; label: string }>
+
+export type CustomInventoryFamily = (typeof customInventoryFamilies)[number]["category"]
+
+export type CustomInventoryAccepts = { families: CustomInventoryFamily[]; keywords: string[] }
+
+function customFamilyOf(token: string): CustomInventoryFamily | null {
+  const normalized = plainCategory(token)
+  if (normalized === "arme" || normalized === "armes") return "Armes"
+  if (normalized === "equipement" || normalized === "equipements") return "Équipement"
+  if (normalized === "objet" || normalized === "objets") return "Inventaire"
+  return null
+}
+
+/**
+ * « Contenu accepté », tel qu'écrit dans la feuille : des familles (Armes, Équipement, Objets)
+ * et des mots-clés, séparés par « | ». Vide : tout sauf la monnaie. Exemple : « Objets | Potion ».
+ */
+export function parseCustomInventoryAccepts(raw: string | undefined): CustomInventoryAccepts {
+  const families: CustomInventoryFamily[] = []
+  const keywords: string[] = []
+  for (const token of (raw ?? "").split(/\s*[|,;\n]\s*/).map((part) => part.trim()).filter(Boolean)) {
+    const family = customFamilyOf(token)
+    if (family) { if (!families.includes(family)) families.push(family) }
+    else if (!keywords.some((keyword) => plainCategory(keyword) === plainCategory(token))) keywords.push(token.slice(0, 60))
+  }
+  return { families, keywords }
+}
+
+export function formatCustomInventoryAccepts(accepts: CustomInventoryAccepts) {
+  const families = customInventoryFamilies.filter((family) => accepts.families.includes(family.category)).map((family) => family.label)
+  // Un mot-clé en double, ou qui se lirait comme une famille (« objets »), est écarté.
+  const keywords = parseCustomInventoryAccepts(accepts.keywords.join(" | ")).keywords
+  return [...families, ...keywords].join(" | ")
+}
+
+/**
+ * Un item rangé exprès dans un inventaire sur mesure : jamais une monnaie ; de l'une des familles
+ * choisies (toutes sinon) ; et, s'il y a des mots-clés, l'un d'eux dans son nom, son type, son
+ * sous-type ou son genre.
+ */
+export function canItemGoInCustomInventory(item: { name?: string; genre?: string; type?: string; subtype?: string }, accepts: string) {
+  const family = compatibleInventoryCategory(inventoryKindOf(item))
+  if (family === "Bourse") return false
+  const rules = parseCustomInventoryAccepts(accepts)
+  const itemFamily: CustomInventoryFamily = family === "Armes" || family === "Équipement" ? family : "Inventaire"
+  if (rules.families.length && !rules.families.includes(itemFamily)) return false
+  if (!rules.keywords.length) return true
+  const text = plainCategory([item.name, item.type, item.subtype, item.genre].filter(Boolean).join(" "))
+  return rules.keywords.some((keyword) => text.includes(plainCategory(keyword)))
+}
+
+/** Un item peut-il être rangé exprès dans ce contenant (recherche, déplacement) ? */
+export function canItemGoInContainer(item: { name?: string; genre?: string; type?: string; subtype?: string }, container: { category: InventoryCategory; custom?: CustomInventoryLook }) {
+  return container.custom ? canItemGoInCustomInventory(item, container.custom.accepts) : canItemGoInInventoryCategory(inventoryKindOf(item), container.category)
+}
+
+/** « Accepte… » en quelques mots, sous le nom d'un inventaire sur mesure. */
+export function describeCustomInventoryAccepts(accepts: string) {
+  const rules = parseCustomInventoryAccepts(accepts)
+  const families = customInventoryFamilies.filter((family) => rules.families.includes(family.category)).map((family) => family.label.toLocaleLowerCase("fr"))
+  const some = families.length > 0 && families.length < customInventoryFamilies.length
+  const text = rules.keywords.length ? `${some ? families.join(", ") : "tout"} : ${rules.keywords.join(", ")}` : some ? `${families.join(", ")} seulement` : "tout sauf la monnaie"
+  return text.charAt(0).toLocaleUpperCase("fr") + text.slice(1)
 }
 
 export type CharacterInventoryRecord = {
@@ -177,8 +279,9 @@ export const inventoryWorkbookTabs = [
   },
   {
     name: "Contenants personnages",
-    headers: ["ID", "ID personnage", "ID type", "Nom personnalisé", "Catégorie", "Capacité", "Ordre", "Créé le", "Supprimé le"],
-    widths: [170, 190, 170, 220, 140, 110, 90, 170, 170],
+    // Couleur, Icône, Contenu accepté : ceux d'un inventaire sur mesure (vides pour les autres).
+    headers: ["ID", "ID personnage", "ID type", "Nom personnalisé", "Catégorie", "Capacité", "Ordre", "Créé le", "Supprimé le", "Couleur", "Icône", "Contenu accepté"],
+    widths: [170, 190, 170, 220, 140, 110, 90, 170, 170, 100, 120, 280],
   },
   {
     name: "Objets",

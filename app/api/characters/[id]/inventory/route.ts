@@ -37,6 +37,14 @@ async function authorizedCharacter(id: string) {
   return character ? { account, character } : null
 }
 
+/** Couleur, icône et contenu accepté d'un inventaire sur mesure, s'ils sont envoyés. */
+function customInventoryInput(value: unknown) {
+  if (!value || typeof value !== "object") return undefined
+  const custom = value as Record<string, unknown>
+  const text = (key: string) => typeof custom[key] === "string" ? custom[key] as string : undefined
+  return { color: text("color"), icon: text("icon"), accepts: text("accepts") }
+}
+
 async function transferableCampaignIds(authorization: NonNullable<Awaited<ReturnType<typeof authorizedCharacter>>>) {
   if (authorization.account.role !== "mj") return authorization.character.campaigns.map((campaign) => campaign.id)
   const allowed = await Promise.all(authorization.character.campaigns.map(async (campaign) => await getCampaignDashboard(authorization.account.uid, campaign.id).catch(() => null) ? campaign.id : ""))
@@ -93,9 +101,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (body.action === "add-container" && typeof body.typeId === "string") {
       inventory = await addCharacterInventoryContainer(id, body.typeId)
     } else if (body.action === "create-container" && typeof body.name === "string" && typeof body.category === "string" && typeof body.capacity === "number" && Number.isFinite(body.capacity)) {
-      inventory = await createCharacterInventoryContainer(id, { name: body.name, category: body.category, capacity: body.capacity })
+      inventory = await createCharacterInventoryContainer(id, { name: body.name, category: body.category, capacity: body.capacity, custom: customInventoryInput(body.custom) })
     } else if (body.action === "update-container" && typeof body.containerId === "string" && typeof body.name === "string" && typeof body.capacity === "number" && Number.isFinite(body.capacity)) {
-      inventory = await updateCharacterInventoryContainer(id, body.containerId, { name: body.name, capacity: body.capacity })
+      inventory = await updateCharacterInventoryContainer(id, body.containerId, { name: body.name, capacity: body.capacity, custom: customInventoryInput(body.custom) })
     } else if (body.action === "delete-container" && typeof body.containerId === "string") {
       inventory = await deleteCharacterInventoryContainer(id, body.containerId)
     } else if (body.action === "add-item" && typeof body.itemId === "string") {

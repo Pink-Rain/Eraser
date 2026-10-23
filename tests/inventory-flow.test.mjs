@@ -269,3 +269,35 @@ test("Le sac d'un PNJ : réuni une fois, sans doubler l'ancien inventaire ni tou
   const pairs = rowsOf(inventory, "Contenu inventaire").filter((row) => row["ID contenant"] === sack).map((row) => row["Emplacement"]);
   assert.equal(new Set(pairs).size, pairs.length);
 });
+
+test("Inventaire sur mesure : couleur, icône et contenu accepté gardés dans la feuille, rangement seulement exprès", async () => {
+  const { inventory } = await linkInventory();
+  await sheets.getCharacterInventory("PERSO-S");
+  // Une feuille d'avant : les trois colonnes s'ajoutent à droite, sans rien déplacer.
+  const created = await sheets.createCharacterInventoryContainer("PERSO-S", { name: "Trousse d'alchimie", category: "Armes", capacity: 3, custom: { color: "#6B4C9A", icon: "flask-conical", accepts: "Objets | potion" } });
+  const trousse = created.containers.find((container) => container.custom);
+  assert.equal(trousse.category, "Inventaire");
+  assert.deepEqual(trousse.custom, { color: "#6b4c9a", icon: "flask-conical", accepts: "Objets | potion" });
+  const headers = google.grid(inventory, "Contenants personnages")[0];
+  assert.deepEqual(headers.slice(0, 9), ["ID", "ID personnage", "ID type", "Nom personnalisé", "Catégorie", "Capacité", "Ordre", "Créé le", "Supprimé le"]);
+  const stored = rowsOf(inventory, "Contenants personnages").find((row) => row["ID"] === trousse.id);
+  assert.equal(stored["Couleur"], "#6b4c9a");
+  assert.equal(stored["Icône"], "flask-conical");
+  assert.equal(stored["Contenu accepté"], "Objets | potion");
+  // Seul ce qui correspond y entre : une potion oui, une corde non (même créée à la main).
+  await sheets.createCharacterInventoryItem("PERSO-S", trousse.id, { name: "Potion de soin", description: "", type: "Objet", subtype: "", effect: "" });
+  await assert.rejects(sheets.createCharacterInventoryItem("PERSO-S", trousse.id, { name: "Corde", description: "", type: "Objet", subtype: "", effect: "" }), /INVENTORY_ITEM_WRONG_CATEGORY/);
+  // Un objet ajouté sans contenant choisi ne va jamais dans un inventaire sur mesure.
+  const added = await sheets.addCharacterInventoryItem("PERSO-S", "OBJ-CORDE");
+  const corde = added.containers.flatMap((container) => container.slots.map((slot) => ({ container, slot }))).find(({ slot }) => slot.itemId === "OBJ-CORDE");
+  assert.ok(corde && !corde.container.custom);
+  await assert.rejects(sheets.moveCharacterInventoryItem("PERSO-S", corde.slot.id, trousse.id), /INVENTORY_NO_COMPATIBLE_CONTAINER/);
+  // Modifié : n'importe quel objet y entre désormais.
+  const edited = await sheets.updateCharacterInventoryContainer("PERSO-S", trousse.id, { name: "Besace", capacity: 4, custom: { color: "#397f88", icon: "inconnue", accepts: "" } });
+  assert.deepEqual(edited.containers.find((container) => container.id === trousse.id).custom, { color: "#397f88", icon: "backpack", accepts: "" });
+  const moved = await sheets.moveCharacterInventoryItem("PERSO-S", corde.slot.id, trousse.id);
+  assert.ok(moved.containers.find((container) => container.id === trousse.id).slots.some((slot) => slot.itemId === "OBJ-CORDE"));
+  // Une couleur invalide est refusée, rien n'est créé.
+  await assert.rejects(sheets.createCharacterInventoryContainer("PERSO-S", { name: "Sans couleur", category: "Inventaire", capacity: 2, custom: { color: "rouge" } }), /INVALID_INVENTORY_CONTAINER/);
+  assert.equal(rowsOf(inventory, "Contenants personnages").filter((row) => row["Nom personnalisé"] === "Sans couleur").length, 0);
+});

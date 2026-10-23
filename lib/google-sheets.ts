@@ -73,6 +73,11 @@ import {
   canItemBeAutoPlacedInInventoryCategory,
   inventoryKindOf,
   canItemGoInInventoryCategory,
+  canItemGoInCustomInventory,
+  customInventoryColor,
+  customInventoryIcon,
+  formatCustomInventoryAccepts,
+  parseCustomInventoryAccepts,
   GROUND_CATEGORY,
   inventoryCategories,
   isUnlimitedInventoryCategory,
@@ -6458,6 +6463,10 @@ type StoredInventoryContainer = {
   order: number
   createdAt: string
   deletedAt: string
+  /** Un inventaire sur mesure a une couleur ; les autres contenants laissent ces trois cases vides. */
+  color: string
+  icon: string
+  accepts: string
   rowNumber: number
 }
 
@@ -6818,6 +6827,9 @@ async function readInventoryWorkbook(includeCatalog = true, options: InventoryRe
       order: nonNegativeInteger(row[6], index),
       createdAt: row[7] || "",
       deletedAt: row[8] || "",
+      color: customInventoryColor(row[9]),
+      icon: row[10] || "",
+      accepts: row[11] || "",
       rowNumber: index + 2,
     }] : []),
     items,
@@ -6917,6 +6929,9 @@ function inventoryContainerRow(container: StoredInventoryContainer): SheetCell[]
     container.order,
     container.createdAt,
     container.deletedAt,
+    container.color,
+    container.icon,
+    container.accepts,
   ]
 }
 
@@ -6967,6 +6982,24 @@ function makeEmptyInventorySlot(characterId: string, containerId: string, index:
 
 function inventoryContainerCategory(container: StoredInventoryContainer, types: Map<string, InventoryContainerTypeRecord>): InventoryCategory {
   return parseInventoryCategory(container.category) ?? types.get(container.typeId)?.category ?? "Inventaire"
+}
+
+/** Un item rangé exprès dans ce contenant : un inventaire sur mesure suit son « Contenu accepté ». */
+function itemFitsInventoryContainer(item: { name?: string; genre?: string; type?: string; subtype?: string }, container: StoredInventoryContainer, types: Map<string, InventoryContainerTypeRecord>) {
+  return container.color ? canItemGoInCustomInventory(item, container.accepts) : canItemGoInInventoryCategory(inventoryKindOf(item), inventoryContainerCategory(container, types))
+}
+
+/** Rangement automatique (ajout sans contenant choisi, don) : jamais dans un inventaire sur mesure. */
+function itemAutoFitsInventoryContainer(item: { genre?: string; type?: string; subtype?: string }, container: StoredInventoryContainer, types: Map<string, InventoryContainerTypeRecord>) {
+  return !container.color && canItemBeAutoPlacedInInventoryCategory(inventoryKindOf(item), inventoryContainerCategory(container, types))
+}
+
+/** Couleur, icône et contenu accepté d'un inventaire sur mesure, vérifiés ; `null` si la couleur manque. */
+function customInventoryFields(input: { color?: string; icon?: string; accepts?: string } | undefined) {
+  const color = customInventoryColor(input?.color)
+  if (!color) return null
+  const accepts = formatCustomInventoryAccepts(parseCustomInventoryAccepts((input?.accepts ?? "").slice(0, 600)))
+  return { color, icon: customInventoryIcon(input?.icon), accepts }
 }
 
 const requiredInventoryCurrencies = ["Or", "Cuivre", "Or noir"]
@@ -7059,7 +7092,7 @@ async function ensureCampaignInventoryStorage(ownerId: string, includeCatalog = 
         capacity: 50,
         order: 0,
         createdAt: new Date().toISOString(),
-        deletedAt: "",
+        deletedAt: "", color: "", icon: "", accepts: "",
         rowNumber: 0,
       }
       await appendInventoryRows(workbook, inventoryContainerTab, [inventoryContainerRow(container)])
@@ -7134,7 +7167,7 @@ async function ensureCharacterInventoryStorage(characterId: string, includeCatal
           capacity: configuredType.capacity,
           order: nextOrder + index,
           createdAt: now,
-          deletedAt: "",
+          deletedAt: "", color: "", icon: "", accepts: "",
           rowNumber: 0,
         }
       })
@@ -7189,7 +7222,7 @@ async function ensureRowInventoryStorage(ownerId: string, category: InventoryCat
       const configuredType = workbook.containerTypes.find((type) => type.id === baseType.id) ?? baseType
       const created: StoredInventoryContainer = {
         id: crypto.randomUUID(), characterId: ownerId, typeId: configuredType.id, customName: category === "Inventaire" ? "Inventaire" : "",
-        category, capacity: configuredType.capacity, order: 0, createdAt: new Date().toISOString(), deletedAt: "", rowNumber: 0,
+        category, capacity: configuredType.capacity, order: 0, createdAt: new Date().toISOString(), deletedAt: "", color: "", icon: "", accepts: "", rowNumber: 0,
       }
       await appendInventoryRows(workbook, inventoryContainerTab, [inventoryContainerRow(created)])
       clearInventoryWorkbookCache()
@@ -7253,7 +7286,7 @@ async function ensureNpcBackpackInventoryStorage(npcId: string, includeCatalog =
     if (!state.backpack) {
       const created: StoredInventoryContainer = {
         id: crypto.randomUUID(), characterId: npcId, typeId: npcBackpackTypeId, customName: "Sac à dos",
-        category: "Inventaire", capacity: 15, order: 0, createdAt: now, deletedAt: "", rowNumber: 0,
+        category: "Inventaire", capacity: 15, order: 0, createdAt: now, deletedAt: "", color: "", icon: "", accepts: "", rowNumber: 0,
       }
       await appendInventoryRows(workbook, inventoryContainerTab, [inventoryContainerRow(created)])
       clearInventoryWorkbookCache()
@@ -7388,6 +7421,7 @@ function buildCharacterInventory(characterId: string, workbook: InventoryWorkboo
         isBase: baseInventoryTypeIds.has(container.typeId),
         used,
         slots,
+        ...(container.color ? { custom: { color: container.color, icon: customInventoryIcon(container.icon), accepts: container.accepts } } : {}),
       }
     })
   return {
@@ -7492,17 +7526,19 @@ export async function addCharacterInventoryContainer(characterId: string, typeId
       capacity: type.capacity,
       order: nextInventoryContainerOrder(characterId, workbook),
       createdAt: new Date().toISOString(),
-      deletedAt: "",
+      deletedAt: "", color: "", icon: "", accepts: "",
       rowNumber: 0,
     }))
   })
 }
 
-export async function createCharacterInventoryContainer(characterId: string, input: { name: string; category: string; capacity: number }) {
+export async function createCharacterInventoryContainer(characterId: string, input: { name: string; category: string; capacity: number; custom?: { color?: string; icon?: string; accepts?: string } }) {
   const name = input.name.trim()
-  const category = parseInventoryCategory(input.category)
+  const custom = input.custom ? customInventoryFields(input.custom) : null
+  // Un inventaire sur mesure est toujours un inventaire (une version plus ancienne y voit un sac).
+  const category = custom ? "Inventaire" : parseInventoryCategory(input.category)
   const capacity = Math.trunc(input.capacity)
-  if (!name || name.length > 120 || !category || category === GROUND_CATEGORY || !Number.isFinite(capacity) || capacity < 1 || capacity > 10000) {
+  if (!name || name.length > 120 || !category || category === GROUND_CATEGORY || (input.custom && !custom) || !Number.isFinite(capacity) || capacity < 1 || capacity > 10000) {
     throw new Error("INVALID_INVENTORY_CONTAINER")
   }
   return withInventoryLock(async () => {
@@ -7517,21 +7553,26 @@ export async function createCharacterInventoryContainer(characterId: string, inp
       order: nextInventoryContainerOrder(characterId, workbook),
       createdAt: new Date().toISOString(),
       deletedAt: "",
+      color: custom?.color ?? "",
+      icon: custom?.icon ?? "",
+      accepts: custom?.accepts ?? "",
       rowNumber: 0,
     }))
   })
 }
 
-export async function updateCharacterInventoryContainer(characterId: string, containerId: string, input: { name: string; capacity: number }) {
+export async function updateCharacterInventoryContainer(characterId: string, containerId: string, input: { name: string; capacity: number; custom?: { color?: string; icon?: string; accepts?: string } }) {
   return withInventoryLock(async () => {
     let workbook = await ensureCharacterInventoryStorage(characterId, true, { fresh: true })
     const container = workbook.containers.find((candidate) => candidate.id === containerId && candidate.characterId === characterId && !candidate.deletedAt)
     const name = input.name.trim()
     const capacity = Math.trunc(input.capacity)
-    if (!container || container.id === groundContainerOf(characterId, workbook)?.id || !name || name.length > 120 || !Number.isFinite(capacity) || capacity < 1 || capacity > 10000) {
+    // Couleur, icône et contenu : seulement pour un inventaire déjà sur mesure (le reste garde les siens).
+    const custom = input.custom && container?.color ? customInventoryFields(input.custom) : null
+    if (!container || container.id === groundContainerOf(characterId, workbook)?.id || !name || name.length > 120 || (input.custom && container.color && !custom) || !Number.isFinite(capacity) || capacity < 1 || capacity > 10000) {
       throw new Error("INVALID_INVENTORY_CONTAINER")
     }
-    workbook = await writeInventoryChanges(workbook, { containers: [[container, { ...container, customName: name, capacity }]] })
+    workbook = await writeInventoryChanges(workbook, { containers: [[container, { ...container, customName: name, capacity, ...(custom ?? {}) }]] })
     const updated = workbook.containers.find((candidate) => candidate.id === container.id)
     if (updated && await appendMissingInventorySlots(workbook, [updated])) workbook = await readInventoryWorkbook(true, { fresh: true })
     return buildCharacterInventory(characterId, workbook)
@@ -7606,12 +7647,10 @@ export async function addCharacterInventoryItem(characterId: string, itemId: str
     let containers = activeInventoryContainers(characterId, workbook)
       .filter((container) => {
         if (isCampaignInventoryOwner(characterId)) return true
-        const category = inventoryContainerCategory(container, typeById)
         // Le genre de l'item (colonne « Genre ») décide de sa famille ; sinon son type.
-        const itemType = inventoryKindOf(item)
         return container.id === requestedContainerId
-          ? canItemGoInInventoryCategory(itemType, category)
-          : canItemBeAutoPlacedInInventoryCategory(itemType, category)
+          ? itemFitsInventoryContainer(item, container, typeById)
+          : itemAutoFitsInventoryContainer(item, container, typeById)
       })
       .sort((left, right) => left.order - right.order)
     const rowCategory = rowInventoryCategory(mode)
@@ -7696,8 +7735,9 @@ export async function createCharacterInventoryItem(
     const name = input.name.trim()
     const type = input.type.trim() || "Objet"
     if (!container || !name || name.length > 160 || input.description.length > 1200 || input.effect.length > 1200) throw new Error("INVALID_INVENTORY_ITEM")
-    const category = inventoryContainerCategory(container, new Map(workbook.containerTypes.map((candidate) => [candidate.id, candidate])))
-    if (!isCampaignInventoryOwner(characterId) && !canItemGoInInventoryCategory(`${type} ${input.subtype}`, category)) throw new Error("INVENTORY_ITEM_WRONG_CATEGORY")
+    const typeById = new Map(workbook.containerTypes.map((candidate) => [candidate.id, candidate]))
+    const category = inventoryContainerCategory(container, typeById)
+    if (!isCampaignInventoryOwner(characterId) && !itemFitsInventoryContainer({ name, type, subtype: input.subtype }, container, typeById)) throw new Error("INVENTORY_ITEM_WRONG_CATEGORY")
     let target = isUnlimitedInventoryCategory(category) ? undefined : workbook.contents
       .filter((content) => content.containerId === container.id && content.index <= container.capacity)
       .sort((left, right) => left.index - right.index)
@@ -7797,8 +7837,8 @@ export async function updateCharacterInventoryItem(characterId: string, slotId: 
     if (!content || !container || (!content.itemId && !content.customName) || !name || name.length > 160 || input.description.length > 1200 || input.effect.length > 1200) {
       throw new Error("INVALID_INVENTORY_ITEM")
     }
-    const category = inventoryContainerCategory(container, new Map(workbook.containerTypes.map((candidate) => [candidate.id, candidate])))
-    if (!isCampaignInventoryOwner(characterId) && !canItemGoInInventoryCategory(`${type} ${input.subtype}`, category)) throw new Error("INVENTORY_ITEM_WRONG_CATEGORY")
+    const typeById = new Map(workbook.containerTypes.map((candidate) => [candidate.id, candidate]))
+    if (!isCampaignInventoryOwner(characterId) && !itemFitsInventoryContainer({ name, type, subtype: input.subtype }, container, typeById)) throw new Error("INVENTORY_ITEM_WRONG_CATEGORY")
     return buildCharacterInventory(characterId, await writeInventoryChanges(workbook, { contents: [[content, {
       ...content,
       customName: name,
@@ -7848,7 +7888,7 @@ export async function moveCharacterInventoryItem(characterId: string, slotId: st
     if (!sourceItem) throw new Error("INVENTORY_ITEM_NOT_FOUND")
     const typeById = new Map(workbook.containerTypes.map((type) => [type.id, type]))
     const targetContainer = workbook.containers.find((container) => container.id === targetContainerId && container.characterId === characterId && !container.deletedAt)
-    if (!targetContainer || (!isCampaignInventoryOwner(characterId) && !canItemGoInInventoryCategory(inventoryKindOf(sourceItem), inventoryContainerCategory(targetContainer, typeById)))) {
+    if (!targetContainer || (!isCampaignInventoryOwner(characterId) && !itemFitsInventoryContainer(sourceItem, targetContainer, typeById))) {
       throw new Error("INVENTORY_NO_COMPATIBLE_CONTAINER")
     }
     const targetCategory = inventoryContainerCategory(targetContainer, typeById)
@@ -7896,7 +7936,7 @@ export async function transferCharacterInventoryItem(sourceId: string, slotId: s
     if (!sourceItem) throw new Error("INVENTORY_ITEM_NOT_FOUND")
     const typeById = new Map(workbook.containerTypes.map((type) => [type.id, type]))
     const containers = activeInventoryContainers(targetId, workbook)
-      .filter((container) => isCampaignInventoryOwner(targetId) || canItemBeAutoPlacedInInventoryCategory(inventoryKindOf(sourceItem), inventoryContainerCategory(container, typeById)))
+      .filter((container) => isCampaignInventoryOwner(targetId) || itemAutoFitsInventoryContainer(sourceItem, container, typeById))
       .sort((left, right) => left.order - right.order)
     const ground = targetMode === "character" ? groundContainerOf(targetId, workbook) : undefined
     if (!containers.length && !ground) throw new Error("INVENTORY_NO_COMPATIBLE_CONTAINER")
