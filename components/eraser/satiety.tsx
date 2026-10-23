@@ -16,31 +16,37 @@ import {
 } from "@/lib/satiety"
 import { cn } from "@/lib/utils"
 
-/** Une cuisse de poulet (le dessin de Lucide) : la viande se remplit quand la charge est pleine. */
-function Drumstick({ filled, className }: { filled: boolean; className?: string }) {
-  return <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill="none" stroke="currentColor" strokeWidth={filled ? 1.6 : 1.8} strokeLinecap="round" strokeLinejoin="round">
-    <path d="M15.4 15.63a7.875 6 135 1 1 6.23-6.23 4.3 3.36 135 0 0-6.23 6.23" fill={filled ? "currentColor" : "none"} />
+/** Une cuisse de poulet (le dessin de Lucide), en motif dans un segment de la barre. */
+function Drumstick({ className }: { className?: string }) {
+  return <svg viewBox="0 0 24 24" aria-hidden="true" className={className} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M15.4 15.63a7.875 6 135 1 1 6.23-6.23 4.3 3.36 135 0 0-6.23 6.23" fill="currentColor" fillOpacity={0.35} />
     <path d="m8.29 12.71-2.6 2.6a2.5 2.5 0 1 0-1.65 4.65A2.5 2.5 0 1 0 8.7 18.3l2.59-2.59" />
   </svg>
 }
 
 /**
- * Les cinq charges de rassasiement. Comme les charges d'un sort : cliquer une cuisse pleine
- * vide la barre jusqu'à elle comprise, cliquer une cuisse vide la remplit jusqu'à elle.
- * La teinte suit la barre : rouge vide, vert pleine.
+ * Les cinq charges de rassasiement, en une jauge à segments. C'est la barre qui prend la
+ * teinte (rouge doux vide, vert sauge pleine) : la piste en garde un voile même vide, les
+ * segments pleins la portent entière. Comme les charges d'un sort : cliquer un segment plein
+ * vide la barre jusqu'à lui compris, cliquer un segment vide la remplit jusqu'à lui.
  */
 export function SatietyBar({ charges, onChange, size = "md", className }: { charges: number; onChange?: (value: number) => void; size?: "sm" | "md"; className?: string }) {
   const available = boundedCharges(charges)
   const color = satietyColor(available)
-  const icon = size === "sm" ? "size-4" : "size-5"
-  return <span className={cn("inline-flex items-center", size === "sm" ? "gap-0" : "gap-0.5", className)} style={{ color }} role={onChange ? "group" : "img"} aria-label={`Rassasiement : ${available} charge${available > 1 ? "s" : ""} sur ${SATIETY_MAX} (${satietyLabel(available)})`} title={`${satietyLabel(available)} · ${available}/${SATIETY_MAX}`}>
+  const small = size === "sm"
+  return <span className={cn("flex overflow-hidden rounded-full shadow-[inset_0_1px_2px_rgb(0_0_0/0.16)] transition-colors duration-300", small ? "h-2.5 gap-px p-px" : "h-6 gap-[3px] p-[3px]", className)}
+    style={{ backgroundColor: `color-mix(in oklab, ${color} 16%, var(--muted))` }}
+    role={onChange ? "group" : "img"} aria-label={`Rassasiement : ${available} charge${available > 1 ? "s" : ""} sur ${SATIETY_MAX} (${satietyLabel(available)})`} title={`${satietyLabel(available)} · ${available}/${SATIETY_MAX}`}>
     {Array.from({ length: SATIETY_MAX }, (_, index) => {
       const filled = index < available
-      if (!onChange) return <span key={index} className={cn("inline-flex", !filled && "opacity-35")}><Drumstick filled={filled} className={icon} /></span>
+      const segment = cn("flex min-w-0 flex-1 items-center justify-center rounded-full transition-[background-color,color,filter] duration-300", filled ? "text-white/80 shadow-[inset_0_1px_0_rgb(255_255_255/0.25)]" : "text-foreground/15")
+      const style = filled ? { background: `linear-gradient(180deg, color-mix(in oklab, ${color} 82%, white), ${color})` } : undefined
+      const glyph = small ? null : <Drumstick className="size-3.5" />
+      if (!onChange) return <span key={index} className={segment} style={style}>{glyph}</span>
       return <button key={index} type="button" onClick={(event) => { event.stopPropagation(); onChange(nextSpellChargeValue(SATIETY_MAX, available, index)) }}
-        className={cn("inline-flex rounded-sm p-0.5 transition hover:scale-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1", filled ? "opacity-100" : "opacity-35 hover:opacity-70")}
+        className={cn(segment, "outline-none hover:brightness-110 focus-visible:ring-2 focus-visible:ring-ring/60", !filled && "hover:bg-foreground/6 hover:text-foreground/30")} style={style}
         aria-label={filled ? `Vider jusqu’à la charge ${index + 1}` : `Remplir jusqu’à la charge ${index + 1}`}>
-        <Drumstick filled={filled} className={icon} />
+        {glyph}
       </button>
     })}
   </span>
@@ -64,7 +70,7 @@ export async function sendSatiety(body: { characterIds: string[]; action: Satiet
  * (le dernier choix est retenu sur ce poste). `preview` : les charges actuelles, pour
  * montrer « 3 → 2 » quand il n'y a qu'un personnage.
  */
-export function RestButton({ onRest, campaigns = [], campaignKey, preview, title = "Passer le temps", subtitle, label, disabled = false, className }: {
+export function RestButton({ onRest, campaigns = [], campaignKey, preview, title = "Passer le temps", subtitle, label, disabled = false, align = "start", className }: {
   onRest: (rest: SatietyRest) => Promise<unknown> | void
   campaigns?: SatietyCampaign[]
   /** Où retenir la dernière campagne choisie (une par personnage). */
@@ -75,6 +81,8 @@ export function RestButton({ onRest, campaigns = [], campaignKey, preview, title
   /** Un texte à côté de la lune (bouton global) ; sans texte, la lune seule. */
   label?: string
   disabled?: boolean
+  /** Le côté du bouton où s'aligne la fenêtre (« end » : elle s'ouvre vers la gauche). */
+  align?: "start" | "end"
   className?: string
 }) {
   const [open, setOpen] = useState(false)
@@ -103,11 +111,11 @@ export function RestButton({ onRest, campaigns = [], campaignKey, preview, title
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>
       <button type="button" disabled={disabled} title={title} aria-label={label ? undefined : title}
-        className={cn("inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full border border-indigo-400/35 bg-indigo-500/10 text-indigo-700 transition hover:border-indigo-400/70 hover:bg-indigo-500/18 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 dark:text-indigo-200", label ? "h-8 px-3 text-xs font-medium" : "size-7", className)}>
-        <Moon className={label ? "size-3.5" : "size-3.5"} />{label}
+        className={cn("inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full border bg-background/60 text-muted-foreground transition hover:border-primary/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50", label ? "h-8 px-3 text-xs font-medium" : "size-7", className)}>
+        <Moon className="size-3.5 text-indigo-500/80 dark:text-indigo-300/80" />{label}
       </button>
     </PopoverTrigger>
-    <PopoverContent align="start" className="w-64 p-3" onClick={(event) => event.stopPropagation()}>
+    <PopoverContent align={align} className="w-64 p-3" onClick={(event) => event.stopPropagation()}>
       <p className="flex items-center gap-1.5 font-display text-sm font-semibold"><Moon className="size-3.5 text-indigo-500" />{title}</p>
       {subtitle && <p className="text-[11px] text-muted-foreground">{subtitle}</p>}
       <div className="mt-2 flex gap-1 rounded-lg bg-muted p-1">{choice("night", "Passer une nuit")}{choice("ellipse", "Ellipse")}</div>
@@ -125,7 +133,7 @@ export function RestButton({ onRest, campaigns = [], campaignKey, preview, title
       </label>}
       <p className="mt-2.5 rounded-md bg-muted/60 px-2 py-1.5 text-[11px] text-muted-foreground">
         {describeRest(rest)}
-        {preview !== undefined && <span className="mt-0.5 flex items-center gap-1.5 text-foreground"><SatietyBar charges={preview} size="sm" /><span aria-hidden>→</span><SatietyBar charges={chargesAfterRest(preview, rest)} size="sm" /></span>}
+        {preview !== undefined && <span className="mt-1.5 flex items-center gap-2 text-foreground"><SatietyBar charges={preview} size="sm" className="flex-1" /><span aria-hidden className="text-muted-foreground">→</span><SatietyBar charges={chargesAfterRest(preview, rest)} size="sm" className="flex-1" /></span>}
       </p>
       <Button type="button" size="sm" className="mt-2.5 w-full" disabled={busy} onClick={() => void confirm()}>{busy && <LoaderCircle className="size-3.5 animate-spin" />}Valider</Button>
     </PopoverContent>
@@ -214,17 +222,20 @@ export function useCharacterSatiety(characterId: string) {
 export function CharacterSatietyPanel({ characterId, campaigns }: { characterId: string; campaigns: SatietyCampaign[] }) {
   const { state, available, error, act, clearError } = useCharacterSatiety(characterId)
   const charges = state?.charges ?? SATIETY_MAX
-  return <div className="rounded-xl border bg-background/40 px-2.5 py-2">
-    <div className="flex items-center justify-between gap-2">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Barre de rassasiement</p>
+  return <div className="mt-2 grid min-w-0 gap-1.5">
+    {/* Le titre reste centré : une case vide à gauche équilibre la lune à droite. */}
+    <div className="grid grid-cols-[1.5rem_minmax(0,1fr)_1.5rem] items-center gap-1">
+      <span aria-hidden />
+      {/* La colonne du portrait est étroite sur un petit écran : le titre court y tient. */}
+      <p className="truncate text-center text-[10px] font-semibold uppercase tracking-[.14em] text-muted-foreground" title="Barre de rassasiement"><span className="lg:hidden">Rassasiement</span><span className="hidden lg:inline">Barre de rassasiement</span></p>
+      <RestButton className="size-6" align="end" disabled={!available} preview={charges} campaigns={campaigns} campaignKey={characterId} title="Nuit ou ellipse" onRest={(rest) => act({ kind: "rest", ...rest })} />
     </div>
-    <div className={cn("mt-1 flex items-center justify-between gap-2", !state && available && "opacity-60")}>
+    <div className={cn("transition-opacity", !state && available && "opacity-60")}>
       {available
         ? <SatietyBar charges={charges} onChange={(value) => void act({ kind: "set", charges: value }).catch(() => {})} />
-        : <span className="text-[11px] text-muted-foreground">Serveur partagé injoignable.</span>}
-      <RestButton disabled={!available} preview={charges} campaigns={campaigns} campaignKey={characterId} title="Nuit ou ellipse" onRest={(rest) => act({ kind: "rest", ...rest })} />
+        : <p className="text-center text-[11px] text-muted-foreground">Serveur partagé injoignable.</p>}
     </div>
-    {error && <p className="mt-1 text-[11px] text-destructive" role="alert">{error} <button type="button" onClick={clearError} className="underline underline-offset-2">OK</button></p>}
+    {error && <p className="text-center text-[11px] text-destructive" role="alert">{error} <button type="button" onClick={clearError} className="underline underline-offset-2">OK</button></p>}
   </div>
 }
 

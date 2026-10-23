@@ -210,7 +210,7 @@ export function CampaignGroupTable({ members: initialMembers, campaignId }: { me
             <td className="px-3 py-2.5"><HpBar current={member.currentHp} total={member.totalHp} life={member.life} /></td>
             <td className="px-3 py-2.5">{member.satiety ? <span className="grid gap-0.5">
               <span className="flex items-center gap-1.5">
-                <SatietyBar size="sm" charges={member.satiety.charges} onChange={(value) => void changeSatiety([member.id], { kind: "set", charges: value }).catch(() => {})} />
+                <SatietyBar size="sm" className="w-24" charges={member.satiety.charges} onChange={(value) => void changeSatiety([member.id], { kind: "set", charges: value }).catch(() => {})} />
                 <RestButton className="size-6" title={`Nuit ou ellipse · ${member.name}`} preview={member.satiety.charges} onRest={(rest) => changeSatiety([member.id], { kind: "rest", ...rest, campaignId })} />
               </span>
               <span className="text-[11px] tabular-nums text-muted-foreground">{daysLabel(member.satiety.days)}</span>

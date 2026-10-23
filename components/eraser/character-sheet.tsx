@@ -1711,8 +1711,8 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
           <input type="file" accept="image/*" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; void changePortrait(file) }} />
         </label>
         <TokenButton kind="character" ownerId={character.id} name={values[0] || character.name} source={values[characterNarrativeStart + 1] || ""} style={{ kind: "character" }} disabledReason={values[characterNarrativeStart + 1] ? "" : "Ajoute d’abord un portrait"} />
-        <CharacterStatesPanel states={postedStates} autoStates={[...formStates, ...autoLife.auto]} autoSources={formStateSources} onAutoLevel={setFormStateLevel} catalog={statesCatalog.catalog} loaded={statesCatalog.loaded} error={statesCatalog.error} onChange={updateStates} onRoll={rollStateEffect} />
         <CharacterSatietyPanel characterId={character.id} campaigns={character.campaigns} />
+        <CharacterStatesPanel states={postedStates} autoStates={[...formStates, ...autoLife.auto]} autoSources={formStateSources} onAutoLevel={setFormStateLevel} catalog={statesCatalog.catalog} loaded={statesCatalog.loaded} error={statesCatalog.error} onChange={updateStates} onRoll={rollStateEffect} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start justify-between gap-3">

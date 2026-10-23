@@ -55,8 +55,8 @@ test("une action envoyée par la page est vérifiée", () => {
 });
 
 test("la barre passe du rouge (vide) au vert (pleine)", () => {
-  assert.equal(satiety.satietyColor(0), "#dc2626");
-  assert.equal(satiety.satietyColor(5), "#16a34a");
+  assert.equal(satiety.satietyColor(0), "#b4635c");
+  assert.equal(satiety.satietyColor(5), "#6c9a76");
   assert.equal(new Set([0, 1, 2, 3, 4, 5].map(satiety.satietyColor)).size, 6);
   assert.equal(satiety.describeRest({ mode: "night", meal: null }), "Nuit sans repas : −1 charge");
   assert.equal(satiety.describeRest({ mode: "ellipse", days: 3, meal: "moyen" }), "Ellipse de 3 jours · moyen repas : +3 charges");

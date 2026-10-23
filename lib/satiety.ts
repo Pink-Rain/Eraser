@@ -113,8 +113,8 @@ export function parseSatietyAction(raw: unknown): SatietyAction | null {
   }
 }
 
-/** La teinte de la barre : rouge vide, vert pleine, en passant par l'orange et le jaune. */
-const satietyColors = ["#dc2626", "#ea580c", "#f59e0b", "#eab308", "#84cc16", "#16a34a"] as const
+/** La teinte de la barre, peu saturée : rouge terre cuite vide, vert sauge pleine, par l'ocre et l'olive. */
+const satietyColors = ["#b4635c", "#bf7f5c", "#c49a5c", "#b3a861", "#8fa86a", "#6c9a76"] as const
 
 export function satietyColor(charges: number) {
   return satietyColors[boundedCharges(charges)]
