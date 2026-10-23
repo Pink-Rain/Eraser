@@ -124,6 +124,17 @@ export function parseCompanions(raw: unknown): Companion[] {
   })
 }
 
+/** Le token d'une créature compagnon : la sienne, propre au personnage (« companion:PER-1:abc »). */
+export function companionTokenId(characterId: string, companionId: string) {
+  return `companion:${characterId}:${companionId}`
+}
+
+/** Le personnage et le compagnon d'un token de créature compagnon ; `null` pour un autre token. */
+export function companionOfTokenId(tokenId: string) {
+  const match = tokenId.match(/^companion:([^:]+):([^:]+)$/)
+  return match ? { characterId: match[1], companionId: match[2] } : null
+}
+
 /** Le propriétaire du sac à dos d'une créature compagnon, dans le classeur d'inventaire. */
 export function companionInventoryOwnerId(characterId: string, companionId: string) {
   return `COMPAGNON:${characterId}:${companionId}`

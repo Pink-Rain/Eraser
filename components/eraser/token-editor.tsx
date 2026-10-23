@@ -144,16 +144,25 @@ async function loadEditableImage(source: string) {
   return { image, release: () => { if (objectUrl) URL.revokeObjectURL(objectUrl) } }
 }
 
-/** Le cadre et le cadrage enregistrés avec le token ; rien si le serveur ne répond pas. */
+/**
+ * Le cadre et le cadrage enregistrés avec le token, et pour un PNJ s'il est le compagnon d'un
+ * personnage (son cadre par défaut change) ; rien si le serveur ne répond pas.
+ */
 async function loadSavedChoice(kind: TokenKind, ownerId: string) {
+  const none = { frame: null, framing: null, companion: false }
   try {
     const response = await fetch(`/api/tokens/${kind}/${encodeURIComponent(ownerId)}/frame`, { cache: "no-store" })
-    if (!response.ok) return { frame: null, framing: null }
-    const payload = (await response.json()) as { frame?: string | null; framing?: unknown }
-    return { frame: payload.frame ?? null, framing: cleanPortraitFraming(payload.framing) }
+    if (!response.ok) return none
+    const payload = (await response.json()) as { frame?: string | null; framing?: unknown; companion?: boolean }
+    return { frame: payload.frame ?? null, framing: cleanPortraitFraming(payload.framing), companion: payload.companion === true }
   } catch {
-    return { frame: null, framing: null }
+    return none
   }
+}
+
+/** Un PNJ compagnon d'un personnage prend le cadre par défaut des compagnons. */
+function withCompanion(subject: TokenSubject, companion: boolean): TokenSubject {
+  return companion && subject.kind === "npc" && !subject.companion ? { ...subject, companion: true } : subject
 }
 
 /* ---------- choix du cadre ---------- */
@@ -230,7 +239,7 @@ function subjectDescription(subject: TokenSubject, frame: TokenFrame) {
   return subject.kind === "character" ? `Choisis ton bleu vif. ${move}` : `Choisis le cadre. ${move}`
 }
 
-export function TokenEditorDialog({ open, kind, ownerId, name, source, style, onClose, onSaved }: {
+export function TokenEditorDialog({ open, kind, ownerId, name, source, style, companionOf = "", onClose, onSaved }: {
   open: boolean
   kind: TokenKind
   ownerId: string
@@ -238,13 +247,17 @@ export function TokenEditorDialog({ open, kind, ownerId, name, source, style, on
   /** L'avatar à cadrer. Vide pour un magasin sans vendeur. */
   source: string
   style: TokenStyle
+  /** Le personnage dont ce PNJ ou cette créature est le compagnon (son joueur peut en faire le token). */
+  companionOf?: string
   onClose: () => void
   onSaved: (url: string) => void
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const frames = tokenFramesFor(style)
+  const [companion, setCompanion] = useState(false)
+  const subject = withCompanion(style, companion)
+  const frames = tokenFramesFor(subject)
   const [frameId, setFrameId] = useState(() => defaultTokenFrameId(style))
-  const frame = resolveTokenFrame(style, frameId)
+  const frame = resolveTokenFrame(subject, frameId)
   const interior = style.kind === "shop" && !source ? shopInterior(style.shopKey) : ""
   const [image, setImage] = useState<HTMLImageElement | null>(null)
   const [placement, setPlacement] = useState<Placement>({ x: CENTER, y: CENTER, width: frame.radius * 2 })
@@ -272,7 +285,8 @@ export function TokenEditorDialog({ open, kind, ownerId, name, source, style, on
       .then(([choice, loaded]) => {
         if (loaded) release = loaded.release
         if (!alive) return release()
-        const chosen = resolveTokenFrame(JSON.parse(subjectKey) as TokenSubject, choice.frame)
+        const chosen = resolveTokenFrame(withCompanion(JSON.parse(subjectKey) as TokenSubject, choice.companion), choice.frame)
+        setCompanion(choice.companion)
         setFrameId(chosen.id)
         setImage(loaded?.image ?? null)
         if (loaded) setPlacement(choice.framing ? placementFromFraming(choice.framing, loaded.image, chosen.radius) : coverPlacement(loaded.image, chosen.radius))
@@ -347,6 +361,7 @@ export function TokenEditorDialog({ open, kind, ownerId, name, source, style, on
       const form = new FormData()
       form.append("token", new File([blob], "token.png", { type: "image/png" }))
       form.append("frame", frame.id)
+      if (companionOf) form.append("character", companionOf)
       // Le cadrage choisi ici recadre aussi l'avatar dans les cartes et les vignettes.
       const framing = image ? framingFromPlacement(placement, image.naturalHeight / image.naturalWidth, SIZE, frame.radius) : null
       if (framing) form.append("framing", JSON.stringify(framing))
@@ -366,7 +381,7 @@ export function TokenEditorDialog({ open, kind, ownerId, name, source, style, on
     <DialogContent className={cn("max-h-[calc(100svh-2rem)] overflow-y-auto", picker ? "sm:max-w-3xl" : "sm:max-w-md")} onOpenAutoFocus={(event) => event.preventDefault()}>
       <DialogHeader>
         <DialogTitle>Token de {name || "ce personnage"}</DialogTitle>
-        <DialogDescription>{subjectDescription(style, frame)}</DialogDescription>
+        <DialogDescription>{subjectDescription(subject, frame)}</DialogDescription>
       </DialogHeader>
       <div className={cn("grid gap-4", picker && "md:grid-cols-[minmax(0,19rem)_minmax(0,1fr)]")}>
         <div className="grid content-start gap-3">
@@ -394,7 +409,7 @@ export function TokenEditorDialog({ open, kind, ownerId, name, source, style, on
           </div>
           {!source && style.kind !== "shop" && <p className="text-xs text-muted-foreground">Ajoute d’abord un avatar pour le cadrer.</p>}
         </div>
-        {picker && <FramePicker frames={frames} subject={style} frameId={frame.id} imageUrl={image?.src ?? ""} placement={image ? placement : null} radius={frame.radius} onChoose={chooseFrame} />}
+        {picker && <FramePicker frames={frames} subject={subject} frameId={frame.id} imageUrl={image?.src ?? ""} placement={image ? placement : null} radius={frame.radius} onChoose={chooseFrame} />}
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex justify-end gap-2">
@@ -406,12 +421,14 @@ export function TokenEditorDialog({ open, kind, ownerId, name, source, style, on
 }
 
 /** Le bouton discret « Token », placé sous un avatar. */
-export function TokenButton({ kind, ownerId, name, source, style, className, disabledReason = "" }: {
+export function TokenButton({ kind, ownerId, name, source, style, companionOf, className, disabledReason = "" }: {
   kind: TokenKind
   ownerId: string
   name: string
   source: string
   style: TokenStyle
+  /** Le personnage dont c'est le compagnon (voir `TokenEditorDialog`). */
+  companionOf?: string
   className?: string
   disabledReason?: string
 }) {
@@ -426,6 +443,6 @@ export function TokenButton({ kind, ownerId, name, source, style, className, dis
         : <CircleDot className="size-4" />}
       Token
     </Button>
-    {open && <TokenEditorDialog open kind={kind} ownerId={ownerId} name={name} source={source} style={style} onClose={() => setOpen(false)} onSaved={() => { setHasToken(true); setVersion(Date.now()) }} />}
+    {open && <TokenEditorDialog open kind={kind} ownerId={ownerId} name={name} source={source} style={style} companionOf={companionOf} onClose={() => setOpen(false)} onSaved={() => { setHasToken(true); setVersion(Date.now()) }} />}
   </>
 }

@@ -9,8 +9,10 @@ import { CharacterInventory } from "@/components/eraser/character-inventory"
 import { IndexRichText } from "@/components/eraser/index-references"
 import { InlineEdit } from "@/components/eraser/inline-edit"
 import { SpellPicker, useSpellOptions, type SpellOption } from "@/components/eraser/spell-picker"
+import { TokenButton } from "@/components/eraser/token-editor"
 import { characteristicColor, characteristicOrder, npcCharacteristicKeys } from "@/lib/characteristics"
 import {
+  companionTokenId,
   creatureCompanionFrom,
   type Companion,
   type CompanionStats,
@@ -179,8 +181,10 @@ type SheetFields = CompanionStats & { notes: string; activeSpells: string; passi
  * La mini-fiche d'un compagnon, la même pour un PNJ et une créature : vie, caractéristiques,
  * sorts, notes et sac à dos. Chaque case s'enregistre en la quittant.
  */
-function CompanionSheet({ characterId, companionId, color, kindLabel, name, subtitle, portrait, fields, description, spells, onName, onChange, onRemove, nameHint, charges, onCharge }: {
+function CompanionSheet({ characterId, companionId, color, kindLabel, name, subtitle, portrait, token, fields, description, spells, onName, onChange, onRemove, nameHint, charges, onCharge }: {
   characterId: string
+  /** Son token : celui du PNJ (le même que chez le MJ) ou celui de la créature, propre au personnage. */
+  token: { kind: "npc" | "creature"; ownerId: string }
   /** Les sorts que ce compagnon peut prendre (`options`), et tous ceux dont on sait montrer la fiche (`known`). */
   spells: { options: SpellOption[]; known: SpellOption[]; loading: boolean }
   companionId: string
@@ -209,7 +213,10 @@ function CompanionSheet({ characterId, companionId, color, kindLabel, name, subt
 
   return <article className="overflow-hidden rounded-2xl border bg-card/80 shadow-sm" style={{ borderColor: `${color}55` }}>
     <header className="flex items-start gap-4 px-4 py-4 sm:px-5" style={{ background: `linear-gradient(135deg, ${color}26, transparent 70%)` }}>
-      <Avatar src={portrait} color={color} fallback={kindLabel === "PNJ" ? <UserRound className="size-6" /> : <PawPrint className="size-6" />} />
+      <div className="grid shrink-0 justify-items-center gap-1">
+        <Avatar src={portrait} color={color} fallback={kindLabel === "PNJ" ? <UserRound className="size-6" /> : <PawPrint className="size-6" />} />
+        <TokenButton kind={token.kind} ownerId={token.ownerId} name={name} source={isImageSource(portrait) ? portrait : ""} style={token.kind === "npc" ? { kind: "npc", companion: true } : { kind: "creature", companion: true }} companionOf={characterId} className="h-7 w-auto px-2 text-xs" disabledReason={isImageSource(portrait) ? "" : "Ajoute d’abord une image"} />
+      </div>
       <div className="min-w-0 flex-1">
         <p className="text-[10px] font-semibold uppercase tracking-[.2em]" style={{ color }}>{kindLabel}</p>
         {onName
@@ -324,6 +331,7 @@ export function CharacterCompanions({ characterId, companions, onChange }: { cha
             nameHint={companion.name !== companion.sourceName ? `${companion.sourceName} de l’Index des créatures` : undefined}
             subtitle={[companion.name !== companion.sourceName ? companion.sourceName : "", companion.creatureType, companion.rank && `Rang ${companion.rank}`].filter(Boolean).join(" · ")}
             portrait={companion.portrait}
+            token={{ kind: "creature", ownerId: companionTokenId(characterId, companion.id) }}
             fields={companion}
             description={companion.description}
             spells={creatureSpells}
@@ -349,6 +357,7 @@ export function CharacterCompanions({ characterId, companions, onChange }: { cha
           nameHint="Le nom d’un PNJ se change avec le MJ"
           subtitle={[npc.title, npc.occupation, npc.people].filter(Boolean).join(" · ")}
           portrait={npc.portrait}
+          token={{ kind: "npc", ownerId: npc.id }}
           fields={{
             currentHp: npc.currentHp, totalHp: npc.totalHp, speed: npc.speed, strength: npc.strength, dexterity: npc.dexterity,
             intelligence: npc.intelligence, wisdom: npc.wisdom, charisma: npc.charisma,

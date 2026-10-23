@@ -4,9 +4,31 @@ import { getCharacterForUser } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
 import { savePortraitFraming } from "@/lib/portrait-framing"
 import { cleanPortraitFraming } from "@/lib/portrait-framing-shared"
-import { isTokenKind, readToken, saveToken, saveTokenFrame, validTokenOwnerId } from "@/lib/tokens"
+import { authorizedCompanionCharacter, companionNpc, findCompanion } from "@/lib/companion-access"
+import { companionOfTokenId } from "@/lib/companions"
+import { isTokenKind, readToken, saveToken, saveTokenFrame, validTokenOwnerId, type TokenKind } from "@/lib/tokens"
 
 type Params = { params: Promise<{ kind: string; id: string }> }
+
+/**
+ * Le MJ et l'administrateur préparent tous les tokens. Un joueur prépare celui de ses
+ * personnages et de leurs compagnons : une créature compagnon (son token lui est propre) ou
+ * un PNJ compagnon, désigné avec le personnage dont il est le compagnon.
+ */
+async function mayPrepareToken(account: { uid: string; role: string }, kind: TokenKind, id: string, character: FormDataEntryValue | null) {
+  if (account.role === "admin" || account.role === "mj") return true
+  if (kind === "character") return Boolean(await getCharacterForUser(account.uid, id).catch(() => null))
+  if (kind === "creature") {
+    const owner = companionOfTokenId(id)
+    if (!owner || !await getCharacterForUser(account.uid, owner.characterId).catch(() => null)) return false
+    return Boolean(await findCompanion(owner.characterId, (companion) => companion.kind === "creature" && companion.id === owner.companionId).catch(() => null))
+  }
+  if (kind === "npc" && typeof character === "string" && character) {
+    const access = await authorizedCompanionCharacter(character).catch(() => null)
+    return Boolean(access && await companionNpc(access, id).catch(() => null))
+  }
+  return false
+}
 
 export async function GET(_request: Request, { params }: Params) {
   const { kind, id } = await params
@@ -22,13 +44,10 @@ export async function POST(request: Request, { params }: Params) {
   const account = await authorizedAccount(["admin", "mj", "joueur"])
   if (!account) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   if (!isTokenKind(kind) || !validTokenOwnerId(id)) return NextResponse.json({ error: "Token invalide." }, { status: 400 })
-  const manager = account.role === "admin" || account.role === "mj"
-  // Un joueur prépare le token de ses propres personnages ; le reste appartient au MJ.
-  if (!manager && (kind !== "character" || !await getCharacterForUser(account.uid, id).catch(() => null))) {
-    return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
-  }
+  const form = await request.formData().catch(() => null)
+  if (!form) return NextResponse.json({ error: "Token invalide." }, { status: 400 })
+  if (!await mayPrepareToken(account, kind, id, form.get("character"))) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
-    const form = await request.formData()
     const file = form.get("token")
     if (!(file instanceof File)) throw new Error("INVALID_TOKEN")
     const url = await saveToken(kind, id, file)

@@ -334,3 +334,13 @@ test("Une fiche à la corbeille ne réapparaît pas dans la liste de son joueur"
   const [row] = (await getDb().select().from(schema.characterIndex)).filter((entry) => entry.id === id);
   assert.equal(row.deletedAt, now);
 });
+
+test("PNJ compagnons : retrouvés dans les onglets Compagnon de toutes les fiches", async () => {
+  const tabs = (companions) => JSON.stringify([{ id: "t1", type: "compagnon", label: "Compagnons", companions }]);
+  await linkCharacters([
+    { ID: fresh("PER"), "Nom personnage": "Aelis", "Onglets personnalisés": tabs([{ id: "c1", kind: "npc", npcId: "NPC-7", campaignId: "CAM-1" }, { id: "c2", kind: "creature", sourceName: "Loup" }]) },
+    { ID: fresh("PER"), "Nom personnage": "Basile", "Onglets personnalisés": tabs([{ id: "c3", kind: "npc", npcId: "NPC-9" }]) },
+    { ID: fresh("PER"), "Nom personnage": "Cassian", "Onglets personnalisés": "pas du JSON" },
+  ]);
+  assert.deepEqual([...await sheets.companionNpcIds()].sort(), ["NPC-7", "NPC-9"]);
+});

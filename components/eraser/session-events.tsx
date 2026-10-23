@@ -15,14 +15,17 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Textarea } from "@/components/ui/textarea"
+import { creatureTokenId } from "@/components/eraser/creature-portrait"
 import { ImageField } from "@/components/eraser/index-cells"
 import { IndexImage } from "@/components/eraser/index-image"
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { RevealToggle } from "@/components/eraser/session-reveal"
 import { AddToSessionDialog, patchSession } from "@/components/eraser/session-picker"
+import { TokenButton } from "@/components/eraser/token-editor"
 import { countChoices, eventShopTypes, generateEventShop, SavedShopCollection, shopSummary } from "@/components/eraser/shop-generator"
 import { persistShops } from "@/components/eraser/shop-persistence"
 import type { CampaignEvent } from "@/lib/campaign-events"
+import { isImageSource } from "@/lib/index-columns"
 import type { CampaignSessionRecord, SessionEvent, SessionEventKind } from "@/lib/campaign-sessions"
 import { genericNpcIndexPage } from "@/lib/npc-pages"
 import type { CampaignNpcRecord, SavedShopRecord, ShopGeneratorItem } from "@/lib/shop-schema"
@@ -128,11 +131,25 @@ function TagChip({ event }: { event: Pick<SessionEvent, "tag" | "tagColor"> }) {
 
 /* ---------- la fiche d'un événement : nom, image, icône, étiquette, description ---------- */
 
+/**
+ * Le token d'une créature ou d'un PNJ générique : celui de sa fiche d'origine, le même que
+ * dans l'index (une créature garde celui de son portrait importé). Une créature sans fiche
+ * prend celui de l'événement.
+ */
+function EventTokenButton({ event }: { event: Pick<SessionEvent, "id" | "kind" | "refId" | "image" | "name"> }) {
+  if (event.kind !== "creature" && event.kind !== "generic-npc") return null
+  const source = isImageSource(event.image) ? event.image : ""
+  const ownerId = event.kind === "creature" ? creatureTokenId(event.image) || event.refId || event.id : event.refId
+  return <TokenButton kind={event.kind === "creature" ? "creature" : "npc"} ownerId={ownerId} name={event.name} source={source} style={event.kind === "creature" ? { kind: "creature" } : { kind: "npc" }} disabledReason={source ? "" : "Ajoute d’abord une image"} />
+}
+
 function EventEditor({ initial, pending, submitLabel, onCancel, onSubmit }: { initial: SessionEvent; pending: boolean; submitLabel: string; onCancel: () => void; onSubmit: (event: SessionEvent) => void }) {
   const [draft, setDraft] = useState(initial)
   const set = (patch: Partial<SessionEvent>) => setDraft((current) => ({ ...current, ...patch }))
   return <form className="grid gap-5 sm:grid-cols-[11rem_minmax(0,1fr)]" onSubmit={(event) => { event.preventDefault(); if (draft.name.trim()) onSubmit({ ...draft, name: draft.name.trim(), tag: draft.tag.trim() }) }}>
-    <ImageField label={`Image de ${draft.name || "l’événement"}`} value={draft.image} aspect="aspect-square" placeholder={<EventGlyph event={draft} className="size-12 text-primary/30" />} onChange={(image) => set({ image })} />
+    <ImageField label={`Image de ${draft.name || "l’événement"}`} value={draft.image} aspect="aspect-square" placeholder={<EventGlyph event={draft} className="size-12 text-primary/30" />} onChange={(image) => set({ image })}>
+      <EventTokenButton event={draft} />
+    </ImageField>
     <div className="grid content-start gap-4">
       <label className="grid gap-1.5 text-sm font-medium">Nom<Input autoFocus value={draft.name} onChange={(event) => set({ name: event.target.value })} maxLength={160} placeholder="Embuscade sur la route, orage, rumeur…" /></label>
       {draft.kind === "other" && <div className="grid gap-1.5 text-sm font-medium"><span>Icône</span><IconPicker icon={iconParts(draft.icon).icon} emoji={iconParts(draft.icon).emoji} onChange={(value) => set({ icon: value.emoji ? `emoji:${value.emoji}` : value.icon || "" })} /></div>}
@@ -406,6 +423,9 @@ export function SessionEvents({ campaignId, session, events, shops, shopTypes = 
   const router = useRouter()
   const [picking, setPicking] = useState(false)
   const [sending, setSending] = useState<SessionEntry | null>(null)
+  const [editing, setEditing] = useState<SessionEvent | null>(null)
+  // Les événements modifiés ici, montrés tout de suite (la page Événements les relira).
+  const [edited, setEdited] = useState<Record<string, SessionEvent>>({})
   const [pending, setPending] = useState(false)
   const [error, setError] = useState("")
   const [notice, setNotice] = useState("")
@@ -413,7 +433,7 @@ export function SessionEvents({ campaignId, session, events, shops, shopTypes = 
   const eventKeys = new Set(eventShopTypes(shopTypes).map((type) => type.key))
   const typeOf = (shop: SavedShopRecord) => shopTypes.find((type) => type.key === shop.key)
   const shopEntry = (shop: SavedShopRecord): SessionEntry => ({ id: `shop:${shop.id}`, shop, event: { id: `shop:${shop.id}`, kind: "market", refId: shop.id, name: shop.name, icon: "", image: "", tag: typeOf(shop)?.name ?? "", tagColor: typeOf(shop)?.color || "#b45309", description: "" } })
-  const all: SessionEntry[] = [...events.map((event) => ({ id: event.id, event })), ...shops.filter((shop) => eventKeys.has(shop.key) || session.eventIds.includes(`shop:${shop.id}`)).map(shopEntry)]
+  const all: SessionEntry[] = [...events.map((event) => ({ id: event.id, event: edited[event.id] ?? event })), ...shops.filter((shop) => eventKeys.has(shop.key) || session.eventIds.includes(`shop:${shop.id}`)).map(shopEntry)]
   const byId = new Map(all.map((entry) => [entry.id, entry]))
   // Un événement supprimé depuis n'apparaît plus ; les anciens événements complets restent visibles.
   const inSession: SessionEntry[] = [...session.legacyEvents.map((event) => ({ id: event.id, event })), ...session.eventIds.flatMap((id) => byId.get(id) ?? [])]
@@ -435,12 +455,24 @@ export function SessionEvents({ campaignId, session, events, shops, shopTypes = 
     {inSession.length
       ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{inSession.map((entry) => <EventCard key={entry.id} event={entry.event} pending={pending} leading={<RevealToggle kind="event" id={entry.id} name={entry.event.name} />} actions={[
           { label: "Ouvrir", icon: ArrowUpRight, href: entry.shop ? `/campagne/${encodeURIComponent(campaignId)}/magasin-et-fouille/sauvegardes?shop=${encodeURIComponent(entry.shop.id)}` : `${eventsHref}#${encodeURIComponent(entry.id)}` },
+          // Un événement de la page Événements se modifie aussi d'ici (nom, image, token…).
+          ...(!entry.shop && byId.has(entry.id) ? [{ label: "Modifier (nom, image, token, étiquette)", icon: Pencil, onClick: () => setEditing(entry.event) }] : []),
           { label: "Envoyer dans une autre session (il reste aussi dans celle-ci)", icon: Send, onClick: () => setSending(entry) },
           { label: "Retirer de la session", icon: CircleMinus, onClick: () => void guarded(async () => { onUpdated(await patchSession(campaignId, session.id, { events: { remove: [entry.id] } })) }), destructive: true },
         ]}>
         {entry.shop && <><p className="-mt-1 px-3 pb-2 text-xs text-muted-foreground">{shopSummary(entry.shop, shopTypes)}</p><ShopItems shop={entry.shop} /></>}
       </EventCard>)}</div>
       : <p className="rounded-2xl border border-dashed px-5 py-8 text-center text-sm text-muted-foreground">Aucun événement dans cette session : prépare-les dans la page Événements, puis ajoute-les ici.</p>}
+    <Dialog open={Boolean(editing)} onOpenChange={(open) => { if (!open && !pending) setEditing(null) }}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader><DialogTitle>{editing ? `Modifier ${editing.name}` : "Modifier"}</DialogTitle></DialogHeader>
+        {editing && <EventEditor key={editing.id} initial={editing} pending={pending} submitLabel="Enregistrer" onCancel={() => setEditing(null)} onSubmit={(event) => void guarded(async () => {
+          const saved = await saveEvent(campaignId, event)
+          setEdited((current) => ({ ...current, [saved.id]: saved }))
+          setEditing(null); setNotice(`${saved.name} enregistré.`)
+        })} />}
+      </DialogContent>
+    </Dialog>
     <AddSessionEventDialog open={picking} candidates={candidates} pending={pending} eventsHref={eventsHref} onClose={() => setPicking(false)} onAdd={(ids) => void guarded(async () => { onUpdated(await patchSession(campaignId, session.id, { events: { add: ids } })); setPicking(false) })} />
     <AddToSessionDialog open={Boolean(sending)} campaignId={campaignId} title="Envoyer dans une autre session" confirmLabel="Envoyer" excludeId={session.id} subject={sending ? `${sending.event.name} reste dans cette session et rejoint celle choisie.` : ""} pending={pending} onClose={() => setSending(null)} onConfirm={(sessionId) => void guarded(async () => {
       if (!sending) return

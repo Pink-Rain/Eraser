@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm"
 
 import { getDb } from "@/db"
 import { roll20CampaignLinks } from "@/db/schema"
-import { getCampaignDashboard, listCampaignMembers, listNpcBackpackSummaries, listNpcs, listSavedShops, listTabletopCharacterEntitiesByIds, saveNpcs } from "@/lib/google-sheets"
+import { companionNpcIds, getCampaignDashboard, listCampaignMembers, listNpcBackpackSummaries, listNpcs, listSavedShops, listTabletopCharacterEntitiesByIds, saveNpcs } from "@/lib/google-sheets"
 import { readCharacterPortrait } from "@/lib/character-portraits"
 import { sharedMediaVersion } from "@/lib/shared-media"
 import { readToken, readTokenFrames, tokenVersion, type TokenKind } from "@/lib/tokens"
@@ -118,7 +118,7 @@ export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$in
       : await Promise.all([listNpcs(link.campaignId, true), listSavedShops(link.campaignId, true)])
   // Les personnages joueurs : ceux de la session, ou tous ceux de la campagne.
   const characterIds = !withEntities ? [] : session ? session.characterIds : (await listCampaignMembers(link.campaignId)).map((member) => member.id)
-  const [inventories, characters, framings, frames, documents] = await Promise.all([
+  const [inventories, characters, framings, frames, documents, companions] = await Promise.all([
     listNpcBackpackSummaries(npcs.map((npc) => npc.id)),
     listTabletopCharacterEntitiesByIds(characterIds),
     // Le cadrage et le cadre choisis dans l'éditeur de token : le token par défaut que dessine
@@ -127,6 +127,8 @@ export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$in
     withEntities ? readTokenFrames().catch(() => ({})) : Promise.resolve({}),
     // Une feuille des documents illisible ne bloque pas le reste de la synchronisation.
     scope === "players" ? Promise.resolve([]) : listCampaignDocuments(link.campaignId).catch(() => []),
+    // Un PNJ compagnon d'un personnage a le cadre par défaut des compagnons, comme dans l'éditeur.
+    withEntities && npcs.length ? companionNpcIds().catch(() => new Set<string>()) : Promise.resolve(new Set<string>()),
   ])
   const framing = (kind: TokenKind, id: string) => (framings as Record<string, { x: number; y: number; span: number }>)[`${kind}:${id}`] ?? null
   // Le cadre (lib/token-frames.ts) : le choix de l'éditeur, sinon le cadre par défaut du token.
@@ -184,7 +186,7 @@ export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$in
       tokenUrl: await tokenUrl("npc", npc.id),
       portraitVersion: npc.portrait ? await portraitVersion(`npcs/${npc.id}/portrait`, npc.portrait) : "",
       framing: framing("npc", npc.id),
-      frame: frame("npc", npc.id, { kind: "npc", group: npc.inPlayerGroup }, true),
+      frame: frame("npc", npc.id, { kind: "npc", group: npc.inPlayerGroup, companion: companions.has(npc.id) }, true),
       currentHp: npc.currentHp,
       totalHp: npc.totalHp,
       constitution: npc.constitution,

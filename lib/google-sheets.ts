@@ -6388,6 +6388,22 @@ export async function getCharacterCompanions(id: string, fresh = false) {
   return current ? companionsOfTabs(current.values[characterCustomTabsIndex] ?? "") : []
 }
 
+/**
+ * Les PNJ pris comme compagnons par un personnage, d'après les onglets Compagnon de toutes
+ * les fiches : une lecture groupée de la colonne « Onglets personnalisés », gardée en mémoire
+ * et partagée comme les autres colonnes des personnages. L'éditeur de token s'en sert pour le
+ * cadre par défaut d'un PNJ.
+ */
+export async function companionNpcIds() {
+  const ids = new Set<string>()
+  const source = await charactersSource()
+  if (!source) return ids
+  const header = characterValueHeaders[characterCustomTabsIndex]
+  const { columns, rows } = await readCharacterColumns(source, [header])
+  for (const row of rows) for (const companion of companionsOfTabs(columns.get(row, header))) if (companion.kind === "npc") ids.add(companion.npcId)
+  return ids
+}
+
 function hasBrokenTotals(values: readonly string[]) {
   return characterSecondaryCalculatedFields.some((field) => isGoogleSheetsCalculationError(values[field.valueIndex]))
 }

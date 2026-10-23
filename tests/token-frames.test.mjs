@@ -57,3 +57,14 @@ test("chaque image de cadre est livrée avec l'application", async () => {
   assert.equal(files.size, 49);
   for (const file of files) await access(new URL(`../public${file}`, import.meta.url));
 });
+
+test("une créature compagnon a son propre token, rattaché à son personnage", async () => {
+  const companions = await vite.ssrLoadModule("/lib/companions.ts");
+  const id = companions.companionTokenId("PER-12", "c-3f2a");
+  assert.equal(id, "companion:PER-12:c-3f2a");
+  assert.deepEqual(companions.companionOfTokenId(id), { characterId: "PER-12", companionId: "c-3f2a" });
+  assert.equal(companions.companionOfTokenId("CRE-4"), null);
+  assert.equal(companions.companionOfTokenId("companion:PER-12"), null);
+  const tokens = await vite.ssrLoadModule("/lib/token-frames.ts");
+  assert.equal(tokens.resolveTokenFrame({ kind: "creature", companion: true }).id, "enamel-blue-3");
+});
