@@ -9,6 +9,7 @@ import { Roll20BridgePanel } from "@/components/eraser/roll20-bridge-panel"
 import { readAchievements } from "@/lib/achievements"
 import { listCampaignSessionsForDisplay } from "@/lib/campaign-sessions"
 import { historyCounts, readCharacterHistories } from "@/lib/character-history"
+import { readCharacterSatieties } from "@/lib/character-satiety"
 import { playerNamesFor } from "@/lib/chat-accounts"
 import { getCampaignDashboard, listCampaignMembers, listCharacterGroupStats, listNpcs, listRelationsOfCharacters, type CampaignRecord } from "@/lib/google-sheets"
 import { identityUidsForUser } from "@/lib/identity-links"
@@ -37,9 +38,10 @@ async function folderData(campaign: CampaignRecord, account: AuthorizedUser) {
   ])
   const members = listed ?? []
   const ids = members.map((member) => member.id)
-  const [stats, histories, achievements, relations, players] = await Promise.all([
+  const [stats, histories, satieties, achievements, relations, players] = await Promise.all([
     listCharacterGroupStats(ids).catch(failed("CAMPAIGN_FOLDER_STATS_FAILED")),
     readCharacterHistories(ids).catch(failed("CAMPAIGN_FOLDER_HISTORY_FAILED")),
+    readCharacterSatieties(ids).catch(failed("CAMPAIGN_FOLDER_SATIETY_FAILED")),
     readAchievements().catch(failed("CAMPAIGN_FOLDER_ACHIEVEMENTS_FAILED")),
     listRelationsOfCharacters(ids).catch(failed("CAMPAIGN_FOLDER_RELATIONS_FAILED")),
     playerNamesFor(account, members.map((member) => member.ownerUid)).catch(failed("CAMPAIGN_FOLDER_PLAYERS_FAILED")),
@@ -75,6 +77,7 @@ async function folderData(campaign: CampaignRecord, account: AuthorizedUser) {
       rareItems: counts?.rareItems ?? null,
       lastItems: counts?.lastItems ?? [],
       purse: stat?.purse ?? null,
+      satiety: (() => { const record = satieties?.[member.id]; return record ? { charges: record.charges, days: record.days[campaign.id] ?? 0 } : null })(),
     }
   })
   const subtitle = (npc: { title: string; occupation: string }) => [npc.title, npc.occupation].filter(Boolean).join(" · ")
@@ -133,7 +136,7 @@ export default async function CampaignFolderPage({ params }: { params: Promise<{
           <h2 id="groupe" className="flex items-center gap-2 font-display text-2xl font-semibold"><ChartColumn className="size-5 text-primary" />Le groupe, personnage par personnage</h2>
           {data.membersFailed
             ? <p className="rounded-2xl border border-dashed px-5 py-6 text-sm text-muted-foreground">Les personnages n’ont pas pu être lus pour l’instant (Google est peut-être saturé). Actualise dans un instant.</p>
-            : <CampaignGroupTable members={data.rows} />}
+            : <CampaignGroupTable members={data.rows} campaignId={campaign.id} />}
         </section>
 
         <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,19rem)] xl:grid-cols-[minmax(0,1fr)_minmax(0,21rem)]">

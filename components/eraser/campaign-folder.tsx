@@ -2,7 +2,10 @@
 
 import { useMemo, useState, type ReactNode } from "react"
 import Link from "next/link"
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, Crown, HeartPulse, PackageOpen, Shield, Skull, Sparkles, Trophy, UsersRound, X, type LucideIcon } from "lucide-react"
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, Crown, Drumstick, HeartPulse, PackageOpen, Shield, Skull, Sparkles, Trophy, UsersRound, X, type LucideIcon } from "lucide-react"
+
+import { RestButton, SatietyBar, sendSatiety } from "@/components/eraser/satiety"
+import { applySatietyAction, daysLabel, type SatietyAction } from "@/lib/satiety"
 
 /** Un personnage du groupe, tel que le dossier de campagne le montre. `null` : donnée illisible ou pas encore suivie. */
 export type FolderMember = {
@@ -23,7 +26,11 @@ export type FolderMember = {
   rareItems: number | null
   lastItems: Array<{ name: string; rarity: string }>
   purse: { or: number; cuivre: number; orNoir: number } | null
+  /** La barre de rassasiement et les jours passés dans cette campagne ; `null` : pas lue. */
+  satiety: FolderSatiety | null
 }
+
+export type FolderSatiety = { charges: number; days: number }
 
 export type FolderNpc = { id: string; name: string; portrait: string; subtitle: string; currentHp: number; totalHp: number; attitude: "ami" | "neutre" | "hostile"; relations: NpcRelation[] }
 export type MetNpc = { id: string; name: string; portrait: string; subtitle: string; attitude: "ami" | "neutre" | "hostile"; relations: NpcRelation[] }
@@ -34,11 +41,12 @@ const average = (values: Array<number | null>) => { const list = known(values); 
 const sum = (values: Array<number | null>) => { const list = known(values); return list.length ? list.reduce((total, value) => total + value, 0) : null }
 const shown = (value: number | null, digits = 1) => value === null ? "—" : number(value, digits)
 
-type SortKey = "name" | "hp" | "states" | "level" | "achievements" | "falls" | "items" | "or" | "cuivre" | "orNoir"
+type SortKey = "name" | "hp" | "satiety" | "states" | "level" | "achievements" | "falls" | "items" | "or" | "cuivre" | "orNoir"
 
 const sortValue: Record<SortKey, (member: FolderMember) => number | string | null> = {
   name: (member) => member.name,
   hp: (member) => member.currentHp,
+  satiety: (member) => member.satiety?.charges ?? null,
   states: (member) => member.states.length,
   level: (member) => member.level,
   achievements: (member) => member.achievements,
@@ -94,9 +102,40 @@ const stickyTone = "bg-card [tr:nth-child(even)>&]:bg-[color-mix(in_oklab,var(--
  * retours, objets reçus et bourse. Chaque colonne se trie ; sous le tableau, la moyenne et
  * la somme du groupe pour chaque colonne.
  */
-export function CampaignGroupTable({ members }: { members: FolderMember[] }) {
+export function CampaignGroupTable({ members: initialMembers, campaignId }: { members: FolderMember[]; campaignId: string }) {
   const [sort, setSort] = useState<{ key: SortKey; direction: 1 | -1 } | null>(null)
   const [open, setOpen] = useState<string | null>(null)
+  // La barre de chacun, changée d'abord à l'écran puis enregistrée (remise si le serveur refuse).
+  const [satiety, setSatiety] = useState<Record<string, FolderSatiety | null>>(() => Object.fromEntries(initialMembers.map((member) => [member.id, member.satiety])))
+  const [satietyMessage, setSatietyMessage] = useState("")
+  const members = useMemo(() => initialMembers.map((member) => ({ ...member, satiety: satiety[member.id] ?? member.satiety })), [initialMembers, satiety])
+  const tracked = members.filter((member) => member.satiety)
+
+  /** Une nuit, une ellipse ou des charges réglées, pour un personnage ou tout le groupe. */
+  async function changeSatiety(ids: string[], action: SatietyAction) {
+    const before = satiety
+    const step = (current: FolderSatiety) => {
+      const next = applySatietyAction({ charges: current.charges, days: { [campaignId]: current.days } }, action)
+      return { charges: next.charges, days: next.days[campaignId] ?? 0 }
+    }
+    setSatiety((all) => ({ ...all, ...Object.fromEntries(ids.flatMap((id) => all[id] ? [[id, step(all[id]!)]] : [])) }))
+    setSatietyMessage("")
+    try {
+      const reply = await sendSatiety({ characterIds: ids, action })
+      setSatiety((all) => ({
+        ...all,
+        ...Object.fromEntries(Object.entries(reply.records).map(([id, record]) => [id, { charges: record.charges, days: record.days[campaignId] ?? 0 }])),
+        ...Object.fromEntries(reply.failed.map((id) => [id, before[id] ?? null])),
+      }))
+      if (reply.failed.length) setSatietyMessage(`Pas enregistré pour ${reply.failed.map((id) => members.find((member) => member.id === id)?.name ?? id).join(", ")}.`)
+      else if (ids.length > 1 && action.kind === "rest") setSatietyMessage(`${action.mode === "ellipse" ? "Ellipse faite" : "Nuit passée"} pour ${ids.length} personnages.`)
+    } catch (error) {
+      setSatiety(before)
+      setSatietyMessage(error instanceof Error ? error.message : "La barre de rassasiement n’a pas pu être enregistrée.")
+      throw error
+    }
+  }
+
   const rows = useMemo(() => {
     if (!sort) return members
     const read = sortValue[sort.key]
@@ -137,12 +176,19 @@ export function CampaignGroupTable({ members }: { members: FolderMember[] }) {
   if (!members.length) return <p className="rounded-2xl border border-dashed px-5 py-8 text-center text-sm text-muted-foreground">Aucun personnage dans cette campagne pour l’instant.</p>
 
   return <div className="grid gap-3">
+    {/* Une nuit ou une ellipse pour tout le groupe d'un coup ; les jours comptent dans cette campagne. */}
+    {tracked.length > 0 && <div className="flex flex-wrap items-center gap-2">
+      <RestButton label="Nuit ou ellipse pour tout le groupe" title="Tout le groupe" subtitle={`${tracked.length} personnage${tracked.length > 1 ? "s" : ""} · les jours comptent dans cette campagne`} onRest={(rest) => changeSatiety(tracked.map((member) => member.id), { kind: "rest", ...rest, campaignId })} />
+      {satietyMessage && <p className="text-xs text-muted-foreground" role="status">{satietyMessage}</p>}
+    </div>}
+    {!tracked.length && satietyMessage && <p className="text-xs text-muted-foreground" role="status">{satietyMessage}</p>}
     <div className="overflow-x-auto rounded-2xl border bg-card/85 shadow-[0_12px_35px_rgb(67_50_31/0.07)]">
-      <table className="w-full min-w-[980px] border-collapse text-sm">
+      <table className="w-full min-w-[1120px] border-collapse text-sm">
         <thead className="border-b bg-muted/30">
           <tr>
             {header("name", "Personnage", "left", UsersRound)}
             {header("hp", "PV", "left", HeartPulse)}
+            {header("satiety", "Rassasiement", "left", Drumstick)}
             {header("states", "États", "left", Sparkles)}
             {header("level", "Classe · rang", "left", Shield)}
             {header("achievements", "Succès", "right", Trophy)}
@@ -162,6 +208,13 @@ export function CampaignGroupTable({ members }: { members: FolderMember[] }) {
               </Link>
             </th>
             <td className="px-3 py-2.5"><HpBar current={member.currentHp} total={member.totalHp} life={member.life} /></td>
+            <td className="px-3 py-2.5">{member.satiety ? <span className="grid gap-0.5">
+              <span className="flex items-center gap-1.5">
+                <SatietyBar size="sm" charges={member.satiety.charges} onChange={(value) => void changeSatiety([member.id], { kind: "set", charges: value }).catch(() => {})} />
+                <RestButton className="size-6" title={`Nuit ou ellipse · ${member.name}`} preview={member.satiety.charges} onRest={(rest) => changeSatiety([member.id], { kind: "rest", ...rest, campaignId })} />
+              </span>
+              <span className="text-[11px] tabular-nums text-muted-foreground">{daysLabel(member.satiety.days)}</span>
+            </span> : <span className="text-muted-foreground">—</span>}</td>
             <td className="px-3 py-2.5">{member.states.length ? <span className="flex flex-wrap gap-1">{member.states.map((state) => <span key={state.name} className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] ${state.level === 2 ? "border-rose-500/40 bg-rose-500/15 font-semibold text-rose-800 dark:text-rose-200" : "border-rose-400/25 bg-rose-400/8"}`}>{state.name}{state.level === 2 ? " II" : ""}</span>)}</span> : <span className="text-muted-foreground">—</span>}</td>
             <td className="px-3 py-2.5 text-xs"><span className="block">{member.classes || "—"}</span>{member.level !== null && <span className="text-muted-foreground">Rang {member.level}</span>}</td>
             <td className="px-3 py-2.5 text-right tabular-nums">{bestAchievements(member) && <>{crown("Le plus de succès du groupe")} </>}{shown(member.achievements, 0)}</td>
@@ -178,6 +231,7 @@ export function CampaignGroupTable({ members }: { members: FolderMember[] }) {
         <tfoot className="border-t-2 bg-muted/45">
           {footer.map(({ label, reduce }) => {
             const hp = [reduce(members.map((member) => member.currentHp)), reduce(members.map((member) => member.totalHp))]
+            const charges = reduce(members.map((member) => member.satiety?.charges ?? null))
             const states = reduce(members.map((member) => member.states.length))
             const level = reduce(members.map((member) => member.level))
             const achievements = reduce(members.map((member) => member.achievements))
@@ -188,6 +242,7 @@ export function CampaignGroupTable({ members }: { members: FolderMember[] }) {
             return <tr key={label} className="border-b border-border/50 last:border-b-0">
               <th scope="row" className="sticky left-0 bg-muted px-3 py-2 text-left font-display text-sm font-semibold">{label}<span className="block text-[11px] font-normal text-muted-foreground">{members.length} personnage{members.length > 1 ? "s" : ""}</span></th>
               <td className="px-3 py-2 text-xs font-semibold tabular-nums">{shown(hp[0])} / {shown(hp[1])}</td>
+              <td className="px-3 py-2 text-xs font-semibold tabular-nums">{charges === null ? "—" : `${number(charges)} charge${charges > 1 ? "s" : ""}`}</td>
               <td className="px-3 py-2 text-xs font-semibold tabular-nums">{states === null ? "—" : `${number(states)} état${states > 1 ? "s" : ""}`}</td>
               <td className="px-3 py-2 text-xs font-semibold tabular-nums">{level === null ? "—" : `Rang ${number(level)}`}</td>
               <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums">{shown(achievements)}</td>

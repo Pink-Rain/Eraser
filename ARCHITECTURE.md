@@ -57,6 +57,14 @@ D1. Il est déployé par `.github/workflows/deploy-accounts-worker.yml` et doit
 - `user_identity_links` ;
 - `shared_records` pour de petits états communs entre installations.
 
+Parmi ces `shared_records`, deux portées décrivent les personnages sans passer par Google :
+`character-history` (chutes, retours, objets reçus, pour le dossier de campagne) et
+`character-satiety` (`lib/character-satiety.ts`) : la barre de rassasiement (5 charges) et les
+jours passés par campagne. La règle (nuit, ellipse, repas) est dans `lib/satiety.ts`, commune
+à la page et au serveur ; `/api/characters/satiety` applique chaque action sur la barre relue
+(une à la fois par personnage). Elle n'est pas dans la case JSON de la fiche : une nuit de
+groupe donnée par le MJ créerait sinon un conflit sur la fiche ouverte de chaque joueur.
+
 Les secrets Google y sont chiffrés au repos. Les clients utilisent
 `ERASER_ACCOUNTS_API_URL` et `ERASER_ACCOUNTS_API_KEY`, injectés dans la Release
 Windows par le workflow de build.

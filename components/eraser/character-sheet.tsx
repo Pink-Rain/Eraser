@@ -35,6 +35,7 @@ import { SpellChoiceDialog, type RankBonusSelection } from "@/components/eraser/
 import { useRankBonuses } from "@/components/eraser/rank-bonus"
 import { isAnyCharacteristicTarget, isMovementTarget } from "@/lib/rank-bonuses"
 import { CharacterStatesPanel, useStatesCatalog } from "@/components/eraser/character-states"
+import { CampaignDayTags, CharacterSatietyPanel } from "@/components/eraser/satiety"
 import { FxOverlay, PageFxOverlay, PortraitFx, pageImageFxClass, portraitImageFxClass, stateFxOf } from "@/components/eraser/portrait-fx"
 import { applyRule, hasRule, ruleLabel, type ModifierRule } from "@/lib/state-change"
 import { portraitLayers, stateContributions, withoutStateWrites, withStateWrites, writesToRevert, type CharacterState, type StateWrite } from "@/lib/character-states"
@@ -1711,6 +1712,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
         </label>
         <TokenButton kind="character" ownerId={character.id} name={values[0] || character.name} source={values[characterNarrativeStart + 1] || ""} style={{ kind: "character" }} disabledReason={values[characterNarrativeStart + 1] ? "" : "Ajoute d’abord un portrait"} />
         <CharacterStatesPanel states={postedStates} autoStates={[...formStates, ...autoLife.auto]} autoSources={formStateSources} onAutoLevel={setFormStateLevel} catalog={statesCatalog.catalog} loaded={statesCatalog.loaded} error={statesCatalog.error} onChange={updateStates} onRoll={rollStateEffect} />
+        <CharacterSatietyPanel characterId={character.id} campaigns={character.campaigns} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1720,7 +1722,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
               if (!name || name.length > 120) { reject(name ? "le nom fait plus de 120 caractères." : "le personnage doit garder un nom."); return Promise.resolve() }
               return commit(0, value)
             }}><h1 className="mt-1 font-display text-4xl font-semibold tracking-tight sm:text-6xl">{values[0] || "Sans nom"}</h1></InlineEdit>{activeTitle && <p className="mt-1 font-display text-lg" style={{ color: campaignAccent }}>{activeTitle}</p>}</div>
-            <div className="flex flex-wrap justify-end gap-2">{character.campaigns.length ? character.campaigns.map((campaign) => <span key={campaign.id} className="rounded-full border px-3 py-1 text-xs font-medium" style={{ color: campaign.accentColor, borderColor: `${campaign.accentColor}66`, backgroundColor: `${campaign.accentColor}12` }}>{campaign.name}</span>) : <span className="rounded-full border px-3 py-1 text-xs text-muted-foreground">Sans campagne</span>}</div>
+            <div className="flex flex-wrap justify-end gap-2"><CampaignDayTags characterId={character.id} campaigns={character.campaigns} /></div>
           </div>
           <div className="mt-6 divide-y border-y">
             <div className="grid gap-x-8 gap-y-4 py-4 sm:grid-cols-2 xl:grid-cols-12">

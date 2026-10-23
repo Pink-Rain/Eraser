@@ -9,6 +9,7 @@ import { replaceAppUrl } from "@/components/eraser/app-tabs"
 import { RevealToggle, SessionRevealProvider } from "@/components/eraser/session-reveal"
 import { patchSession } from "@/components/eraser/session-picker"
 import { RichTextView } from "@/components/eraser/rich-text"
+import { RestButton, sendSatiety } from "@/components/eraser/satiety"
 import {
   EmptyHint,
   LinkChip,
@@ -650,6 +651,20 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
   }
   const countNew = (keys: string[]) => keys.filter(isNew).length
   const plural = (count: number, one: string, many: string) => `${count} ${count > 1 ? many : one}`
+  // Une nuit ou une ellipse pour tous les présents : le MJ, ou un joueur présent à la session.
+  const canRest = group.length > 0 && (viewer.manager || viewer.characterIds.some((characterId) => current.characterIds.includes(characterId)))
+  const restAction = canRest ? <RestButton label="Nuit ou ellipse" title="Tous les présents" subtitle={`${plural(group.length, "personnage présent", "personnages présents")} · les jours comptent dans ${campaignName}`} onRest={async (rest) => {
+    try {
+      const reply = await sendSatiety({ characterIds: group.map((member) => member.id), action: { kind: "rest", ...rest, campaignId }, campaignId, sessionId: current.id })
+      const done = Object.keys(reply.records).length
+      say(reply.failed.length
+        ? `Pas enregistré pour ${reply.failed.map((id) => members.find((member) => member.id === id)?.name ?? id).join(", ")}.`
+        : `${rest.mode === "ellipse" ? "Ellipse faite" : "Nuit passée"} pour ${plural(done, "personnage", "personnages")}.`)
+    } catch (error) {
+      say(error instanceof Error ? error.message : "La barre de rassasiement n’a pas pu être enregistrée.")
+      throw error
+    }
+  }} /> : undefined
 
   const npcCount = sessionNpcs.length + npcEvents.length
   const newNpcs = countNew([...sessionNpcs.map((npc) => `npc:${npc.id}`), ...npcEvents.map((event) => `event:${event.id}`)])
@@ -792,7 +807,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
           </aside>
 
           <div key={`recit-${current.id}`} className="journal-rise min-w-0 space-y-10 lg:col-start-2 lg:row-start-2">
-            <Section id="journal-groupe" icon={linkKindLabels.character.icon} title="Le groupe" count={absents.length ? `${group.length} · ${plural(absents.length, "absent", "absents")}` : group.length}>
+            <Section id="journal-groupe" icon={linkKindLabels.character.icon} title="Le groupe" count={absents.length ? `${group.length} · ${plural(absents.length, "absent", "absents")}` : group.length} action={restAction}>
               {group.length + absents.length ? <div className={groupGrid}>
                 {group.map((member) => <CharacterCard key={member.id} member={member} reveal />)}
                 {absents.map((member) => <CharacterCard key={member.id} member={member} absent tags={<Tag>absent</Tag>} />)}
