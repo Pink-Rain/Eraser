@@ -201,9 +201,12 @@ pour tout index. Sa page est `WorldIndexPage`. Il n’a **pas d’autre lecteur*
   sol ou dans l’esthétique). Sans genre, le type décide, comme avant. Les types de magasin
   comparent aussi le genre (`shopTypeAllows`) : un type réglé sur « Armes » vend les items de
   genre « Arme ».
-- un **inventaire sur mesure** (le + sous les deux colonnes de la fiche) est un contenant
-  « Inventaire » qui a une couleur : colonnes « Couleur », « Icône », « Contenu accepté » de
-  « Contenants personnages », vides pour les autres (une version plus ancienne y voit un sac).
+- un **inventaire sur mesure** (le + sous chacune des deux colonnes de la fiche) est un
+  contenant « Inventaire » qui a une couleur : colonnes « Couleur », « Icône », « Contenu
+  accepté » et « Colonne » (Gauche, Droite : où il s'affiche) de « Contenants personnages »,
+  vides pour les autres (une version plus ancienne y voit un sac). Les grandes catégories
+  (sauf la bourse) et ces inventaires se replient ; le pli est gardé sur l'ordinateur
+  (`eraser:inventory-folds`).
   « Contenu accepté » : familles (Armes, Équipement, Objets) et mots-clés séparés par « | »,
   vide = tout sauf la monnaie (`canItemGoInCustomInventory`). On n’y range qu’exprès : le
   rangement automatique (achat, don, ajout sans contenant) ne le vise jamais

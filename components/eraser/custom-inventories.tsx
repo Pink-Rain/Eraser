@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { customInventoryFamilies, customInventoryIcon, customInventoryIcons, defaultCustomInventoryIcon, describeCustomInventoryAccepts, formatCustomInventoryAccepts, parseCustomInventoryAccepts, type CustomInventoryFamily, type CustomInventoryIcon, type CustomInventoryLook, type InventoryContainerRecord } from "@/lib/inventory-schema"
+import { customInventoryFamilies, customInventoryIcon, customInventoryIcons, defaultCustomInventoryIcon, describeCustomInventoryAccepts, formatCustomInventoryAccepts, parseCustomInventoryAccepts, type CustomInventoryFamily, type CustomInventoryIcon, type CustomInventoryLook, type CustomInventorySide, type InventoryContainerRecord } from "@/lib/inventory-schema"
 import { cn } from "@/lib/utils"
 
 export const customInventoryIconComponents: Record<CustomInventoryIcon, LucideIcon> = {
@@ -33,29 +33,31 @@ export function CustomInventoryIconGlyph({ icon, className }: { icon: string; cl
 /** Ce que le popup envoie : nom, emplacements, et l'apparence de l'inventaire sur mesure. */
 export type CustomInventoryDraft = { name: string; capacity: number; custom: CustomInventoryLook }
 
-type Form = { name: string; capacity: string; color: string; icon: CustomInventoryIcon; families: CustomInventoryFamily[]; keywords: string }
+type Form = { name: string; capacity: string; color: string; icon: CustomInventoryIcon; families: CustomInventoryFamily[]; keywords: string; side: CustomInventorySide }
 
-function formOf(container: InventoryContainerRecord | null): Form {
-  if (!container?.custom) return { name: "", capacity: "10", color: defaultCustomInventoryColor, icon: defaultCustomInventoryIcon, families: [], keywords: "" }
+function formOf(container: InventoryContainerRecord | null, side: CustomInventorySide): Form {
+  if (!container?.custom) return { name: "", capacity: "10", color: defaultCustomInventoryColor, icon: defaultCustomInventoryIcon, families: [], keywords: "", side }
   const accepts = parseCustomInventoryAccepts(container.custom.accepts)
-  return { name: container.name, capacity: String(container.capacity), color: container.custom.color, icon: customInventoryIcon(container.custom.icon), families: accepts.families, keywords: accepts.keywords.join(", ") }
+  return { name: container.name, capacity: String(container.capacity), color: container.custom.color, icon: customInventoryIcon(container.custom.icon), families: accepts.families, keywords: accepts.keywords.join(", "), side: container.custom.side }
 }
+
+const sides: Array<{ value: CustomInventorySide; label: string }> = [{ value: "left", label: "Gauche" }, { value: "right", label: "Droite" }]
 
 /**
  * Créer ou modifier un inventaire sur mesure : nom, couleur, icône, emplacements et ce qu'on
  * peut y ranger (des familles, des mots-clés). L'aperçu en haut suit chaque choix.
  */
-export function CustomInventoryDialog({ open, container, pending, onOpenChange, onSave }: { open: boolean; /** `null` : un nouvel inventaire. */ container: InventoryContainerRecord | null; pending: boolean; onOpenChange: (open: boolean) => void; onSave: (draft: CustomInventoryDraft) => Promise<boolean> }) {
+export function CustomInventoryDialog({ open, container, side, pending, onOpenChange, onSave }: { open: boolean; /** `null` : un nouvel inventaire. */ container: InventoryContainerRecord | null; /** La colonne du + cliqué (un nouvel inventaire). */ side: CustomInventorySide; pending: boolean; onOpenChange: (open: boolean) => void; onSave: (draft: CustomInventoryDraft) => Promise<boolean> }) {
   return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent className="sm:max-w-lg">
       {/* Remonté à chaque ouverture : le formulaire repart de l'inventaire choisi. */}
-      {open && <CustomInventoryForm key={container?.id ?? "new"} container={container} pending={pending} onCancel={() => onOpenChange(false)} onSave={onSave} />}
+      {open && <CustomInventoryForm key={container?.id ?? `new:${side}`} container={container} side={side} pending={pending} onCancel={() => onOpenChange(false)} onSave={onSave} />}
     </DialogContent>
   </Dialog>
 }
 
-function CustomInventoryForm({ container, pending, onCancel, onSave }: { container: InventoryContainerRecord | null; pending: boolean; onCancel: () => void; onSave: (draft: CustomInventoryDraft) => Promise<boolean> }) {
-  const [form, setForm] = useState<Form>(() => formOf(container))
+function CustomInventoryForm({ container, side, pending, onCancel, onSave }: { container: InventoryContainerRecord | null; side: CustomInventorySide; pending: boolean; onCancel: () => void; onSave: (draft: CustomInventoryDraft) => Promise<boolean> }) {
+  const [form, setForm] = useState<Form>(() => formOf(container, side))
   const set = <K extends keyof Form>(key: K, value: Form[K]) => setForm((current) => ({ ...current, [key]: value }))
   const capacity = Math.trunc(Number(form.capacity))
   const valid = Boolean(form.name.trim()) && capacity >= 1 && capacity <= 10000
@@ -64,7 +66,7 @@ function CustomInventoryForm({ container, pending, onCancel, onSave }: { contain
   const toggleFamily = (family: CustomInventoryFamily) => set("families", form.families.includes(family) ? form.families.filter((candidate) => candidate !== family) : [...form.families, family])
   async function save() {
     if (!valid || pending) return
-    await onSave({ name: form.name.trim(), capacity, custom: { color: form.color, icon: form.icon, accepts } })
+    await onSave({ name: form.name.trim(), capacity, custom: { color: form.color, icon: form.icon, accepts, side: form.side } })
   }
   return <>
     <DialogHeader>
@@ -81,6 +83,14 @@ function CustomInventoryForm({ container, pending, onCancel, onSave }: { contain
       <div className="grid gap-4 sm:grid-cols-[1fr_7rem]">
         <Label className="grid gap-1.5 text-sm font-medium">Nom<Input value={form.name} onChange={(event) => set("name", event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void save() }} maxLength={120} placeholder="Trousse d’alchimiste, carquois…" autoFocus /></Label>
         <Label className="grid gap-1.5 text-sm font-medium">Emplacements<Input type="number" min={1} max={10000} value={form.capacity} onChange={(event) => set("capacity", event.target.value)} /></Label>
+      </div>
+      <div className="grid gap-1.5 text-sm font-medium">Colonne
+        <div className="flex gap-1.5" role="radiogroup" aria-label="Colonne de l’inventaire">
+          {sides.map((option) => {
+            const selected = form.side === option.value
+            return <button key={option.value} type="button" role="radio" aria-checked={selected} onClick={() => set("side", option.value)} className={cn("rounded-full border px-3 py-1 text-xs transition", selected ? "font-semibold" : "text-muted-foreground hover:bg-muted")} style={selected ? { color: form.color, borderColor: `${form.color}88`, backgroundColor: `${form.color}14` } : undefined}>{option.label}</button>
+          })}
+        </div>
       </div>
       <div className="grid gap-1.5 text-sm font-medium">Couleur<ColorSwatches value={form.color} onChange={(color) => set("color", color ?? defaultCustomInventoryColor)} none={null} ariaLabel="Couleur de l’inventaire" /></div>
       <div className="grid gap-1.5 text-sm font-medium">Icône
@@ -127,14 +137,15 @@ const craftColor = "#9a5f3c"
 export function CraftCorner() {
   const [opened, setOpened] = useState<(typeof craftKinds)[number]["key"] | null>(null)
   const current = craftKinds.find((kind) => kind.key === opened)
-  return <div className="rounded-[1.4rem] border p-3" style={{ borderColor: `${craftColor}42`, background: `linear-gradient(145deg, ${craftColor}12, rgba(255,255,255,.015))` }}>
+  // Étiré à la hauteur de la bourse, à côté d'elle : les boutons restent centrés dans la place.
+  return <div className="flex flex-col rounded-[1.4rem] border p-3" style={{ borderColor: `${craftColor}42`, background: `linear-gradient(145deg, ${craftColor}12, rgba(255,255,255,.015))` }}>
     <div className="mb-3 flex items-center gap-3 px-1"><div className="flex size-9 items-center justify-center rounded-xl" style={{ color: craftColor, backgroundColor: `${craftColor}18` }}><Anvil className="size-4.5" /></div><h3 className="font-display flex-1 text-xl font-semibold" style={{ color: craftColor }}>Craft</h3></div>
-    <div className="grid grid-cols-3 gap-2">
+    <div className="flex flex-1 items-center justify-center"><div className="grid grid-cols-3 gap-2">
       {craftKinds.map((kind) => {
         const Icon = kind.icon
         return <button key={kind.key} type="button" onClick={() => setOpened(kind.key)} aria-label={kind.label} title={kind.label} className="flex size-11 items-center justify-center rounded-xl border bg-card/70 shadow-sm transition hover:-translate-y-px hover:shadow-md focus-visible:outline-none focus-visible:ring-2" style={{ color: craftColor, borderColor: `${craftColor}40` }}><Icon className="size-5" /></button>
       })}
-    </div>
+    </div></div>
     <Dialog open={current !== undefined} onOpenChange={(open) => { if (!open) setOpened(null) }}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader><DialogTitle className="flex items-center gap-2">{current && <current.icon className="size-5" style={{ color: craftColor }} />}{current?.label}</DialogTitle><DialogDescription className="sr-only">{current?.label}</DialogDescription></DialogHeader>

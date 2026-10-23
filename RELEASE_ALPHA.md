@@ -1,18 +1,18 @@
-# Eraser 0.1.1-alpha.255 — Une jauge qui ouvre l'appétit
+# Eraser 0.1.1-alpha.256 — Chaque colonne son +
 
 Cette version arrive **sans réinstallation** (enveloppe 10, comme l'alpha 238) : Eraser la
-télécharge, redémarre son serveur et recharge la page tout seul. Rien n'est modifié dans Google
-Sheets.
+télécharge, redémarre son serveur et recharge la page tout seul. Dans Google Sheets, une
+colonne « Colonne » s'ajoute à droite de l'onglet « Contenants personnages » ; rien d'existant
+n'est déplacé ni réécrit.
 
-La barre de rassasiement de l'alpha 253, redessinée :
+D'après le retour sur l'alpha 254 :
 
-- **À sa place** : sous le token, **au-dessus** des états.
-- **Une vraie petite jauge** : cinq segments arrondis dans une pilule. C'est la barre qui se
-  colore, plus les cuisses : les segments pleins prennent la teinte du moment et la piste en
-  garde un voile, même vide. Les cuisses de poulet restent en motif discret dans chaque segment.
-- **Des couleurs douces** : rouge terre cuite à vide, puis ocre, olive, et vert sauge quand la
-  barre est pleine.
-- **Le titre centré en haut**, avec la lune sur la même ligne, à droite. Sur un petit écran, où
-  la colonne du portrait est étroite, le titre devient « Rassasiement ».
-- La même jauge, en plus fine, dans le tableau du dossier de campagne et dans l'aperçu de la
-  fenêtre « Nuit ou ellipse ».
+- **Un + sous chaque colonne** de l'onglet Inventaire : celui de gauche crée un inventaire sur
+  mesure en bas de la colonne de gauche, celui de droite en bas de celle de droite. Le popup
+  permet aussi de le changer de colonne (« Gauche » / « Droite »). Ceux créés avec l'alpha 254
+  vont à gauche.
+- **Plier et déplier** : un chevron sur Armes, Équipement, Purement esthétique, Inventaire, Au
+  sol et chaque inventaire sur mesure (un clic sur le titre marche aussi). Repliée, une
+  catégorie dit combien d'items elle garde. Le pli est retenu sur cet ordinateur, pour toutes
+  les fiches. La bourse et le Craft restent toujours ouverts.
+- **Craft** prend la même hauteur que la bourse, ses boutons centrés dedans.

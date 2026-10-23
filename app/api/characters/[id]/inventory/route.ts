@@ -42,7 +42,7 @@ function customInventoryInput(value: unknown) {
   if (!value || typeof value !== "object") return undefined
   const custom = value as Record<string, unknown>
   const text = (key: string) => typeof custom[key] === "string" ? custom[key] as string : undefined
-  return { color: text("color"), icon: text("icon"), accepts: text("accepts") }
+  return { color: text("color"), icon: text("icon"), accepts: text("accepts"), side: text("side") }
 }
 
 async function transferableCampaignIds(authorization: NonNullable<Awaited<ReturnType<typeof authorizedCharacter>>>) {

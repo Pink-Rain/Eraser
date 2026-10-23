@@ -122,7 +122,19 @@ export type InventoryContainerRecord = {
  * « Couleur », « Icône », « Contenu accepté » de « Contenants personnages ») : une version
  * plus ancienne d'Eraser le voit comme un sac ordinaire.
  */
-export type CustomInventoryLook = { color: string; icon: string; accepts: string }
+export type CustomInventoryLook = { color: string; icon: string; accepts: string; /** La colonne de l'onglet Inventaire où il s'affiche. */ side: CustomInventorySide }
+
+export type CustomInventorySide = "left" | "right"
+
+/** « Droite » (ou « right ») : la colonne de droite ; tout le reste, celle de gauche. */
+export function customInventorySide(value: string | undefined): CustomInventorySide {
+  return ["droite", "right"].includes((value ?? "").trim().toLocaleLowerCase("fr")) ? "right" : "left"
+}
+
+/** Le nom de la colonne dans la feuille. */
+export function customInventorySideLabel(side: CustomInventorySide) {
+  return side === "right" ? "Droite" : "Gauche"
+}
 
 /** Les icônes proposées (noms d'icônes lucide, gardés tels quels dans la feuille). */
 export const customInventoryIcons = [
@@ -279,9 +291,9 @@ export const inventoryWorkbookTabs = [
   },
   {
     name: "Contenants personnages",
-    // Couleur, Icône, Contenu accepté : ceux d'un inventaire sur mesure (vides pour les autres).
-    headers: ["ID", "ID personnage", "ID type", "Nom personnalisé", "Catégorie", "Capacité", "Ordre", "Créé le", "Supprimé le", "Couleur", "Icône", "Contenu accepté"],
-    widths: [170, 190, 170, 220, 140, 110, 90, 170, 170, 100, 120, 280],
+    // Couleur, Icône, Contenu accepté, Colonne : ceux d'un inventaire sur mesure (vides pour les autres).
+    headers: ["ID", "ID personnage", "ID type", "Nom personnalisé", "Catégorie", "Capacité", "Ordre", "Créé le", "Supprimé le", "Couleur", "Icône", "Contenu accepté", "Colonne"],
+    widths: [170, 190, 170, 220, 140, 110, 90, 170, 170, 100, 120, 280, 100],
   },
   {
     name: "Objets",

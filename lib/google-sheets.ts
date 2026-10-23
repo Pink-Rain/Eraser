@@ -76,6 +76,8 @@ import {
   canItemGoInCustomInventory,
   customInventoryColor,
   customInventoryIcon,
+  customInventorySide,
+  customInventorySideLabel,
   formatCustomInventoryAccepts,
   parseCustomInventoryAccepts,
   GROUND_CATEGORY,
@@ -6463,10 +6465,12 @@ type StoredInventoryContainer = {
   order: number
   createdAt: string
   deletedAt: string
-  /** Un inventaire sur mesure a une couleur ; les autres contenants laissent ces trois cases vides. */
+  /** Un inventaire sur mesure a une couleur ; les autres contenants laissent ces cases vides. */
   color: string
   icon: string
   accepts: string
+  /** « Gauche » ou « Droite » : sa colonne dans l'onglet Inventaire. */
+  side: string
   rowNumber: number
 }
 
@@ -6830,6 +6834,7 @@ async function readInventoryWorkbook(includeCatalog = true, options: InventoryRe
       color: customInventoryColor(row[9]),
       icon: row[10] || "",
       accepts: row[11] || "",
+      side: row[12] || "",
       rowNumber: index + 2,
     }] : []),
     items,
@@ -6932,6 +6937,7 @@ function inventoryContainerRow(container: StoredInventoryContainer): SheetCell[]
     container.color,
     container.icon,
     container.accepts,
+    container.side,
   ]
 }
 
@@ -6995,12 +7001,14 @@ function itemAutoFitsInventoryContainer(item: { genre?: string; type?: string; s
 }
 
 /** Couleur, icône et contenu accepté d'un inventaire sur mesure, vérifiés ; `null` si la couleur manque. */
-function customInventoryFields(input: { color?: string; icon?: string; accepts?: string } | undefined) {
+function customInventoryFields(input: CustomInventoryInput | undefined) {
   const color = customInventoryColor(input?.color)
   if (!color) return null
   const accepts = formatCustomInventoryAccepts(parseCustomInventoryAccepts((input?.accepts ?? "").slice(0, 600)))
-  return { color, icon: customInventoryIcon(input?.icon), accepts }
+  return { color, icon: customInventoryIcon(input?.icon), accepts, side: customInventorySideLabel(customInventorySide(input?.side)) }
 }
+
+type CustomInventoryInput = { color?: string; icon?: string; accepts?: string; side?: string }
 
 const requiredInventoryCurrencies = ["Or", "Cuivre", "Or noir"]
 
@@ -7092,7 +7100,7 @@ async function ensureCampaignInventoryStorage(ownerId: string, includeCatalog = 
         capacity: 50,
         order: 0,
         createdAt: new Date().toISOString(),
-        deletedAt: "", color: "", icon: "", accepts: "",
+        deletedAt: "", color: "", icon: "", accepts: "", side: "",
         rowNumber: 0,
       }
       await appendInventoryRows(workbook, inventoryContainerTab, [inventoryContainerRow(container)])
@@ -7167,7 +7175,7 @@ async function ensureCharacterInventoryStorage(characterId: string, includeCatal
           capacity: configuredType.capacity,
           order: nextOrder + index,
           createdAt: now,
-          deletedAt: "", color: "", icon: "", accepts: "",
+          deletedAt: "", color: "", icon: "", accepts: "", side: "",
           rowNumber: 0,
         }
       })
@@ -7222,7 +7230,7 @@ async function ensureRowInventoryStorage(ownerId: string, category: InventoryCat
       const configuredType = workbook.containerTypes.find((type) => type.id === baseType.id) ?? baseType
       const created: StoredInventoryContainer = {
         id: crypto.randomUUID(), characterId: ownerId, typeId: configuredType.id, customName: category === "Inventaire" ? "Inventaire" : "",
-        category, capacity: configuredType.capacity, order: 0, createdAt: new Date().toISOString(), deletedAt: "", color: "", icon: "", accepts: "", rowNumber: 0,
+        category, capacity: configuredType.capacity, order: 0, createdAt: new Date().toISOString(), deletedAt: "", color: "", icon: "", accepts: "", side: "", rowNumber: 0,
       }
       await appendInventoryRows(workbook, inventoryContainerTab, [inventoryContainerRow(created)])
       clearInventoryWorkbookCache()
@@ -7286,7 +7294,7 @@ async function ensureNpcBackpackInventoryStorage(npcId: string, includeCatalog =
     if (!state.backpack) {
       const created: StoredInventoryContainer = {
         id: crypto.randomUUID(), characterId: npcId, typeId: npcBackpackTypeId, customName: "Sac à dos",
-        category: "Inventaire", capacity: 15, order: 0, createdAt: now, deletedAt: "", color: "", icon: "", accepts: "", rowNumber: 0,
+        category: "Inventaire", capacity: 15, order: 0, createdAt: now, deletedAt: "", color: "", icon: "", accepts: "", side: "", rowNumber: 0,
       }
       await appendInventoryRows(workbook, inventoryContainerTab, [inventoryContainerRow(created)])
       clearInventoryWorkbookCache()
@@ -7421,7 +7429,7 @@ function buildCharacterInventory(characterId: string, workbook: InventoryWorkboo
         isBase: baseInventoryTypeIds.has(container.typeId),
         used,
         slots,
-        ...(container.color ? { custom: { color: container.color, icon: customInventoryIcon(container.icon), accepts: container.accepts } } : {}),
+        ...(container.color ? { custom: { color: container.color, icon: customInventoryIcon(container.icon), accepts: container.accepts, side: customInventorySide(container.side) } } : {}),
       }
     })
   return {
@@ -7526,13 +7534,13 @@ export async function addCharacterInventoryContainer(characterId: string, typeId
       capacity: type.capacity,
       order: nextInventoryContainerOrder(characterId, workbook),
       createdAt: new Date().toISOString(),
-      deletedAt: "", color: "", icon: "", accepts: "",
+      deletedAt: "", color: "", icon: "", accepts: "", side: "",
       rowNumber: 0,
     }))
   })
 }
 
-export async function createCharacterInventoryContainer(characterId: string, input: { name: string; category: string; capacity: number; custom?: { color?: string; icon?: string; accepts?: string } }) {
+export async function createCharacterInventoryContainer(characterId: string, input: { name: string; category: string; capacity: number; custom?: CustomInventoryInput }) {
   const name = input.name.trim()
   const custom = input.custom ? customInventoryFields(input.custom) : null
   // Un inventaire sur mesure est toujours un inventaire (une version plus ancienne y voit un sac).
@@ -7556,12 +7564,13 @@ export async function createCharacterInventoryContainer(characterId: string, inp
       color: custom?.color ?? "",
       icon: custom?.icon ?? "",
       accepts: custom?.accepts ?? "",
+      side: custom?.side ?? "",
       rowNumber: 0,
     }))
   })
 }
 
-export async function updateCharacterInventoryContainer(characterId: string, containerId: string, input: { name: string; capacity: number; custom?: { color?: string; icon?: string; accepts?: string } }) {
+export async function updateCharacterInventoryContainer(characterId: string, containerId: string, input: { name: string; capacity: number; custom?: CustomInventoryInput }) {
   return withInventoryLock(async () => {
     let workbook = await ensureCharacterInventoryStorage(characterId, true, { fresh: true })
     const container = workbook.containers.find((candidate) => candidate.id === containerId && candidate.characterId === characterId && !candidate.deletedAt)
