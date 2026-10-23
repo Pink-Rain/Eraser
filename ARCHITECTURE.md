@@ -377,6 +377,28 @@ n'est pas compilé et garde son comportement.
   parties dépliées sont dans l'adresse (`?ouvert=…`, `lib/open-sections.ts`) et le serveur ne
   calcule que celles-là (page Google Drive et Sheets).
 
+## Documents
+
+La page Document d’une campagne (`/campagne/[id]/document`, menu › Créateur de session)
+écrit des documents : un fond (fourni dans `public/documents/fonds`, envoyé depuis
+l’ordinateur ou une adresse) et des zones de texte posées dessus, chacune avec sa police
+(`public/documents/polices`, licence OFL), sa taille, son encre et son inclinaison. Le modèle
+est pur et partagé (`lib/document-model.ts`) : mesures en unités du document (largeur 1000),
+texte en paragraphes de morceaux stylés (gras, italique, souligné, barré, couleur).
+
+- Une ligne par document dans la feuille « Documents de campagne » (`lib/campaign-documents.ts`),
+  créée au premier document enregistré ; « ID session » le range dans une session.
+- « Enregistrer » dessine le document dans le navigateur (`components/eraser/document-render.ts`,
+  même coupure des lignes que l’éditeur) : le rendu WebP et l’impression JPEG sur fond blanc
+  vont dans Drive avec le fond envoyé. Le PDF (une page, `lib/document-pdf.ts`) est fait à la
+  demande de l’impression.
+- Donner un document (`.../documents/[documentId]/give`) pose un item personnalisé dans le sac
+  du personnage ; l’entrée `{"target":"document"}` du JSON de l’exemplaire le désigne, et
+  l’inventaire l’ouvre d’un clic. `keepItemCharges` et `setCharacterInventoryItemModifiers`
+  gardent cette entrée.
+- Le Créateur de session montre les documents de la session ; Roll20 les reçoit en handouts
+  (image) et en PDF du Journal (voir plus bas).
+
 ## Tabletop
 
 Le tabletop conserve ses pages, routes API, composants Leaflet, styles globaux
@@ -389,7 +411,13 @@ Les sources sont dans `integrations/roll20/`. La page Roll20 télécharge encore
 les copies versionnées dans `public/roll20/`; elles doivent donc rester présentes
 tant qu’un script de génération ne les remplace pas.
 
-Le compagnon appelle `/api/roll20/bridge` sur le serveur local. Le lien d’une
+Le compagnon appelle `/api/roll20/bridge` sur le serveur local (`?view=players` : les
+personnages joueurs seuls, `?view=documents` : les documents seuls). Le token par défaut
+qu’il dessine reprend le cadrage de l’éditeur de token (`framing`, `token-art.js`) ; le Mod
+met aussi à jour les jetons déjà posés sur les cartes. Un document devient un handout (son
+image, déposée comme les portraits) ; son PDF est déposé dans Journal › + Ajouter › PDF par
+le compagnon, ou téléchargé si cette fenêtre de Roll20 a changé (le Mod ne peut pas créer de
+PDF). Le lien d’une
 campagne est encore représenté dans `roll20_campaign_links` en SQLite locale.
 `shared_records` fournit le support nécessaire à un état commun, mais la
 migration des liens existants doit être traitée séparément et de façon

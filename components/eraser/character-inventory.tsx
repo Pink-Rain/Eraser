@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent, type ReactNode, type SetStateAction } from "react"
-import { Anvil, ArrowDownToLine, ArrowLeft, Backpack, Check, ChevronDown, ChevronRight, Coins, Gem, LoaderCircle, Minus, MoveRight, PackageOpen, Pencil, Plus, Search, Shield, Sword, Trash2, UserRound, Users, X } from "lucide-react"
+import { Anvil, ArrowDownToLine, ArrowLeft, Backpack, BookOpen, Check, ChevronDown, ChevronRight, Coins, Gem, LoaderCircle, Minus, MoveRight, PackageOpen, Pencil, Plus, Search, Shield, Sword, Trash2, UserRound, Users, X } from "lucide-react"
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { useInventoryReceived } from "@/components/eraser/item-notifications"
@@ -30,6 +30,8 @@ import { ItemDisplaySettingsLink, itemValuesOf, itemZoneParts, placeZone, useIte
 import { itemFieldStyle, type ItemDisplayField, type ItemFieldKey } from "@/lib/item-display"
 import { loadFullInventory } from "@/lib/inventory-fetch"
 import { playItemEquipped, playItemUnequipped } from "@/lib/sounds"
+import { DocumentViewerDialog } from "@/components/eraser/document-viewer"
+import { documentOfItem } from "@/lib/document-model"
 
 const categoryPresentation: Record<InventoryCategory, { icon: typeof Sword; color: string; singular: string; label?: string }> = {
   Armes: { icon: Sword, color: "#b9504e", singular: "un rangement d’armes" },
@@ -222,8 +224,11 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
   const fresh = useNewSlot(slot.id)
   const [moving, setMoving] = useState(false)
   const [linking, setLinking] = useState(false)
+  const [reading, setReading] = useState(false)
   const itemDisplay = useItemDisplay()
   const modifiers = parseItemModifiers(slot.modifiers)
+  // Un document donné par le MJ (page Document) : il s'ouvre d'un clic.
+  const documentRef = documentOfItem(slot.modifiers)
   // Ce que cet exemplaire change de son objet (fenêtre de l'enclume) : affiché à la place.
   const changes = parseItemOverrides(slot.modifiers)
   const customized = Object.keys(changes).length > 0 || parseItemAttachments(slot.modifiers).length > 0
@@ -280,12 +285,14 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
       {equippable && <Checkbox checked={slot.equipped} disabled={pending} onCheckedChange={(checked) => { if (checked === true) playItemEquipped(); else playItemUnequipped(); void mutate({ action: "set-equipped", slotId: slot.id, equipped: checked === true }, `slot:${slot.id}`) }} className="mt-3" aria-label={`${slot.equipped ? "Déséquiper" : "Équiper"} ${item.name}`} title={slot.equipped ? (modifiers.length ? "Équipé — ses liens comptent dans les totaux" : "Équipé") : "Non équipé"} />}
       {/* L'icône, et sous elle les compétences liées : la place sous l'icône était vide. */}
       <div className="flex w-14 shrink-0 flex-col items-center gap-1.5">
-        <div className="flex size-14 items-center justify-center overflow-hidden rounded-lg bg-muted/70 text-muted-foreground">{visualIsImage ? <img src={item.image} alt="" loading="lazy" decoding="async" className="size-full object-cover" /> : <ObjectIcon icon={item.icon} name={item.name} type={item.type} subtype={item.subtype} className="size-full p-0.5" emojiClassName="text-2xl" fallback={<PackageOpen className="size-4" />} />}</div>
+        {documentRef
+          ? <button type="button" onClick={() => setReading(true)} title="Lire le document" className="flex size-14 items-center justify-center overflow-hidden rounded-lg bg-[radial-gradient(circle_at_center,rgb(120_90_50/0.18),transparent_72%)] transition hover:scale-105"><img src={item.image} alt="" loading="lazy" decoding="async" className="size-full object-contain" /></button>
+          : <div className="flex size-14 items-center justify-center overflow-hidden rounded-lg bg-muted/70 text-muted-foreground">{visualIsImage ? <img src={item.image} alt="" loading="lazy" decoding="async" className="size-full object-cover" /> : <ObjectIcon icon={item.icon} name={item.name} type={item.type} subtype={item.subtype} className="size-full p-0.5" emojiClassName="text-2xl" fallback={<PackageOpen className="size-4" />} />}</div>}
         <ItemModifierSummary stacked modifiers={modifiers} className={slot.equipped ? "" : "opacity-55"} />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-start gap-2">
-          <div className="min-w-0 flex-1"><div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5"><InlineField readOnly={readOnly} label="le nom" value={item.name} html={item.nameHtml} className="block max-w-full text-sm font-semibold" onCommit={(name) => update({ name }).then(() => undefined)} /><ItemCharges item={shown} raw={slot.modifiers} readOnly={readOnly} onChange={(modifiers) => void mutate({ action: "set-modifiers", slotId: slot.id, modifiers }, `slot:${slot.id}`)} />{nameParts}</div>{underParts.length > 0 && <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{underParts.map((part, index) => <span key={index} className="contents">{index > 0 && <span>·</span>}{part}</span>)}</div>}</div>
+          <div className="min-w-0 flex-1"><div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5"><InlineField readOnly={readOnly} label="le nom" value={item.name} html={item.nameHtml} className="block max-w-full text-sm font-semibold" onCommit={(name) => update({ name }).then(() => undefined)} /><ItemCharges item={shown} raw={slot.modifiers} readOnly={readOnly} onChange={(modifiers) => void mutate({ action: "set-modifiers", slotId: slot.id, modifiers }, `slot:${slot.id}`)} />{documentRef && <button type="button" onClick={() => setReading(true)} className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/8 px-2 py-0.5 text-[11px] font-semibold text-primary transition hover:bg-primary/15"><BookOpen className="size-3" />Lire</button>}{nameParts}</div>{underParts.length > 0 && <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{underParts.map((part, index) => <span key={index} className="contents">{index > 0 && <span>·</span>}{part}</span>)}</div>}</div>
           {!readOnly && <div className="inline-flex items-center gap-0.5"><button type="button" disabled={pending} onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: slot.quantity - 1, ...expected }, `slot:${slot.id}`)} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" aria-label={`Retirer un ${item.name}`}><Minus className="size-3" /></button><span className="min-w-7 text-center text-sm font-semibold tabular-nums">{slot.quantity}<span className="text-[9px] font-normal text-muted-foreground">/{item.maxQuantity}</span></span><button type="button" disabled={pending || slot.quantity >= item.maxQuantity} onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: slot.quantity + 1, ...expected }, `slot:${slot.id}`)} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted disabled:opacity-30" aria-label={`Ajouter un ${item.name}`}><Plus className="size-3" /></button></div>}
           {readOnly && <span className="shrink-0 text-sm font-semibold tabular-nums">×{slot.quantity}</span>}
           {equippable && <button type="button" disabled={pending} onClick={() => setLinking(true)} className={`flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-muted ${modifiers.length || customized ? "text-primary" : "text-muted-foreground"}`} aria-label={`Modifier cet exemplaire de ${item.name} : compétence, valeur, distance, actions, attributs, matériaux, runes, compétences liées`} title="Cet exemplaire : compétence, valeur, distance, actions, attributs, matériaux, runes, compétences liées"><Anvil className="size-3.5" /></button>}
@@ -295,6 +302,7 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
         <div className="mt-2 grid gap-1 text-xs leading-5 text-muted-foreground empty:hidden"><ItemDescription readOnly={readOnly} item={item} template={shown} withDescription={withDescription} extras={descriptionParts} onCommit={(description) => update({ description }).then(() => undefined)} onRichCommit={(descriptionHtml) => void update({ description: richTextPlainText(descriptionHtml), descriptionHtml })} />{effectParts}</div>
       </div>
     </div>
+    {documentRef && <DocumentViewerDialog document={reading ? { campaignId: documentRef.campaignId, documentId: documentRef.documentId, title: item.name } : null} onClose={() => setReading(false)} />}
     {equippable && <ItemModifierDialog open={linking} onOpenChange={setLinking} itemName={item.name} base={item} effective={shown} modifiers={modifiers} effectHtml={item.effectHtml?.trim() ? sanitizeRichText(item.effectHtml) : escapeRichText(item.effect).replace(/\n/g, "<br>")} onSaveEffect={(effectHtml) => update({ effect: richTextPlainText(effectHtml), effectHtml })} pending={pending} onSave={(serialized) => mutate({ action: "set-modifiers", slotId: slot.id, modifiers: keepItemCharges(serialized, slot.modifiers) }, `slot:${slot.id}`)} />}
   </article>
 }

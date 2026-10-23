@@ -1,7 +1,8 @@
 // 0.3.0 : le service worker ne fait plus que les requêtes réseau vers Eraser.
 // Toute la configuration Roll20 passe par le script Mod.
+// 0.8.0 : « eraser-file » télécharge aussi un fichier qui n'est pas une image (PDF des documents).
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (!message || !['eraser-fetch', 'eraser-image'].includes(message.type)) return false;
+  if (!message || !['eraser-fetch', 'eraser-image', 'eraser-file'].includes(message.type)) return false;
   (async () => {
     try {
       const response = await fetch(message.url, {
@@ -10,10 +11,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         body: message.body || undefined,
         cache: 'no-store',
       });
-      if (message.type === 'eraser-image') {
-        if (!response.ok) throw new Error('Téléchargement du portrait impossible (' + response.status + ').');
-        const type = (response.headers.get('content-type') || 'image/png').split(';')[0];
-        if (!type.startsWith('image/')) throw new Error('Le lien du portrait ne renvoie pas une image (' + type + ').');
+      if (message.type === 'eraser-image' || message.type === 'eraser-file') {
+        const image = message.type === 'eraser-image';
+        if (!response.ok) throw new Error((image ? 'Téléchargement du portrait impossible (' : 'Téléchargement du fichier impossible (') + response.status + ').');
+        const type = (response.headers.get('content-type') || (image ? 'image/png' : 'application/octet-stream')).split(';')[0];
+        if (image && !type.startsWith('image/')) throw new Error('Le lien du portrait ne renvoie pas une image (' + type + ').');
         const bytes = new Uint8Array(await response.arrayBuffer());
         let binary = '';
         for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));

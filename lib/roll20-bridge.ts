@@ -5,11 +5,14 @@ import { roll20CampaignLinks } from "@/db/schema"
 import { getCampaignDashboard, listCampaignMembers, listNpcBackpackSummaries, listNpcs, listSavedShops, listTabletopCharacterEntitiesByIds, saveNpcs } from "@/lib/google-sheets"
 import { readCharacterPortrait } from "@/lib/character-portraits"
 import { sharedMediaVersion } from "@/lib/shared-media"
-import { readToken, tokenVersion, type TokenKind } from "@/lib/tokens"
+import { readToken, readTokenFrames, tokenVersion, type TokenKind } from "@/lib/tokens"
+import { resolveTokenFrame, shopInterior, type TokenSubject } from "@/lib/token-frames"
 import { readNpcPortrait } from "@/lib/npc-portraits"
 import type { AuthorizedUser } from "@/lib/server-auth"
 import { listCampaignSessions } from "@/lib/campaign-sessions"
 import { shopForPlayers } from "@/lib/shop-purchase"
+import { documentFileName, documentPdf, listCampaignDocuments, readDocumentImage } from "@/lib/campaign-documents"
+import { readPortraitFramings } from "@/lib/portrait-framing"
 
 function bytesToBase64Url(bytes: Uint8Array) {
   let binary = ""
@@ -84,34 +87,63 @@ async function roll20LinkFromImageToken(campaignId: string, imageToken: string) 
 
 /** Les sessions de la campagne liée, de la plus récente à la plus ancienne. */
 export async function roll20SessionList(link: typeof roll20CampaignLinks.$inferSelect) {
-  const sessions = await listCampaignSessions(link.campaignId)
-  return [...sessions].reverse().map((session) => ({ id: session.id, name: session.name, createdAt: session.createdAt, npcCount: session.npcIds.length, shopCount: session.shopIds.length }))
+  const [sessions, documents] = await Promise.all([listCampaignSessions(link.campaignId), listCampaignDocuments(link.campaignId).catch(() => [])])
+  return [...sessions].reverse().map((session) => ({ id: session.id, name: session.name, createdAt: session.createdAt, npcCount: session.npcIds.length, shopCount: session.shopIds.length, documentCount: documents.filter((document) => document.sessionId === session.id && document.renderVersion).length }))
 }
+
+/** « players » : les personnages joueurs seuls ; « documents » : les documents seuls. */
+export type Roll20Scope = "" | "players" | "documents"
 
 /**
  * Sans `sessionId`, « Tout synchroniser » : tous les PNJs et magasins présents dans le
- * Créateur de session. Avec, seulement ceux de cette session.
+ * Créateur de session, et tous les documents. Avec, seulement ceux de cette session.
+ * `scope` « players » (« Mettre à jour les personnages joueurs ») ne lit que les joueurs de la
+ * campagne ; « documents », que les documents : moins de lectures Google.
  */
-export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$inferSelect, origin: string, game: { id?: string; name?: string }, sessionId = "") {
+export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$inferSelect, origin: string, game: { id?: string; name?: string }, sessionId = "", scope: Roll20Scope = "") {
   const campaign = await getCampaignDashboard(null, link.campaignId)
   if (!campaign) throw new Error("CAMPAIGN_NOT_FOUND")
-  const session = sessionId ? (await listCampaignSessions(link.campaignId)).find((candidate) => candidate.id === sessionId) : null
-  if (sessionId && !session) throw new Error("SESSION_NOT_FOUND")
-  const [npcs, shops] = session
-    ? await Promise.all([listNpcs(link.campaignId), listSavedShops(link.campaignId)]).then(([allNpcs, allShops]) => {
-      const npcIds = new Set(session.npcIds)
-      const shopIds = new Set(session.shopIds)
-      return [allNpcs.filter((npc) => npcIds.has(npc.id)), allShops.filter((shop) => shopIds.has(shop.id))] as const
-    })
-    : await Promise.all([listNpcs(link.campaignId, true), listSavedShops(link.campaignId, true)])
+  const session = sessionId && !scope ? (await listCampaignSessions(link.campaignId)).find((candidate) => candidate.id === sessionId) : null
+  if (sessionId && !scope && !session) throw new Error("SESSION_NOT_FOUND")
+  const withEntities = scope !== "documents"
+  const withSheets = !scope
+  const [npcs, shops] = !withSheets
+    ? [[], []] as const
+    : session
+      ? await Promise.all([listNpcs(link.campaignId), listSavedShops(link.campaignId)]).then(([allNpcs, allShops]) => {
+        const npcIds = new Set(session.npcIds)
+        const shopIds = new Set(session.shopIds)
+        return [allNpcs.filter((npc) => npcIds.has(npc.id)), allShops.filter((shop) => shopIds.has(shop.id))] as const
+      })
+      : await Promise.all([listNpcs(link.campaignId, true), listSavedShops(link.campaignId, true)])
   // Les personnages joueurs : ceux de la session, ou tous ceux de la campagne.
-  const characterIds = session ? session.characterIds : (await listCampaignMembers(link.campaignId)).map((member) => member.id)
-  const [inventories, characters] = await Promise.all([
+  const characterIds = !withEntities ? [] : session ? session.characterIds : (await listCampaignMembers(link.campaignId)).map((member) => member.id)
+  const [inventories, characters, framings, frames, documents] = await Promise.all([
     listNpcBackpackSummaries(npcs.map((npc) => npc.id)),
     listTabletopCharacterEntitiesByIds(characterIds),
+    // Le cadrage et le cadre choisis dans l'éditeur de token : le token par défaut que dessine
+    // le compagnon est le même que celui de l'éditeur.
+    withEntities ? readPortraitFramings().catch(() => ({})) : Promise.resolve({}),
+    withEntities ? readTokenFrames().catch(() => ({})) : Promise.resolve({}),
+    // Une feuille des documents illisible ne bloque pas le reste de la synchronisation.
+    scope === "players" ? Promise.resolve([]) : listCampaignDocuments(link.campaignId).catch(() => []),
   ])
+  const framing = (kind: TokenKind, id: string) => (framings as Record<string, { x: number; y: number; span: number }>)[`${kind}:${id}`] ?? null
+  // Le cadre (lib/token-frames.ts) : le choix de l'éditeur, sinon le cadre par défaut du token.
+  // Ses images sont dans public/token-frames, servies sans clé par le serveur local.
+  const frame = (kind: TokenKind, id: string, subject: TokenSubject, withPortrait: boolean) => {
+    const chosen = resolveTokenFrame(subject, (frames as Record<string, string>)[`${kind}:${id}`])
+    return {
+      id: chosen.id,
+      radius: chosen.radius,
+      front: `${origin}${chosen.front}`,
+      back: chosen.back ? `${origin}${chosen.back}` : "",
+      // Un magasin sans vendeur montre l'intérieur de la boutique dans sa porte.
+      interior: subject.kind === "shop" && !withPortrait ? `${origin}${shopInterior(subject.shopKey)}` : "",
+    }
+  }
   const npcById = new Map(npcs.map((npc) => [npc.id, npc]))
-  const imageUrl = (kind: TokenKind, id: string, type: "portrait" | "token", version = "") =>
+  const imageUrl = (kind: TokenKind | "document", id: string, type: "portrait" | "token" | "image" | "pdf", version = "") =>
     `${origin}/api/roll20/bridge/portrait/${encodeURIComponent(id)}?campaign=${encodeURIComponent(link.campaignId)}&key=${encodeURIComponent(link.imageToken)}&kind=${kind}&type=${type}${version ? `&v=${encodeURIComponent(version.replace(/[^0-9A-Za-z]/g, ""))}` : ""}`
   const portraitUrl = (npcId: string, portrait: string) => portrait ? imageUrl("npc", npcId, "portrait") : ""
   // Version du portrait : le compagnon refait le token par défaut quand elle change.
@@ -138,8 +170,12 @@ export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$in
       portraitUrl: await characterHasPortrait(character.id, character.portrait) ? imageUrl("character", character.id, "portrait") : "",
       tokenUrl: await tokenUrl("character", character.id),
       portraitVersion: await portraitVersion(`characters/${character.id}/portrait`, character.portrait),
+      framing: framing("character", character.id),
+      frame: frame("character", character.id, { kind: "character" }, true),
       currentHp: character.currentHp,
       totalHp: character.totalHp,
+      speed: character.speed,
+      profile: character.subtitle,
     }))),
     npcs: await Promise.all(npcs.map(async (npc) => ({
       id: npc.id,
@@ -147,6 +183,8 @@ export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$in
       portraitUrl: portraitUrl(npc.id, npc.portrait),
       tokenUrl: await tokenUrl("npc", npc.id),
       portraitVersion: npc.portrait ? await portraitVersion(`npcs/${npc.id}/portrait`, npc.portrait) : "",
+      framing: framing("npc", npc.id),
+      frame: frame("npc", npc.id, { kind: "npc", group: npc.inPlayerGroup }, true),
       currentHp: npc.currentHp,
       totalHp: npc.totalHp,
       constitution: npc.constitution,
@@ -168,9 +206,23 @@ export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$in
         portraitUrl: seller ? portraitUrl(seller.id, seller.portrait) : "",
         tokenUrl: await tokenUrl("shop", shop.id),
         portraitVersion: seller?.portrait ? await portraitVersion(`npcs/${seller.id}/portrait`, seller.portrait) : "",
+        // Le cadrage du token du magasin, sinon celui du token du vendeur.
+        framing: framing("shop", shop.id) ?? (seller ? framing("npc", seller.id) : null),
+        frame: frame("shop", shop.id, { kind: "shop", shopKey: shop.key }, Boolean(seller?.portrait)),
         seller: seller ? { id: seller.id, name: seller.name, portraitUrl: portraitUrl(seller.id, seller.portrait) } : null,
       }
     })),
+    // Les documents : ceux de la session, ou tous ceux de la campagne. Seuls ceux qui ont un
+    // rendu enregistré partent (un document jamais enregistré n'a pas d'image).
+    documents: documents
+      .filter((document) => document.renderVersion && (!session || document.sessionId === session.id))
+      .map((document) => ({
+        id: document.id,
+        name: document.title,
+        version: document.renderVersion,
+        imageUrl: imageUrl("document", document.id, "image", document.renderVersion),
+        pdfUrl: imageUrl("document", document.id, "pdf", document.renderVersion),
+      })),
   }
 }
 
@@ -218,6 +270,16 @@ export async function roll20Image(campaignId: string, kind: string, id: string, 
   if (kind === "shop" && type === "token") {
     if (!(await listSavedShops(campaignId)).some((shop) => shop.id === id)) return null
     return tokenImage("shop", id)
+  }
+  if (kind === "document") {
+    const document = (await listCampaignDocuments(campaignId)).find((candidate) => candidate.id === id)
+    if (!document) return null
+    if (type === "pdf") {
+      const pdf = await documentPdf(campaignId, id, document.title)
+      return pdf ? { body: pdf, contentType: "application/pdf", fileName: documentFileName(document.title, "pdf") } : null
+    }
+    const object = await readDocumentImage(campaignId, id, "rendu")
+    return object ? { body: object.body, contentType: object.httpMetadata?.contentType || "image/webp" } : null
   }
   return null
 }

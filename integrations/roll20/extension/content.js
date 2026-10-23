@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  const VERSION = '0.7.2';
+  const VERSION = '0.8.0';
   const API = 'http://127.0.0.1:32147/api/roll20/bridge';
   const IS_TOP = window.top === window;
   let syncing = false;
@@ -212,21 +212,39 @@
     return image.dataUrl;
   }
 
-  // Sans token préparé dans Eraser : l'avatar centré dans son cadre (token-art.js,
-  // le même dessin que l'éditeur de token de l'application).
+  async function imageFrom(url, what) {
+    const image = new Image();
+    const dataUrl = await downloadImage(url, what);
+    await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = () => reject(new Error('Le ' + what + ' n’est pas une image lisible.')); image.src = dataUrl; });
+    return image;
+  }
+
+  // Les images des cadres (public/token-frames d'Eraser), téléchargées une fois par page.
+  const frameImages = new Map();
+  function frameImage(url) {
+    if (!frameImages.has(url)) frameImages.set(url, imageFrom(url, 'cadre').catch((error) => { frameImages.delete(url); throw error; }));
+    return frameImages.get(url);
+  }
+
+  // Sans token préparé dans Eraser : le token que l'éditeur de token aurait fait, avec le cadre
+  // choisi (sinon celui par défaut) et l'avatar cadré comme dans Eraser (token-art.js).
   async function defaultTokenFile(kind, value) {
     const art = globalThis.EraserTokenArt;
     if (!art) throw new Error('Le dessin des tokens est absent du compagnon.');
-    const style = kind === 'shop'
-      ? { kind: 'shop', shopKey: art.shopFronts[value.key] ? value.key : 'market' }
-      : { kind: kind === 'character' ? 'character' : 'npc' };
-    let image = null;
-    if (value.portraitUrl) {
-      const dataUrl = await downloadImage(value.portraitUrl, 'portrait');
-      image = new Image();
-      await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = () => reject(new Error('Le portrait n’est pas une image lisible.')); image.src = dataUrl; });
+    const image = value.portraitUrl ? await imageFrom(value.portraitUrl, 'portrait') : null;
+    let canvas = null;
+    if (value.frame?.front && art.renderFramedToken) {
+      try {
+        const [front, back, interior] = await Promise.all([frameImage(value.frame.front), value.frame.back ? frameImage(value.frame.back) : null, !image && value.frame.interior ? frameImage(value.frame.interior) : null]);
+        canvas = art.renderFramedToken({ front, back, interior, radius: value.frame.radius }, image, value.framing || null);
+      } catch { canvas = null; /* cadre introuvable : le dessin intégré au compagnon */ }
     }
-    const canvas = art.renderDefaultToken(style, image);
+    if (!canvas) {
+      const style = kind === 'shop'
+        ? { kind: 'shop', shopKey: art.shopFronts[value.key] ? value.key : 'market' }
+        : { kind: kind === 'character' ? 'character' : 'npc' };
+      canvas = art.renderDefaultToken(style, image, value.framing || null);
+    }
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
     if (!blob) throw new Error('Le token par défaut n’a pas pu être dessiné.');
     return new File([blob], (String(value.name || 'token').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9_-]+/gi, '-') || 'token') + '-token.png', { type: 'image/png' });
@@ -235,7 +253,7 @@
   async function uploadImage(imported, source, name, role, options) {
     const file = source instanceof File
       ? source
-      : await toUploadableFile(await downloadImage(source, role === 'token' ? 'token' : 'portrait'), name + (role === 'token' ? '-token' : ''));
+      : await toUploadableFile(await downloadImage(source, role === 'token' ? 'token' : role === 'handout' ? 'document' : 'portrait'), name + (role === 'token' ? '-token' : ''));
     const doneId = rid();
     const done = waitForAcknowledgement(doneId, 60000, 'Roll20 n’a pas renvoyé l’image importée en 60 s (upload bloqué ou table de jeu non visible).');
     try {
@@ -267,7 +285,10 @@
     // Aucun token préparé : le compagnon fabrique le token par défaut. Son empreinte
     // suit le portrait, il est donc refait quand l'avatar change dans Eraser.
     const automatic = !value.tokenUrl && (Boolean(value.portraitUrl) || kind === 'shop');
-    const sent = automatic ? { ...value, tokenUrl: 'auto1:' + (value.portraitUrl || 'shop:' + value.key) + ':' + (value.portraitVersion || '') } : value;
+    // « auto3 » : le token par défaut suit aussi le cadrage de l'avatar et le cadre choisi
+    // dans Eraser (il est refait quand l'un d'eux change).
+    const framingKey = value.framing ? [value.framing.x, value.framing.y, value.framing.span].map((number) => Math.round(Number(number) * 1000)).join(',') : '';
+    const sent = automatic ? { ...value, tokenUrl: 'auto3:' + (value.portraitUrl || 'shop:' + value.key) + ':' + (value.portraitVersion || '') + ':' + framingKey + ':' + (value.frame?.id || '') } : value;
     let result;
     try {
       result = await importPayload({ campaign: payload.campaign, kind, value: sent, folder: folder || '' });
@@ -307,6 +328,124 @@
     return report;
   }
 
+  /* ---------- documents ---------- */
+  async function downloadFile(url, name, type) {
+    const file = await runtimeMessage({ type: 'eraser-file', url: new URL(url, API).href });
+    if (!file?.ok) throw new Error(file?.error || 'Le fichier n’a pas pu être téléchargé depuis Eraser.');
+    const blob = dataUrlToBlob(file.dataUrl);
+    return new File([blob], name, { type: type || blob.type });
+  }
+
+  const safeFileName = (value, fallback) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 _-]+/gi, '').trim().replace(/\s+/g, ' ') || fallback;
+
+  function visible(element) {
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility !== 'hidden';
+  }
+  // La page et ses racines fantômes (shadow DOM) : l'interface de Roll20 en utilise.
+  function queryAll(selector) {
+    const found = [...document.querySelectorAll(selector)];
+    for (const root of chatRootList) if (root !== document.body && root.querySelectorAll) found.push(...root.querySelectorAll(selector));
+    return [...new Set(found)];
+  }
+  const labelOf = (element) => [element.textContent, element.getAttribute('aria-label'), element.getAttribute('title')].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  const pdfInput = () => queryAll('input[type="file"]').find((input) => /pdf/i.test(input.accept || ''));
+  async function waitFor(find, timeoutMs) {
+    for (const until = Date.now() + timeoutMs; Date.now() < until; await sleep(150)) {
+      const found = find();
+      if (found) return found;
+    }
+    return null;
+  }
+
+  /**
+   * Dépose le PDF dans le Journal comme le MJ le ferait : onglet Journal › « + Ajouter » ›
+   * « PDF », puis le fichier choisi dans la fenêtre d'envoi. Le Mod ne peut pas créer de PDF.
+   * Si l'un des boutons est introuvable (interface de Roll20 changée), rien d'autre n'est
+   * cliqué : l'appelant télécharge alors le PDF pour que le MJ le glisse lui-même.
+   */
+  async function uploadPdfToJournal(file) {
+    let input = pdfInput();
+    if (!input) {
+      const tab = queryAll('a[href="#journal"], [data-tab="journal"], button[aria-label="Journal"], [title="Journal"]').find(visible);
+      if (tab) { tab.click(); await sleep(350); }
+      const journal = document.getElementById('journal') || document;
+      const add = [...journal.querySelectorAll('button, a, .btn, [role="button"]')].filter(visible).find((element) => /^\+?\s*(add|ajouter)$/i.test(labelOf(element)));
+      if (!add) throw new Error('bouton « + Ajouter » du Journal introuvable');
+      add.click();
+      const item = await waitFor(() => queryAll('li, a, button, [role="menuitem"], [role="option"]').filter(visible).find((element) => /^pdf$/i.test(labelOf(element))), 3000);
+      if (!item) { add.click(); throw new Error('choix « PDF » du menu « + Ajouter » introuvable'); }
+      item.click();
+      input = await waitFor(pdfInput, 8000);
+      if (!input) throw new Error('fenêtre d’envoi du PDF introuvable');
+    }
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    input.files = transfer.files;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await sleep(700);
+    // Une fenêtre qui attend encore sa confirmation : seul un bouton d'envoi explicite est cliqué.
+    const dialog = input.closest('[role="dialog"], dialog, .modal, .ui-dialog') || null;
+    const confirm = dialog && [...dialog.querySelectorAll('button')].filter((button) => visible(button) && !button.disabled).find((button) => /^(upload|téléverser|televerser|importer|envoyer|charger|ajouter le pdf|add pdf)/i.test(labelOf(button)));
+    if (confirm) confirm.click();
+  }
+
+  function saveFileLocally(file) {
+    const url = URL.createObjectURL(file);
+    const link = Object.assign(document.createElement('a'), { href: url, download: file.name });
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+
+  /**
+   * Un document d'Eraser : un handout (son image, lisible tout de suite) et son PDF dans le
+   * Journal. Le PDF n'est redéposé que si le document a changé depuis le dernier envoi.
+   */
+  async function importDocument(payload, doc, label, folder) {
+    const report = { imported: false, image: false, pdf: false, pdfSaved: false, characterId: '', failures: [], warnings: [] };
+    let result;
+    try {
+      result = await importPayload({ campaign: payload.campaign, kind: 'document', value: { id: doc.id, name: doc.name, imageUrl: doc.imageUrl }, folder: folder || '' });
+      if (!result.handoutId) throw new Error('Roll20 n’a pas confirmé la création du handout.');
+      report.imported = true;
+      report.characterId = result.handoutId;
+    } catch (error) {
+      report.failures.push(doc.name + ' : document — ' + error.message);
+      return report;
+    }
+    if (result.needsImage) {
+      status(label + ' (image)');
+      try {
+        await uploadImage(result, doc.imageUrl, doc.name, 'handout', { bar: false });
+        report.image = true;
+      } catch (error) { report.failures.push(doc.name + ' : image — ' + error.message); }
+    }
+    if (doc.pdfUrl) {
+      const sent = (await storageGet('eraserPdfs')) || {};
+      const key = gameId() + ':' + doc.id;
+      if (sent[key] !== doc.version) {
+        status(label + ' (PDF)');
+        let file = null;
+        try {
+          file = await downloadFile(doc.pdfUrl, safeFileName(doc.name, 'document') + '.pdf', 'application/pdf');
+          await uploadPdfToJournal(file);
+          report.pdf = true;
+          await storageSet({ eraserPdfs: { ...sent, [key]: doc.version } });
+        } catch (error) {
+          if (file) {
+            saveFileLocally(file);
+            report.pdfSaved = true;
+            report.warnings.push(doc.name + ' : PDF téléchargé sur ton ordinateur (' + error.message + '). Glisse-le dans Journal › + Ajouter › PDF.');
+          } else report.failures.push(doc.name + ' : PDF — ' + error.message);
+        }
+      }
+    }
+    return report;
+  }
+
   /* ---------- panneau ---------- */
   function status(message, error) {
     const node = document.getElementById('eraser-roll20-status');
@@ -323,10 +462,11 @@
   }
   const gameName = () => document.title.replace(/\s*\|\s*Roll20.*$/i, '').trim() || 'Partie Roll20';
 
-  async function fetchCampaign(sessionId) {
+  // `scope` : « players » (personnages joueurs seuls) ou « documents » (documents seuls).
+  async function fetchCampaign(sessionId, scope) {
     const token = await storageGet('eraserToken');
     if (!token) throw new Error('Colle d’abord la clé créée dans Eraser.');
-    const url = API + '?gameId=' + encodeURIComponent(gameId()) + '&gameName=' + encodeURIComponent(gameName()) + (sessionId ? '&session=' + encodeURIComponent(sessionId) : '');
+    const url = API + '?gameId=' + encodeURIComponent(gameId()) + '&gameName=' + encodeURIComponent(gameName()) + (sessionId ? '&session=' + encodeURIComponent(sessionId) : '') + (scope ? '&view=' + encodeURIComponent(scope) : '');
     const response = await bridgeFetch({ url, headers: { authorization: 'Bearer ' + token } });
     if (!response?.ok) throw new Error(response?.payload?.error || 'Connexion à Eraser impossible.');
     if (response.payload?.schema !== 2) throw new Error('Version de données Eraser incompatible (schema ' + (response.payload?.schema ?? 'absent') + '). Mets à jour l’application, le compagnon et le Mod en ' + VERSION + '.');
@@ -362,7 +502,7 @@
       const option = document.createElement('option');
       option.value = session.id;
       const date = dateLabel(session.createdAt);
-      option.textContent = session.name + (date ? ' — ' + date : '') + ' (' + (session.npcCount || 0) + ' PNJ · ' + (session.shopCount || 0) + ' magasin(s))';
+      option.textContent = session.name + (date ? ' — ' + date : '') + ' (' + (session.npcCount || 0) + ' PNJ · ' + (session.shopCount || 0) + ' magasin(s)' + (session.documentCount ? ' · ' + session.documentCount + ' document(s)' : '') + ')';
       return option;
     }));
     if (!visible.length) {
@@ -387,26 +527,34 @@
   }
 
   /* ---------- synchronisation ---------- */
-  async function syncAll(sessionId) {
+  /**
+   * `scope` vide : tout (ou la session `sessionId`). « players » : seulement les personnages
+   * joueurs (nom, PV, profil, portrait, token). « documents » : seulement les documents.
+   */
+  async function syncAll(sessionId, scope) {
     if (syncing || !IS_TOP) return;
     syncing = true; openPanel();
     const started = Date.now();
     try {
       status('Vérification du script Mod Roll20…');
       await checkModBridge();
-      status(sessionId ? 'Chargement de la session…' : 'Chargement de la campagne…');
-      const payload = await fetchCampaign(sessionId);
+      status(scope === 'players' ? 'Chargement des personnages joueurs…' : scope === 'documents' ? 'Chargement des documents…' : sessionId ? 'Chargement de la session…' : 'Chargement de la campagne…');
+      const payload = await fetchCampaign(sessionId, scope);
       if (!Array.isArray(payload.npcs) || !Array.isArray(payload.shops)) throw new Error('Eraser a renvoyé une campagne invalide. Vérifie la clé de liaison.');
       const characters = Array.isArray(payload.characters) ? payload.characters : [];
-      const total = characters.length + payload.npcs.length + payload.shops.length;
-      if (!payload.npcs.length && !payload.shops.length && !characters.length) throw new Error(payload.session ? 'La session « ' + payload.session.name + ' » ne contient aucun joueur, PNJ ni magasin.' : 'Eraser a renvoyé 0 PNJ et 0 magasin. Ajoute des PNJ ou des magasins à une session dans le Créateur de session.');
-      // Une session range ses PNJs et magasins dans un dossier à son nom (les joueurs ne bougent pas).
+      // Une application Eraser plus ancienne ne connaît pas les documents.
+      const documents = Array.isArray(payload.documents) ? payload.documents : [];
+      const total = characters.length + payload.npcs.length + payload.shops.length + documents.length;
+      if (!total) throw new Error(scope === 'players' ? 'Aucun personnage joueur dans cette campagne Eraser.' : scope === 'documents' ? 'Aucun document dans cette campagne Eraser : écris-en un dans la page Document.' : payload.session ? 'La session « ' + payload.session.name + ' » ne contient aucun joueur, PNJ, magasin ni document.' : 'Eraser a renvoyé 0 PNJ et 0 magasin. Ajoute des PNJ ou des magasins à une session dans le Créateur de session.');
+      // Une session range ses PNJs, magasins et documents dans un dossier à son nom (les joueurs ne bougent pas).
       const folder = payload.session ? payload.session.name : '';
+      const documentFolder = folder || 'Documents Eraser';
 
       const failures = [];
       const warnings = [];
-      let imported = 0, players = 0, tokens = 0, eraserTokens = 0, autoTokens = 0, portraits = 0, shops = 0, done = 0;
+      let imported = 0, players = 0, tokens = 0, eraserTokens = 0, autoTokens = 0, portraits = 0, shops = 0, docs = 0, pdfs = 0, done = 0;
       const filed = [];
+      const filedDocuments = [];
       const collect = (report, fileInFolder) => {
         failures.push(...report.failures); warnings.push(...report.warnings);
         if (report.portrait) portraits += 1;
@@ -432,6 +580,14 @@
         status(label);
         if (collect(await importWithImages(payload, 'shop', shop, label, folder), true)) shops += 1;
       }
+      for (const doc of documents) {
+        const label = 'Document ' + (++done) + '/' + total + ' — ' + doc.name;
+        status(label);
+        const report = await importDocument(payload, doc, label, documentFolder);
+        failures.push(...report.failures); warnings.push(...report.warnings);
+        if (report.imported) { docs += 1; filedDocuments.push(report.characterId); }
+        if (report.pdf) pdfs += 1;
+      }
 
       // Les PNJs et magasins de la session vont dans son dossier ; les joueurs ne bougent pas.
       let folderNote = '';
@@ -440,11 +596,21 @@
         try { folderNote = ' · ' + (await moveToJournalFolder(folder, filed)) + ' fiche(s) dans le dossier « ' + folder + ' »'; }
         catch (error) { failures.push('Dossier « ' + folder + ' » — ' + error.message); }
       }
+      if (filedDocuments.length) {
+        status('Rangement des documents dans « ' + documentFolder + ' »…');
+        try { await moveToJournalFolder(documentFolder, filedDocuments); }
+        catch (error) { failures.push('Dossier « ' + documentFolder + ' » — ' + error.message); }
+      }
 
       await sendCommand('!eraser-import-done');
       const seconds = Math.round((Date.now() - started) / 1000);
       const withToken = characters.concat(payload.npcs, payload.shops).filter((entry) => entry.tokenUrl).length;
-      const summary = (payload.session ? 'Session « ' + payload.session.name + ' » · ' : 'Tout · ') + players + '/' + characters.length + ' joueur(s) · ' + imported + '/' + payload.npcs.length + ' PNJ · ' + shops + '/' + payload.shops.length + ' magasin(s) · ' + tokens + ' jeton(s) OK · ' + portraits + ' portrait(s) importé(s) · ' + eraserTokens + ' token(s) Eraser importé(s) sur ' + withToken + ' préparé(s) · ' + autoTokens + ' token(s) par défaut' + folderNote + ' · ' + seconds + ' s';
+      const documentNote = documents.length ? ' · ' + docs + '/' + documents.length + ' document(s), ' + pdfs + ' PDF déposé(s)' : '';
+      const summary = scope === 'players'
+        ? 'Personnages joueurs · ' + players + '/' + characters.length + ' à jour · ' + tokens + ' jeton(s) OK · ' + portraits + ' portrait(s) · ' + eraserTokens + ' token(s) Eraser · ' + autoTokens + ' token(s) par défaut · ' + seconds + ' s'
+        : scope === 'documents'
+          ? 'Documents · ' + docs + '/' + documents.length + ' handout(s) · ' + pdfs + ' PDF déposé(s) dans le Journal · ' + seconds + ' s'
+          : (payload.session ? 'Session « ' + payload.session.name + ' » · ' : 'Tout · ') + players + '/' + characters.length + ' joueur(s) · ' + imported + '/' + payload.npcs.length + ' PNJ · ' + shops + '/' + payload.shops.length + ' magasin(s) · ' + tokens + ' jeton(s) OK · ' + portraits + ' portrait(s) importé(s) · ' + eraserTokens + ' token(s) Eraser importé(s) sur ' + withToken + ' préparé(s) · ' + autoTokens + ' token(s) par défaut' + documentNote + folderNote + ' · ' + seconds + ' s';
       if (failures.length) status('Synchronisation incomplète — ' + summary + '\n\n' + failures.concat(warnings).join('\n'), true);
       else if (warnings.length) status('Synchronisation faite — ' + summary + '\n\n' + warnings.join('\n') + '\n\nAstuce : sélectionne un jeton puis « !eraser-placeholder » pour donner une image par défaut aux PNJ sans portrait.', false);
       else status('Synchronisation terminée — ' + summary);
@@ -456,9 +622,10 @@
   }
 
   async function resetAllImports() {
-    if (!window.confirm('Supprimer les PNJ et magasins créés par Eraser dans cette partie Roll20, puis repartir de zéro ?')) return;
+    if (!window.confirm('Supprimer les PNJ, magasins et documents créés par Eraser dans cette partie Roll20, puis repartir de zéro ? (Les PDF déposés dans le Journal restent à supprimer à la main.)')) return;
     try {
       const result = await command('!eraser-reset-all', null, 15000);
+      await storageSet({ eraserPdfs: {} });
       status((result.removed || 0) + ' import(s) Eraser supprimé(s). Tu peux relancer une synchronisation.');
     } catch (error) { status(error.message || String(error), true); }
   }
@@ -477,7 +644,7 @@
   const handledEvents = new Set();
   // Les demandes déjà dans le chat à l'ouverture de la page sont anciennes : jamais rejouées.
   const handledRequests = new Set();
-  const requestPattern = /ERASER_SYNC(_SESSION)?_REQUEST:([A-Za-z0-9]+)_([A-Za-z0-9]+)/g;
+  const requestPattern = /ERASER_SYNC(_SESSION|_PLAYERS|_DOCUMENTS)?_REQUEST:([A-Za-z0-9]+)_([A-Za-z0-9]+)/g;
   // Roll20 recharge l'historique du chat après l'ouverture : une demande plus
   // ancienne que la page (à 30 s près pour l'écart d'horloge) n'est pas rejouée.
   const pageOpenedAt = Date.now();
@@ -489,7 +656,7 @@
       if (handledRequests.has(id)) continue;
       handledRequests.add(id);
       if (parseInt(match[2], 36) < pageOpenedAt - 30000) continue;
-      found.push(match[1] ? 'session' : 'all');
+      found.push(match[1] === '_SESSION' ? 'session' : match[1] === '_PLAYERS' ? 'players' : match[1] === '_DOCUMENTS' ? 'documents' : 'all');
     }
     return found;
   }
@@ -502,7 +669,9 @@
         // Seul le texte ajouté compte pour une demande : relire le parent rejouait
         // d'anciennes demandes « Tout synchroniser » restées dans le chat.
         for (const request of newRequests(node.textContent || '')) {
-          if (request === 'session') void openSessionPicker(); else void syncAll();
+          if (request === 'session') void openSessionPicker();
+          else if (request === 'players' || request === 'documents') void syncAll('', request);
+          else void syncAll();
         }
         const hp = text.match(/ERASER_HP:([A-Za-z0-9_-]+)/);
         if (hp && !handledEvents.has(hp[1])) { handledEvents.add(hp[1]); void pushHp(hp[1]); }
@@ -539,7 +708,7 @@
     panel.id = 'eraser-roll20-panel';
     panel.innerHTML = '<div class="eraser-head"><strong>Eraser ↔ Roll20 <small style="opacity:.6">' + VERSION + '</small></strong><button type="button" data-close>×</button></div>'
       + '<label>Clé de liaison<input type="password" id="eraser-roll20-token" autocomplete="off" placeholder="era_…"></label>'
-      + '<div class="eraser-actions"><button type="button" data-save>Enregistrer la clé</button><button type="button" data-sync>Tout synchroniser</button><button type="button" data-sessions>Synchroniser une session</button></div>'
+      + '<div class="eraser-actions"><button type="button" data-save>Enregistrer la clé</button><button type="button" data-sync>Tout synchroniser</button><button type="button" data-sessions>Synchroniser une session</button><button type="button" data-players>Mettre à jour les personnages joueurs</button><button type="button" data-documents>Synchroniser les documents</button></div>'
       + '<div id="eraser-roll20-sessions" hidden><label>Session<input type="search" id="eraser-roll20-session-search" autocomplete="off" placeholder="Rechercher par nom…"></label><select id="eraser-roll20-session" aria-label="Session à synchroniser"></select><div class="eraser-actions"><button type="button" data-sync-session>Synchroniser cette session</button></div></div>'
       + '<div class="eraser-actions"><button type="button" data-hp>Renvoyer les PV</button><button type="button" data-reset>Effacer les imports Eraser / repartir de zéro</button></div>'
       + '<p id="eraser-roll20-status">Prêt.</p>';
@@ -553,6 +722,8 @@
     });
     panel.querySelector('[data-sync]').addEventListener('click', () => syncAll());
     panel.querySelector('[data-sessions]').addEventListener('click', openSessionPicker);
+    panel.querySelector('[data-players]').addEventListener('click', () => syncAll('', 'players'));
+    panel.querySelector('[data-documents]').addEventListener('click', () => syncAll('', 'documents'));
     panel.querySelector('#eraser-roll20-session-search').addEventListener('input', renderSessions);
     panel.querySelector('[data-sync-session]').addEventListener('click', () => {
       const sessionId = panel.querySelector('#eraser-roll20-session').value;

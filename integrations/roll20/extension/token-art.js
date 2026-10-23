@@ -1,7 +1,8 @@
-// Dessin des tokens d'Eraser : cadre doré (joueurs), cuivré (PNJs), argenté
-// (créatures) et devantures de magasins. Une seule source pour l'application
-// (éditeur de token) et le compagnon Roll20 (tokens automatiques) : ce fichier est
-// un script classique, chargé comme content script et importé par l'application.
+// Dessin des tokens d'Eraser pour le compagnon Roll20 (tokens automatiques), script
+// classique chargé comme content script. Depuis l'alpha 258, l'éditeur de token de
+// l'application compose des cadres en images (public/token-frames) : renderFramedToken
+// fait la même composition. Les cadres dessinés ici (doré, cuivré, argenté, devantures)
+// restent le repli d'une application plus ancienne qui n'envoie pas son cadre.
 (function (root) {
   'use strict';
   const SIZE = 512;
@@ -217,25 +218,74 @@
     const halfHeight = height / 2;
     return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([dx, dy]) => [placement.x + dx * halfWidth, placement.y + dy * halfHeight]);
   }
-  function coverPlacement(image) {
-    const diameter = INNER * 2;
+  function coverPlacement(image, radius = INNER) {
+    const diameter = radius * 2;
     const ratio = (image.naturalWidth || image.width) / (image.naturalHeight || image.height);
     const width = ratio >= 1 ? diameter * ratio : diameter;
     return { x: CENTER, y: CENTER, width };
   }
 
   /**
-   * Le token par défaut : l'avatar centré pour couvrir le cercle, dans son cadre.
-   * `image` peut être nul (magasin sans vendeur). Renvoie un canvas 512 × 512.
+   * Le cadrage enregistré dans Eraser (lib/portrait-framing-shared.ts) : le point de l'image
+   * au centre du cercle (x, y de 0 à 1) et la part de sa largeur que le cercle montre (span).
+   * C'est l'inverse de framingFromPlacement : on retrouve la place de l'image dans le token.
    */
-  function renderDefaultToken(style, image) {
+  function framedPlacement(image, framing, radius = INNER) {
+    if (!framing || ![framing.x, framing.y, framing.span].every((value) => typeof value === 'number' && Number.isFinite(value)) || framing.span <= 0) return coverPlacement(image, radius);
+    const ratio = (image.naturalHeight || image.height) / (image.naturalWidth || image.width);
+    const width = (radius * 2) / framing.span;
+    return { x: CENTER - (framing.x - 0.5) * width, y: CENTER - (framing.y - 0.5) * width * ratio, width };
+  }
+
+  // Le portrait tel que l'éditeur de token d'Eraser le dessine (components/eraser/token-editor.tsx) :
+  // un peu patiné, sur un fond sombre, dans le cercle du cadre.
+  const PORTRAIT_FILTER = 'sepia(0.16) saturate(0.88) contrast(1.05)';
+  const INTERIOR_FILTER = 'saturate(0.95)';
+  const PORTRAIT_BACKGROUND = '#1a1714';
+
+  /**
+   * Un token aux cadres d'Eraser (public/token-frames, lib/token-frames.ts) : le calque derrière
+   * s'il y en a un, le portrait (ou l'intérieur d'un magasin sans vendeur) dans le cercle du
+   * cadre, puis le cadre. `layers` : { front, back, interior } (images chargées) et `radius`.
+   */
+  function renderFramedToken(layers, image, framing) {
+    const canvas = Object.assign(document.createElement('canvas'), { width: SIZE, height: SIZE });
+    const ctx = canvas.getContext('2d');
+    const radius = layers.radius || INNER;
+    if (layers.back) ctx.drawImage(layers.back, 0, 0, SIZE, SIZE);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(CENTER, CENTER, radius, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.fillStyle = PORTRAIT_BACKGROUND;
+    ctx.fillRect(0, 0, SIZE, SIZE);
+    if (image) {
+      const placement = framedPlacement(image, framing, radius);
+      const height = placement.width * ((image.naturalHeight || image.height) / (image.naturalWidth || image.width));
+      ctx.filter = PORTRAIT_FILTER;
+      ctx.drawImage(image, placement.x - placement.width / 2, placement.y - height / 2, placement.width, height);
+    } else if (layers.interior) {
+      ctx.filter = INTERIOR_FILTER;
+      ctx.drawImage(layers.interior, 0, 0, SIZE, SIZE);
+    }
+    ctx.restore();
+    ctx.drawImage(layers.front, 0, 0, SIZE, SIZE);
+    return canvas;
+  }
+
+  /**
+   * Le token par défaut : l'avatar cadré comme dans Eraser (sinon centré pour couvrir le
+   * cercle), dans son cadre. `image` peut être nul (magasin sans vendeur). Renvoie un
+   * canvas 512 × 512.
+   */
+  function renderDefaultToken(style, image, framing) {
     const canvas = typeof OffscreenCanvas === 'function' && typeof document === 'undefined'
       ? new OffscreenCanvas(SIZE, SIZE)
       : Object.assign(document.createElement('canvas'), { width: SIZE, height: SIZE });
     const context = canvas.getContext('2d');
-    drawToken(context, style, image, image ? coverPlacement(image) : { x: CENTER, y: CENTER, width: INNER * 2 }, false);
+    drawToken(context, style, image, image ? framedPlacement(image, framing) : { x: CENTER, y: CENTER, width: INNER * 2 }, false);
     return canvas;
   }
 
-  root.EraserTokenArt = { SIZE, CENTER, INNER, shopFronts, drawToken, corners, coverPlacement, renderDefaultToken };
+  root.EraserTokenArt = { SIZE, CENTER, INNER, shopFronts, drawToken, corners, coverPlacement, framedPlacement, renderDefaultToken, renderFramedToken };
 }(typeof globalThis !== 'undefined' ? globalThis : window));

@@ -18,6 +18,7 @@ import { NpcManager } from "@/components/eraser/npc-manager"
 import { CreateSessionDialog, deleteSession, patchSession, SESSION_UPDATED_EVENT, sessionDateLabel, type CampaignSessionRecord } from "@/components/eraser/session-picker"
 import { SavedShopCollection } from "@/components/eraser/shop-generator"
 import { SessionEvents } from "@/components/eraser/session-events"
+import { SessionDocuments } from "@/components/eraser/session-documents"
 import { RichTextField } from "@/components/eraser/rich-text"
 import { CalendarDateField } from "@/components/eraser/calendar-date-field"
 import { SessionPlaces } from "@/components/eraser/session-places"
@@ -27,6 +28,7 @@ import { replaceAppUrl } from "@/components/eraser/app-tabs"
 import type { CampaignNpcRecord, SavedShopRecord, ShopGeneratorItem } from "@/lib/shop-schema"
 import { builtinShopTypes, type ShopTypeDefinition } from "@/lib/shop-types"
 import type { CampaignEvent } from "@/lib/campaign-events"
+import type { CampaignDocumentRecord } from "@/lib/document-model"
 
 export type SessionMember = { id: string; name: string; people: string; classes: string; level: string; honoraryTitle: string }
 
@@ -98,7 +100,7 @@ function withMembership(session: CampaignSessionRecord, add: Membership, remove:
   return { ...session, ...lists, hidden }
 }
 
-export function SessionCreator({ campaignId, initialSessions, initialSessionId, members, npcs, shops, generatorItems, shopTypes = builtinShopTypes, events = [] }: {
+export function SessionCreator({ campaignId, initialSessions, initialSessionId, members, npcs, shops, generatorItems, shopTypes = builtinShopTypes, events = [], documents = [] }: {
   campaignId: string
   initialSessions: CampaignSessionRecord[]
   initialSessionId: string
@@ -109,6 +111,8 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
   shopTypes?: ShopTypeDefinition[]
   /** Les événements préparés dans la page Événements. */
   events?: CampaignEvent[]
+  /** Les documents de la campagne (page Document) : ceux de la session s'affichent ici. */
+  documents?: CampaignDocumentRecord[]
 }) {
   const [sessions, setSessions] = useState(initialSessions)
   const [selectedId, setSelectedId] = useState(initialSessionId || initialSessions.at(-1)?.id || "")
@@ -334,6 +338,11 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
       <section className="border-t pt-8">
         <SectionTitle count={session.legacyEvents.length + session.eventIds.filter((id) => id.startsWith("shop:") ? shops.some((shop) => `shop:${shop.id}` === id) : events.some((event) => event.id === id)).length}>Événements</SectionTitle>
         <SessionEvents campaignId={campaignId} session={session} events={events} shops={shops} shopTypes={shopTypes} onUpdated={replace} />
+      </section>
+
+      <section className="border-t pt-8">
+        <SectionTitle>Documents</SectionTitle>
+        <SessionDocuments campaignId={campaignId} sessionId={session.id} initialDocuments={documents} players={(players.length ? players : members).map((member) => ({ id: member.id, name: member.name }))} />
       </section>
     </>}
 

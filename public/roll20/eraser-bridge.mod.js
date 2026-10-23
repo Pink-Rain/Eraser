@@ -7,10 +7,13 @@
  * 0.7.1 : les dossiers du Journal sont rangés par le compagnon (le Mod ne peut pas
  * les modifier) ; chaque demande de synchro porte un identifiant unique.
  * 0.7.2 : sans token préparé dans Eraser, le compagnon envoie un token par défaut.
+ * 0.8.0 : « Mettre à jour les personnages joueurs », jetons déjà posés sur les cartes mis à
+ * jour avec leur fiche, image renvoyée si elle a disparu de Roll20, documents d'Eraser en
+ * handouts (image du document ; le PDF est déposé dans le Journal par le compagnon).
  */
 var EraserBridge = EraserBridge || (function () {
   'use strict';
-  var VERSION = '0.7.2';
+  var VERSION = '0.8.0';
   var SCRIPT = 'Eraser';
   var BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   var PORTRAIT_WINDOW_MS = 90000;
@@ -35,12 +38,12 @@ var EraserBridge = EraserBridge || (function () {
   ];
 
   function freshState() {
-    return { version: VERSION, campaign: null, npcs: {}, shops: {}, characters: {}, chunks: {}, portraits: {}, tokens: {}, tokenHashes: {}, tokenImages: {}, names: {}, placeholder: '' };
+    return { version: VERSION, campaign: null, npcs: {}, shops: {}, characters: {}, handouts: {}, handoutImages: {}, chunks: {}, portraits: {}, tokens: {}, tokenHashes: {}, tokenImages: {}, names: {}, placeholder: '' };
   }
 
   function ensureState() {
     var s = state.EraserBridge = state.EraserBridge || freshState();
-    ['npcs', 'shops', 'characters', 'chunks', 'portraits', 'tokens', 'tokenHashes', 'tokenImages', 'names'].forEach(function (key) { s[key] = s[key] || {}; });
+    ['npcs', 'shops', 'characters', 'handouts', 'handoutImages', 'chunks', 'portraits', 'tokens', 'tokenHashes', 'tokenImages', 'names'].forEach(function (key) { s[key] = s[key] || {}; });
     s.placeholder = s.placeholder || '';
     s.version = VERSION;
   }
@@ -134,16 +137,18 @@ var EraserBridge = EraserBridge || (function () {
   }
 
   // Un seul endroit décide s'il faut renvoyer le portrait ou le token : leur adresse change
-  // quand l'image change dans Eraser.
-  function imageNeeds(eraserId, portraitUrl, tokenUrl) {
+  // quand l'image change dans Eraser. Une image effacée dans Roll20 (avatar vide, token
+  // jamais reçu) est renvoyée elle aussi.
+  function imageNeeds(eraserId, portraitUrl, tokenUrl, character) {
     var s = state.EraserBridge;
     var portraitHash = hash(portraitUrl || '');
     var tokenHash = hash(tokenUrl || '');
+    var avatarMissing = Boolean(character) && !cleanImgsrc(character.get('avatar'));
     return {
       portraitHash: portraitHash,
       tokenHash: tokenHash,
-      needsAvatar: Boolean(portraitUrl) && s.portraits[eraserId] !== portraitHash,
-      needsToken: Boolean(tokenUrl) && s.tokenHashes[eraserId] !== tokenHash
+      needsAvatar: Boolean(portraitUrl) && (s.portraits[eraserId] !== portraitHash || avatarMissing),
+      needsToken: Boolean(tokenUrl) && (s.tokenHashes[eraserId] !== tokenHash || !cleanImgsrc(s.tokenImages[eraserId]))
     };
   }
 
@@ -180,7 +185,7 @@ var EraserBridge = EraserBridge || (function () {
     upsertAttribute(character.id, 'pv', npc.currentHp, npc.totalHp);
     [['constitution', npc.constitution], ['force', npc.strength], ['dexterite', npc.dexterity], ['intelligence', npc.intelligence], ['sagesse', npc.wisdom], ['charisme', npc.charisma]]
       .forEach(function (entry) { upsertAttribute(character.id, entry[0], entry[1]); });
-    var needs = imageNeeds(npc.id, npc.portraitUrl, npc.tokenUrl);
+    var needs = imageNeeds(npc.id, npc.portraitUrl, npc.tokenUrl, character);
     return {
       character: character,
       meta: {
@@ -195,8 +200,9 @@ var EraserBridge = EraserBridge || (function () {
     };
   }
 
-  // Personnage joueur : créé une fois, puis seuls le nom et les PV suivent Eraser.
-  // Journaux, contrôle et dossier choisis par le MJ ne sont jamais touchés.
+  // Personnage joueur : créé une fois, puis le nom, les PV, la rapidité et le profil
+  // (peuple, classe) suivent Eraser. Journaux, contrôle et dossier choisis par le MJ ne
+  // sont jamais touchés.
   function upsertPlayer(player) {
     var s = state.EraserBridge;
     var character = s.characters[player.id] && getObj('character', s.characters[player.id]);
@@ -212,7 +218,9 @@ var EraserBridge = EraserBridge || (function () {
     character.set({ name: player.name });
     upsertAttribute(character.id, 'eraser_id', player.id);
     upsertAttribute(character.id, 'pv', player.currentHp, player.totalHp);
-    var needs = imageNeeds(player.id, player.portraitUrl, player.tokenUrl);
+    if (player.speed !== undefined) upsertAttribute(character.id, 'rapidite', player.speed);
+    if (player.profile !== undefined) upsertAttribute(character.id, 'profil', player.profile);
+    var needs = imageNeeds(player.id, player.portraitUrl, player.tokenUrl, character);
     return {
       character: character,
       meta: { characterId: character.id, eraserId: player.id, portraitHash: needs.portraitHash, tokenHash: needs.tokenHash, needsAvatar: needs.needsAvatar, needsToken: needs.needsToken, created: created }
@@ -237,11 +245,62 @@ var EraserBridge = EraserBridge || (function () {
     }
     character.set({ name: 'Boutique — ' + shop.name, bio: shopBio(shop), gmnotes: '', inplayerjournals: 'all' });
     upsertAttribute(character.id, 'eraser_id', shop.id);
-    var needs = imageNeeds(shop.id, shop.portraitUrl, shop.tokenUrl);
+    var needs = imageNeeds(shop.id, shop.portraitUrl, shop.tokenUrl, character);
     return {
       character: character,
       meta: { characterId: character.id, eraserId: shop.id, portraitHash: needs.portraitHash, tokenHash: needs.tokenHash, needsAvatar: needs.needsAvatar, needsToken: needs.needsToken, bar: false }
     };
+  }
+
+  /* ---------- documents (handouts) ---------- */
+  // Un document d'Eraser : un handout à son nom, caché aux joueurs tant que le MJ ne le
+  // partage pas. Son image arrive ensuite, déposée par le compagnon.
+  function upsertDocument(doc) {
+    var s = state.EraserBridge;
+    var handout = s.handouts[doc.id] && getObj('handout', s.handouts[doc.id]);
+    var created = false;
+    if (!handout) {
+      handout = createObj('handout', { name: doc.name, inplayerjournals: '', controlledby: '', archived: false });
+      if (!handout) throw new Error('Roll20 a refusé de créer le handout « ' + doc.name + ' ».');
+      s.handoutImages[doc.id] = '';
+      created = true;
+    }
+    s.handouts[doc.id] = handout.id;
+    handout.set({ name: doc.name });
+    var imageHash = hash(doc.imageUrl || '');
+    var avatarMissing = !cleanImgsrc(handout.get('avatar'));
+    return {
+      handoutId: handout.id,
+      characterId: handout.id,
+      eraserId: doc.id,
+      portraitHash: imageHash,
+      needsImage: Boolean(doc.imageUrl) && (s.handoutImages[doc.id] !== imageHash || avatarMissing),
+      created: created
+    };
+  }
+
+  function handoutNotes(image) {
+    return '<p><img src="' + html(image) + '" style="max-width:100%"></p>';
+  }
+
+  /* ---------- jetons déjà posés sur les cartes ---------- */
+  // Les jetons posés avant une mise à jour gardaient l'ancienne image et l'ancien nom :
+  // ils suivent maintenant leur fiche (image Eraser, nom non personnalisé, barre de PV liée).
+  function refreshPlacedTokens(character, change) {
+    var updated = 0;
+    findObjs({ _type: 'graphic', represents: character.id }).forEach(function (graphic) {
+      var values = {};
+      if (change.image && !sameImage(graphic.get('imgsrc'), change.image)) values.imgsrc = cleanImgsrc(change.image);
+      if (change.name && graphic.get('name') !== change.name && (!graphic.get('name') || graphic.get('name') === change.previousName)) values.name = change.name;
+      if (change.hp && !graphic.get('bar1_link')) {
+        values.bar1_link = change.hp.id;
+        values.bar1_value = String(change.hp.get('current'));
+        values.bar1_max = String(change.hp.get('max'));
+      }
+      if (!Object.keys(values).length) return;
+      try { graphic.set(values); updated += 1; } catch (_e) { /* image du marketplace : Roll20 la refuse */ }
+    });
+    return updated;
   }
 
   /* ---------- jeton par défaut ---------- */
@@ -324,9 +383,11 @@ var EraserBridge = EraserBridge || (function () {
         }
 
         if (changed) writeDefaultToken(character, props);
+        var previousName = s.names[eraserId];
         s.tokens[eraserId] = true;
         s.names[eraserId] = props.name;
-        done(null, { token: true, tokenUpdated: changed, initialized: initialize });
+        var placed = refreshPlacedTokens(character, { image: options.image ? props.imgsrc : '', name: props.name, previousName: previousName, hp: hp });
+        done(null, { token: true, tokenUpdated: changed, initialized: initialize, placed: placed });
       } catch (error) { done(error); }
     });
   }
@@ -334,12 +395,13 @@ var EraserBridge = EraserBridge || (function () {
   /* ---------- portraits : capture de l'image déposée par l'extension ---------- */
   function armPortrait(payload) {
     ensureState();
-    if (!getObj('character', payload.characterId)) throw new Error('Fiche Roll20 introuvable pour le portrait.');
+    var role = payload.role === 'token' || payload.role === 'handout' ? payload.role : 'avatar';
+    if (role === 'handout' ? !getObj('handout', payload.characterId) : !getObj('character', payload.characterId)) throw new Error(role === 'handout' ? 'Handout Roll20 introuvable pour le document.' : 'Fiche Roll20 introuvable pour le portrait.');
     pendingPortrait = {
       characterId: payload.characterId,
       eraserId: payload.eraserId,
       hash: payload.hash || payload.portraitHash,
-      role: payload.role === 'token' ? 'token' : 'avatar',
+      role: role,
       tokenFollows: Boolean(payload.tokenFollows),
       bar: payload.bar !== false,
       doneId: payload.doneId,
@@ -358,9 +420,22 @@ var EraserBridge = EraserBridge || (function () {
     pendingPortrait = null;
     setTimeout(function () { try { graphic.remove(); } catch (_e) { /* déjà supprimé */ } }, 0);
 
+    var s = state.EraserBridge;
+    if (job.role === 'handout') {
+      var handout = getObj('handout', job.characterId);
+      if (!handout) return complete(job.doneId, new Error('Handout disparu pendant l’upload.'));
+      // La plus grande version de l'image pour lire le document ; la moyenne si Roll20 la refuse.
+      var large = image.replace(/\/thumb(\.[a-z0-9]+)/i, '/max$1');
+      handout.set('avatar', large);
+      if (!cleanImgsrc(handout.get('avatar'))) handout.set('avatar', avatarFromImgsrc(image));
+      handout.set('notes', handoutNotes(cleanImgsrc(handout.get('avatar')) ? handout.get('avatar') : large));
+      handout.set('gmnotes', '<p>Document importé depuis Eraser.</p>');
+      s.handoutImages[job.eraserId] = job.hash;
+      return complete(job.doneId, null, { handout: true });
+    }
+
     var character = getObj('character', job.characterId);
     if (!character) return complete(job.doneId, new Error('Fiche disparue pendant l’upload.'));
-    var s = state.EraserBridge;
     if (job.role === 'token') {
       // Le token rond devient l'image du jeton par défaut ; le portrait reste celui de la fiche.
       s.tokenImages[job.eraserId] = image;
@@ -398,6 +473,7 @@ var EraserBridge = EraserBridge || (function () {
       var shop = upsertShop(payload.value);
       return done(null, shop.meta);
     }
+    if (payload.kind === 'document') return done(null, upsertDocument(payload.value));
     if (payload.kind === 'character') {
       // Les personnages joueurs restent toujours là où le MJ les a rangés.
       var player = upsertPlayer(payload.value);
@@ -453,6 +529,11 @@ var EraserBridge = EraserBridge || (function () {
       var character = getObj('character', characterId);
       if (character) { character.remove(); removed += 1; }
     });
+    // Les documents (handouts) créés par Eraser partent aussi ; les personnages joueurs restent.
+    Object.keys(s.handouts).forEach(function (eraserId) {
+      var handout = getObj('handout', s.handouts[eraserId]);
+      if (handout) { handout.remove(); removed += 1; }
+    });
     var placeholder = s.placeholder;
     state.EraserBridge = freshState();
     state.EraserBridge.placeholder = placeholder;
@@ -467,6 +548,8 @@ var EraserBridge = EraserBridge || (function () {
     whisper('<div style="border:1px solid #6f5530;background:#f4ead6;padding:10px;border-radius:7px"><b>Eraser Bridge ' + VERSION + '</b><br><span style="font-size:11px">' + linked + '</span><hr>'
       + '<a href="!eraser-sync">Tout synchroniser</a><br>'
       + '<a href="!eraser-sync-session">Synchroniser une session</a><br>'
+      + '<a href="!eraser-sync-players">Mettre à jour les personnages joueurs</a><br>'
+      + '<a href="!eraser-sync-documents">Synchroniser les documents</a><br>'
       + '<a href="!eraser-push-hp">Renvoyer les PV vers Eraser</a><br>'
       + '<a href="!eraser-tokens">Revérifier les jetons par défaut</a><br>'
       + '<a href="!eraser-placeholder">Image par défaut = jeton sélectionné</a>' + (s.placeholder ? ' ✓' : '') + '<br>'
@@ -498,6 +581,8 @@ var EraserBridge = EraserBridge || (function () {
       // Un identifiant par demande : le compagnon ne rejoue jamais une demande déjà vue.
       if (content === '!eraser-sync') return whisper('<span data-eraser-event="sync">ERASER_SYNC_REQUEST:' + requestId() + '</span>');
       if (content === '!eraser-sync-session') return whisper('<span data-eraser-event="sync-session">ERASER_SYNC_SESSION_REQUEST:' + requestId() + '</span>');
+      if (content === '!eraser-sync-players') return whisper('<span data-eraser-event="sync-players">ERASER_SYNC_PLAYERS_REQUEST:' + requestId() + '</span>');
+      if (content === '!eraser-sync-documents') return whisper('<span data-eraser-event="sync-documents">ERASER_SYNC_DOCUMENTS_REQUEST:' + requestId() + '</span>');
       if (content === '!eraser-push-hp') return exportHp();
       if (content === '!eraser-tokens') return rebuildAllTokens();
       if (content === '!eraser-placeholder') {

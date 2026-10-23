@@ -10,6 +10,7 @@ import {
 } from "@/lib/character-catalog"
 import { characterValueHeaders } from "@/lib/character-sheet-schema"
 import type { InventoryContainerRecord } from "@/lib/inventory-schema"
+import { documentItemEntries, documentOfItem } from "@/lib/document-model"
 
 /**
  * Un lien chiffré vers une caractéristique ou une compétence. `from` : l'attribut, le
@@ -316,7 +317,10 @@ export function withItemCharge(raw: string, kind: ItemAttachmentKind, name: stri
 
 /** Garde les charges d'un exemplaire dans des liens réécrits (fenêtre de l'enclume). */
 export function keepItemCharges(serialized: string, previous: string) {
-  return serializeItemLinks(parseItemModifiers(serialized), parseItemAttachments(serialized), parseItemOverrides(serialized), { ...parseItemCharges(previous), ...parseItemCharges(serialized) })
+  const links = serializeItemLinks(parseItemModifiers(serialized), parseItemAttachments(serialized), parseItemOverrides(serialized), { ...parseItemCharges(previous), ...parseItemCharges(serialized) })
+  // Un document donné (lib/document-model.ts) reste un document quand l'exemplaire est réécrit.
+  const documents = documentOfItem(links) ? [] : documentItemEntries(previous)
+  return documents.length ? JSON.stringify([...(links ? JSON.parse(links) as unknown[] : []), ...documents]) : links
 }
 
 /** Ce qui apporte un lien : « attribut:Lourde ». */

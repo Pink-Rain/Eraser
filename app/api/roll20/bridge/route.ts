@@ -29,10 +29,12 @@ export async function GET(request: Request) {
     if (url.searchParams.get("view") === "sessions") {
       return NextResponse.json({ schema: 2, sessions: await roll20SessionList(link) }, { headers: corsHeaders })
     }
+    // « players » : « Mettre à jour les personnages joueurs » ; « documents » : les documents seuls.
+    const view = url.searchParams.get("view")
     const payload = await roll20CampaignPayload(link, url.origin, {
       id: url.searchParams.get("gameId") || "",
       name: url.searchParams.get("gameName") || "",
-    }, (url.searchParams.get("session") || "").slice(0, 200))
+    }, (url.searchParams.get("session") || "").slice(0, 200), view === "players" || view === "documents" ? view : "")
     return NextResponse.json(payload, { headers: corsHeaders })
   } catch (error) {
     const missingSession = error instanceof Error && error.message === "SESSION_NOT_FOUND"

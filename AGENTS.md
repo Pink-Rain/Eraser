@@ -140,6 +140,20 @@
 - Les cadres proposés et les défauts par type de token sont dans `lib/token-frames.ts` ; le
   cadre choisi est gardé sur le Worker (portée `token-frames`). Ne jamais renommer un
   identifiant de cadre déjà enregistré (« gold-3 », « special-lich », « door-market »…).
+- Le compagnon Roll20 compose ses tokens par défaut comme l'éditeur
+  (`renderFramedToken` dans `integrations/roll20/extension/token-art.js`, cadre et cadrage
+  envoyés par `lib/roll20-bridge.ts`). Tout changement de la composition de l'éditeur
+  (filtre du portrait, fond, calques) est à reporter là.
+
+## Documents
+
+- Les documents d'une campagne (page Document) : modèle pur dans `lib/document-model.ts`,
+  feuille « Documents de campagne » (`lib/campaign-documents.ts`), rendu dans le navigateur
+  (`components/eraser/document-render.ts`). Le rendu doit couper les lignes comme l'éditeur :
+  toute mise en forme ajoutée à l'éditeur doit l'être aussi au rendu, sinon l'image donnée
+  aux joueurs et envoyée à Roll20 ne ressemble plus à ce que le MJ a écrit.
+- Ne jamais renommer les clés enregistrées (colonnes de la feuille, champs du JSON des
+  zones, `{"target":"document"}` dans le JSON d'un exemplaire d'inventaire).
 
 ## Tabletop et Roll20
 
@@ -152,6 +166,9 @@
   génération vérifié ne remplace les copies publiques.
 - Le jeton de campagne est l’authentification du pont. Ne pas ajouter une
   authentification par cookie aux routes `/api/roll20/bridge`.
+- Le compagnon et le script Mod portent la même version (`VERSION`, `manifest.json`) : le
+  compagnon refuse un Mod d'une autre version. Après toute modification, recopier le Mod dans
+  `public/roll20/` et refaire `public/roll20/eraser-roll20-companion.zip` (fichiers à la racine).
 
 ## Vérifications avant publication
 

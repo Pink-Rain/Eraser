@@ -1,5 +1,5 @@
 import { copySharedMedia, getSharedMedia, putSharedMedia, sharedMediaVersion } from "@/lib/shared-media"
-import { readSharedRecord, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
+import { listSharedRecords, readSharedRecord, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
 import { isTokenFrameId } from "@/lib/token-frames"
 
 /**
@@ -61,4 +61,12 @@ export async function readTokenFrame(kind: TokenKind, id: string) {
 export async function saveTokenFrame(kind: TokenKind, id: string, frame: string) {
   if (!sharedStoreAvailable() || !isTokenFrameId(frame)) return
   await writeSharedRecord(frameScope, `${kind}:${id}`, frame)
+}
+
+/** Tous les cadres choisis, par « genre:identifiant » ; une seule lecture du serveur partagé (pont Roll20). */
+export async function readTokenFrames(): Promise<Record<string, string>> {
+  if (!sharedStoreAvailable()) return {}
+  const frames: Record<string, string> = {}
+  for (const record of await listSharedRecords(frameScope)) if (isTokenFrameId(record.value)) frames[record.key] = record.value
+  return frames
 }

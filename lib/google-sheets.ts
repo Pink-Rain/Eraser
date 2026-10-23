@@ -96,6 +96,7 @@ import {
 } from "@/lib/inventory-schema"
 import { objectItemId, positionalObjectId } from "@/lib/object-item-id"
 import { parseItemAttachments, parseItemCharges, parseItemModifiers, parseItemOverrides, serializeItemLinks } from "@/lib/item-modifiers"
+import { documentImageUrl, documentItemEntries, documentOfItem } from "@/lib/document-model"
 import { ownedBy, ownersCell, ownersOf } from "@/lib/ownership"
 import { companionsOfTabs, isCompanionInventoryOwner } from "@/lib/companions"
 import { displayedMultipleValue } from "@/lib/multiple-values"
@@ -3049,6 +3050,8 @@ const NPC_LAST_COLUMN = columnName(npcSheetHeaders.length)
 
 // Les trois dernières sont venues après : dans une feuille existante, elles s'ajoutent à droite.
 export const campaignEventSheetHeaders = ["ID", "ID campagne", "Type", "Référence", "Nom", "Icône", "Image", "Étiquette", "Couleur", "Description", "Créé par", "Créé le", "Modifié le"]
+// Les documents d'une campagne (page Document) : le fond et les zones de texte (JSON), le rendu dans Drive.
+export const campaignDocumentSheetHeaders = ["ID", "ID campagne", "ID session", "Titre", "Fond (JSON)", "Contenu (JSON)", "Version du rendu", "Créé par", "Créé le", "Modifié le"]
 export const sessionNoteSheetHeaders = ["ID", "ID campagne", "ID session", "Visibilité", "ID personnage", "Type", "Titre", "Texte", "Moment", "Liens (JSON)", "Quête (JSON)", "Auteur", "UID auteur", "Créé le", "Modifié le"]
 // « Cachés (JSON) » : ce que le MJ n'a pas encore révélé aux joueurs (lib/session-reveal.ts), ajouté à droite.
 export const sessionSheetHeaders = ["ID", "ID campagne", "Titre", "Bannière", "Personnages (JSON)", "PNJs (JSON)", "Magasins (JSON)", "Créée par", "Créée le", "Modifiée le", "Lieux de la session", "Document", "Événements (JSON)", "Cachés (JSON)", "Lieux liés (JSON)", "Calendrier", "Date de début", "Date de fin"]
@@ -3186,6 +3189,16 @@ export const jdrSheetDefinitions: StructuredSheetDefinition[] = [
     frozenColumns: 3,
     headers: campaignEventSheetHeaders,
     columnWidths: [180, 180, 140, 180, 240, 140, 320, 160, 110, 420, 190, 170, 170],
+  },
+  {
+    // Les documents d'une campagne (page Document) : parchemins, lettres, livres à donner
+    // aux joueurs et à envoyer dans Roll20. Créée au premier document enregistré.
+    key: "campaign_documents",
+    name: "Documents de campagne",
+    tabName: "Documents",
+    frozenColumns: 4,
+    headers: campaignDocumentSheetHeaders,
+    columnWidths: [180, 180, 180, 240, 260, 520, 190, 190, 170, 170],
   },
   {
     // Les notes du journal de session : publiques (journal de la campagne) ou privées
@@ -7356,7 +7369,8 @@ function customInventoryItem(content: StoredInventoryContent): InventoryItemReco
     weight: "",
     price: "",
     bulk: "",
-    image: "",
+    // Un document donné : son rendu sert d'illustration (lib/document-model.ts).
+    image: (() => { const document = documentOfItem(content.modifiers); return document ? documentImageUrl(document.campaignId, document.documentId) : "" })(),
     icon: "",
     notes: "",
     link: "",
@@ -7732,7 +7746,7 @@ export async function addCharacterInventoryItem(characterId: string, itemId: str
 export async function createCharacterInventoryItem(
   characterId: string,
   requestedContainerId: string,
-  input: { name: string; description: string; type: string; subtype: string; effect: string },
+  input: { name: string; description: string; type: string; subtype: string; effect: string; /** Le JSON de l'exemplaire (un document donné : lib/document-model.ts). */ modifiers?: string },
   mode: InventoryOwnerMode = "character",
 ): Promise<InventoryChangeResult> {
   return withInventoryLock(async () => {
@@ -7771,6 +7785,7 @@ export async function createCharacterInventoryItem(
       type,
       subtype: input.subtype.trim(),
       effect: input.effect.trim(),
+      ...(input.modifiers !== undefined ? { modifiers: input.modifiers } : {}),
       nameHtml: "",
       descriptionHtml: "",
       effectHtml: "",
@@ -7832,7 +7847,10 @@ export async function setCharacterInventoryItemModifiers(characterId: string, sl
   if (normalized.length > 4000) throw new Error("INVALID_INVENTORY_MODIFIERS")
   return withInventoryLock(async () => {
     const { workbook, content } = await characterItemSlot(characterId, slotId)
-    return buildCharacterInventory(characterId, await writeInventoryChanges(workbook, { contents: [[content, { ...content, modifiers: normalized, updatedAt: new Date().toISOString() }]] }))
+    // Un document donné reste un document : sa marque n'est pas un lien chiffré.
+    const documents = documentOfItem(normalized) ? [] : documentItemEntries(content.modifiers)
+    const modifiers = documents.length ? JSON.stringify([...(normalized ? JSON.parse(normalized) as unknown[] : []), ...documents]) : normalized
+    return buildCharacterInventory(characterId, await writeInventoryChanges(workbook, { contents: [[content, { ...content, modifiers, updatedAt: new Date().toISOString() }]] }))
   })
 }
 
