@@ -45,7 +45,7 @@ import { usePersistentState } from "@/hooks/use-persistent-state"
 import { IN_PLACE_ATTRIBUTE, replaceAppUrl, URL_CHANGE_EVENT } from "@/components/eraser/app-tabs"
 import { IndexTabPicker, useIndexTabParam } from "@/components/eraser/index-tab-picker"
 import { buttonPresets, runActionButton, type ActionRuntime } from "@/lib/index-actions"
-import { choiceCorrection, computeRollup, isIdHeader, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
+import { choiceCorrection, computeRollup, isCheckedValue, isIdHeader, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
 import { numberCorrection } from "@/lib/index-numbers"
 import { positionalObjectId } from "@/lib/object-item-id"
 import { ObjectIcon } from "@/components/eraser/object-icon"
@@ -1564,6 +1564,10 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     // Les colonnes propres à la page qui accueille la vue, dessinées par elle.
     .concat(pageColumns.map((extra) => ({ key: `__embed:${extra.key}`, label: extra.label, spec: { kind: "ranked-links" } as IndexColumnSpec, value: "", long: true }))) : []
   /* eslint-enable react-hooks/refs */
+  /** Le token d'un PNJ ou d'une créature : l'identifiant de la ligne, et si le PNJ est du groupe des joueurs. */
+  const rowToken = (id: string, group: string) => indexKey === "npcs" || indexKey === "creatures"
+    ? { ownerId: id.replace(/<[^>]+>/g, "").trim(), group: indexKey === "npcs" && isCheckedValue(group.replace(/<[^>]+>/g, "")) }
+    : undefined
   const sheetRow = (header: string): IndexFieldProps["row"] => details === null ? undefined : {
     ...(entityImage && foldName(header) === entityImage.header ? { upload: (file: File) => entityImage.upload(file, details, header) } : {}),
     formula: (spec) => engine.formula(details, header, spec),
@@ -1574,6 +1578,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     runButton: (button) => runButton(details, button),
     tabNames: sortTabs.map((entry) => entry.value),
     name: detailsFound ? savedCell(detailsFound, detailsFound.table.headers[ownNameColumn(detailsFound.table.headers, detailsFound.table.tabName)] ?? "").replace(/<[^>]+>/g, "") : undefined,
+    token: detailsFound ? rowToken(savedCell(detailsFound, "ID"), savedCell(detailsFound, "Dans le groupe joueur")) : undefined,
   }
 
 
@@ -1622,6 +1627,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       runButton: (button) => runButton(rowKey, button),
       tabNames: sortTabs.map((entry) => entry.value),
       name: nameOf(rowKey).replace(/<[^>]+>/g, ""),
+      token: rowToken(rawOf(rowKey, "ID"), rawOf(rowKey, "Dans le groupe joueur")),
     })
     const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
     return <IndexRowForm key={`${rowKey}:${formId}`} rowKey={rowKey} fields={fields} layout={layout} rowFor={rowFor} columnValue={(column) => rawOf(rowKey, column)} onSave={saveSheet} rowRef={{ index: indexKey, id, tab }} inventoryEndpoint={indexKey === "npcs" ? (row) => `/api/npcs/${encodeURIComponent(row.id)}/inventory` : undefined} openForm={(next) => openRowForm(rowKey, next ?? DEFAULT_FORM_ID)} locked={locked} />

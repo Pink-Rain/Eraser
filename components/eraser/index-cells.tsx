@@ -1181,10 +1181,24 @@ export type IndexFieldProps = {
     upload?: (file: File, previous: string) => Promise<string>
     /** Le nom de la ligne (le token d'une créature le porte). */
     name?: string
+    /** Le token de la ligne (PNJ, créature) : son identifiant, et si le PNJ est du groupe des joueurs. */
+    token?: { ownerId: string; group?: boolean }
   }
 }
 
 const fieldLabel = "grid content-start gap-1 text-xs font-semibold"
+
+/**
+ * Le bouton « Token » sous l'image d'un PNJ ou d'une créature. Une créature garde le token
+ * fait de son portrait importé (même identifiant) ; une image collée ou venue d'ailleurs
+ * prend celui de la ligne.
+ */
+function RowTokenButton({ token, row, label, value }: { token: "creature" | "npc"; row: NonNullable<IndexFieldProps["row"]>; label: string; value: string }) {
+  const source = isImageSource(value) ? value : ""
+  const ownerId = (token === "creature" ? creatureTokenId(value) : "") || row.token?.ownerId || ""
+  const disabledReason = !source ? "Ajoute d’abord une image" : ownerId ? "" : "Enregistre d’abord la fiche"
+  return <TokenButton kind={token} ownerId={ownerId} name={row.name ?? label} source={source} style={token === "npc" ? { kind: "npc", group: row.token?.group } : { kind: "creature" }} disabledReason={disabledReason} />
+}
 
 /** L'import d'une colonne Fichier réglée vers un autre rangement (portraits des créatures) ; sinon celui des index. */
 function fileUploadFor(spec: IndexColumnSpec) {
@@ -1218,7 +1232,7 @@ function IndexFieldOfType({ label, spec: input, value, onChange, long = false, a
     case "file":
       return spec.file?.accept === "image" && !spec.file.multiple
         ? <div className={fieldLabel}>{title}<ImageField label={label} value={value} onChange={onChange} upload={row?.upload ?? fileUploadFor(spec)} aspect={fileAspectClass(spec.file.aspect)} disabled={disabled}>
-          {spec.file.token === "creature" && row && <TokenButton kind="creature" ownerId={creatureTokenId(value)} name={row.name ?? label} source={isImageSource(value) ? value : ""} style={{ kind: "creature" }} disabledReason={creatureTokenId(value) ? "" : "Importe d’abord l’image de la créature"} />}
+          {spec.file.token && row && <RowTokenButton token={spec.file.token} row={row} label={label} value={value} />}
         </ImageField></div>
         : <div className={`${fieldLabel} ${spec.file?.multiple ? "md:col-span-2" : ""}`}>{title}<span className="rounded-lg border bg-background/50 p-2"><FilesEditor files={splitFiles(value)} accept={spec.file?.accept ?? "any"} multiple={Boolean(spec.file?.multiple)} disabled={disabled} onChange={(files) => onChange(files.join("\n"))} /></span></div>
     case "color":

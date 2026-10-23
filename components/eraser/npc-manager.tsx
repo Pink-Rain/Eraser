@@ -175,7 +175,7 @@ export function NpcForm({ npc, pending, onClose, onSave, index = false, locked =
           onFile={choosePortrait}
           onChange={(value) => { setPortraitFile(undefined); setPortraitPreview(""); update("portrait", value) }}
         >
-          <TokenButton kind="npc" ownerId={draft.id} name={draft.name} source={portraitPreview || draft.portrait} style={{ kind: "npc" }} disabledReason={portraitPreview || draft.portrait ? "" : "Ajoute d’abord un avatar"} />
+          <TokenButton kind="npc" ownerId={draft.id} name={draft.name} source={portraitPreview || draft.portrait} style={{ kind: "npc", group: draft.inPlayerGroup }} disabledReason={portraitPreview || draft.portrait ? "" : "Ajoute d’abord un avatar"} />
         </ImageField>
       </div>
       <div className="grid content-start gap-4 sm:grid-cols-2">

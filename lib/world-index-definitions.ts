@@ -882,7 +882,7 @@ function entityColumnSpec(index: EntityWorldIndexKey, header: string): IndexColu
     if (is("Peuple")) return { kind: "linked-choice", source: { index: "peoples", tab: "Peuples" } }
     if (is("Vie actuelle", "Vie totale", "Rapidité", "Force", "Dextérité", "Intelligence", "Sagesse", "Charisme", "Capacité de combat", "Capacité de tir", "Capacité magique", "Force mentale", "Constitution")) return { kind: "number" }
     // Le portrait se voit, s'importe ou se colle comme sur la page du PNJ (même stockage).
-    if (is("Portrait")) return { kind: "file", file: { accept: "image" }, description: "Le portrait du PNJ. Importer une image (ou coller une adresse) le remplace, comme sur sa page." }
+    if (is("Portrait")) return { kind: "file", file: { accept: "image", token: "npc" }, description: "Le portrait du PNJ. Importer une image (ou coller une adresse) le remplace, comme sur sa page." }
     if (is("Sorts actifs")) return { kind: "spells", spells: { source: "creature", category: "actif" } }
     if (is("Sorts passifs")) return { kind: "spells", spells: { source: "creature", category: "passif" } }
     return { kind: "rich" }

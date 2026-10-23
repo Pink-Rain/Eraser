@@ -1,0 +1,49 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body>
+<script src="relief.js"></script>
+<script>
+// Capture : le portrait et l'assemblage final, pour séparer les calques du cadre.
+(function () {
+  const R = window.Relief; const P = R.portraitCanvas; const K = R.compose;
+  window.__last = {};
+  R.portraitCanvas = (img, radius, options = {}) => { window.__last.portrait = { radius, options }; return P(null, radius, options); };
+  R.compose = (args) => { window.__last.compose = args; return K(args); };
+}());
+</script>
+<script src="helpers.js"></script><script src="props.js"></script><script src="props-strange.js"></script><script src="stalls.js"></script>
+<script src="base.js"></script>
+<script src="frames.js"></script><script src="frames-1.js"></script><script src="frames-2.js"></script><script src="frames-3.js"></script><script src="frames-4.js"></script><script src="frames-5.js"></script><script src="frames-6.js"></script>
+<script src="shops2.js"></script><script src="shops3.js"></script><script src="backdrops.js"></script>
+<script>
+const SIZE = 512, C = 256, TAU = Math.PI * 2;
+const blank = () => { const c = document.createElement('canvas'); c.width = c.height = SIZE; return c; };
+const url = (c) => c.toDataURL('image/webp', 0.92);
+function layers() {
+  const { back, frame, front, opening } = window.__last.compose;
+  const { radius, options } = window.__last.portrait;
+  let backUrl = null;
+  if (back) { const b = blank(); back(b.getContext('2d')); backUrl = url(b); }
+  const f = blank(); const ctx = f.getContext('2d');
+  // Vignette posée sur le portrait (elle ne dépend pas de l'image).
+  ctx.save(); ctx.beginPath(); ctx.arc(C, C, radius, 0, TAU); ctx.clip();
+  if (options.tint) { ctx.fillStyle = options.tint; ctx.fillRect(0, 0, SIZE, SIZE); }
+  const v = ctx.createRadialGradient(C, C, radius * 0.45, C, C, radius);
+  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, `rgba(8,5,2,${options.vignette ?? 0.55})`);
+  ctx.fillStyle = v; ctx.fillRect(0, 0, SIZE, SIZE); ctx.restore();
+  if (frame.shadow) { ctx.save(); ctx.filter = 'blur(1.5px)'; ctx.drawImage(frame.shadow, 0, 0); ctx.restore(); }
+  else { ctx.save(); ctx.beginPath(); ctx.arc(C, C, opening + 2, 0, TAU); ctx.clip(); ctx.filter = 'blur(7px) brightness(0)'; ctx.globalAlpha = 0.75; ctx.drawImage(frame, 7, 10); ctx.restore(); }
+  ctx.drawImage(frame, 0, 0);
+  if (front) front(ctx);
+  return { front: url(f), back: backUrl, radius, opening, background: options.background || '#1a1714', focus: options.focus || null };
+}
+window.exportAll = function () {
+  const out = { base: {}, epic: {}, door: {}, interior: {}, epicList: EpicLab.frames.map((f, i) => ({ n: i + 1, id: f.id, name: f.name })) };
+  for (const mk of ['vividBlue', 'blue', 'red', 'gold']) for (let lvl = 0; lvl < 4; lvl += 1) { BaseLab.renderBase(mk, lvl, null); out.base[`${mk}-${lvl + 1}`] = layers(); }
+  for (const n of [1, 2, 3, 4, 8, 13, 14, 16, 19, 20]) { const f = EpicLab.frames[n - 1]; EpicLab.renderFrame(f.id, null); out.epic[f.id] = { n, name: f.name, ...layers() }; }
+  for (const shop of ['market', 'bookshop', 'antique', 'armory', 'black-market', 'alchemist', 'tavern', 'traveling']) {
+    const it = ShopPack2.items.find((x) => x.id === `porte-${shop}`); ShopPack2.render(it, null); out.door[shop] = layers();
+    out.interior[shop] = url(Backdrops.render(shop, 'A'));
+  }
+  return out;
+};
+document.title = 'ready';
+</script></body></html>

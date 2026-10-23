@@ -884,7 +884,7 @@ test("PNJs and spells are set in the engine's editor: locks, hidden columns, por
   assert.ok(npcSheetHeaders.every((header) => worldColumnPolicy("npcs", "PNJs", header, []).reasons.length > 0));
   assert.ok(spellSheetHeaders.every((header) => worldColumnPolicy("class-spells", "Sorts", header, []).reasons.length > 0));
   assert.equal(worldColumnSpec("npcs", "PNJs", "Page lié").hidden, true);
-  assert.deepEqual(worldColumnSpec("npcs", "PNJs", "Portrait").file, { accept: "image" });
+  assert.deepEqual(worldColumnSpec("npcs", "PNJs", "Portrait").file, { accept: "image", token: "npc" });
   assert.equal(worldColumnSpec("npcs", "PNJs", "Page lié").defaultValue, "index-des-pnjs");
   assert.equal(worldColumnSpec("npcs", "PNJs", "PNJ important").defaultValue, "Non");
 });

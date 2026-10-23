@@ -216,8 +216,8 @@ export type FileSettings = {
   aspect?: "portrait" | "square" | "wide"
   /** Rangement des images importées ; absent : celui des index. */
   store?: "creature-portraits"
-  /** Un bouton « Token » sous l'image (créature). */
-  token?: "creature"
+  /** Un bouton « Token » sous l'image (créature, PNJ). */
+  token?: "creature" | "npc"
 }
 
 /** La classe de forme d'une image de fiche. */

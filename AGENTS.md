@@ -131,6 +131,16 @@
   posé sur `<body>` à l'ouverture d'une fenêtre : chacun refait le style de toute la page. Les
   retouches de Radix et de trystero dans `vite.config.ts` sont à vérifier à toute montée de version.
 
+## Tokens
+
+- Les cadres des tokens sont des images (`public/token-frames`), rendues une fois par le moteur
+  du dépôt ClaudeIcones (`scripts/token-frames/export.mjs`). Ne jamais faire tourner ce moteur
+  dans Eraser : il lui faut ~25 s. L'éditeur (`components/eraser/token-editor.tsx`) superpose
+  calque arrière, portrait et cadre.
+- Les cadres proposés et les défauts par type de token sont dans `lib/token-frames.ts` ; le
+  cadre choisi est gardé sur le Worker (portée `token-frames`). Ne jamais renommer un
+  identifiant de cadre déjà enregistré (« gold-3 », « special-lich », « door-market »…).
+
 ## Tabletop et Roll20
 
 - Le tabletop utilise notamment Leaflet et Trystero. Ses routes, composants et

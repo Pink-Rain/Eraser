@@ -1,4 +1,6 @@
 import { copySharedMedia, getSharedMedia, putSharedMedia, sharedMediaVersion } from "@/lib/shared-media"
+import { readSharedRecord, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
+import { isTokenFrameId } from "@/lib/token-frames"
 
 /**
  * Le token d'un personnage, PNJ, créature ou magasin : l'image ronde avec son cadre,
@@ -41,4 +43,22 @@ export async function tokenVersion(kind: TokenKind, id: string) {
 
 export async function copyToken(kind: TokenKind, sourceId: string, targetId: string) {
   return copySharedMedia(tokenKey(kind, sourceId), tokenKey(kind, targetId)).catch(() => false)
+}
+
+/**
+ * Le cadre choisi dans l'éditeur (« gold-3 », « special-lich »…), gardé dans le serveur
+ * partagé : l'éditeur le retrouve sur toutes les installations. Sans choix, l'éditeur prend
+ * le cadre par défaut du token (`lib/token-frames.ts`).
+ */
+const frameScope = "token-frames"
+
+export async function readTokenFrame(kind: TokenKind, id: string) {
+  if (!sharedStoreAvailable()) return null
+  const value = (await readSharedRecord(frameScope, `${kind}:${id}`))?.value ?? null
+  return isTokenFrameId(value) ? value : null
+}
+
+export async function saveTokenFrame(kind: TokenKind, id: string, frame: string) {
+  if (!sharedStoreAvailable() || !isTokenFrameId(frame)) return
+  await writeSharedRecord(frameScope, `${kind}:${id}`, frame)
 }
