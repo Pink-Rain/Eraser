@@ -56,6 +56,35 @@ export type CampaignSessionRecord = {
    * lib/session-reveal.ts) : absent du journal pour eux. Une chose ajoutée y entre.
    */
   hidden: string[]
+  /** Les lieux de l'Index des lieux liés à la session (leur nom gardé pour l'affichage). */
+  placeLinks: SessionPlace[]
+  /** Les dates en jeu, écrites dans ce calendrier (vide : pas de date). */
+  calendar: string
+  startDate: string
+  endDate: string
+}
+
+/** Un lieu de l'Index des lieux : son identifiant (« LIE-… »), son nom et son onglet (Villes…). */
+export type SessionPlace = { id: string; name: string; tab: string }
+
+/** Les lieux liés (JSON) ; une case illisible n'en a aucun (`strict` : refusée pour une écriture). */
+function placeList(value: string | undefined, strict = false): SessionPlace[] {
+  try {
+    const parsed = JSON.parse(value || "[]") as unknown
+    if (!Array.isArray(parsed)) throw new Error("NOT_A_LIST")
+    const places = parsed.flatMap((item) => cleanSessionPlace(item) ?? [])
+    return [...new Map(places.map((place) => [place.id, place])).values()]
+  } catch {
+    if (strict) throw new Error("SESSION_LISTS_UNREADABLE")
+    return []
+  }
+}
+
+export function cleanSessionPlace(value: unknown): SessionPlace | null {
+  if (!value || typeof value !== "object") return null
+  const raw = value as Record<string, unknown>
+  const place = { id: text(raw.id, 200).trim(), name: text(raw.name, 200).replace(/\s+/g, " ").trim(), tab: text(raw.tab, 120).trim() }
+  return place.id && place.name ? place : null
 }
 
 /**
@@ -161,6 +190,10 @@ function sessionFromRow(row: string[], strict = false, strictEvents = false): Ca
     ...(() => { const events = eventList(row[12], strictEvents); return { eventIds: events.ids, legacyEvents: events.legacy } })(),
     // Une case illisible ne révèle rien en douce : tout ce que la session contient reste caché.
     hidden: hiddenList(row[13], row),
+    placeLinks: placeList(row[14], strict),
+    calendar: row[15] || "",
+    startDate: row[16] || "",
+    endDate: row[17] || "",
   }
 }
 
@@ -189,6 +222,10 @@ function sessionCells(change: Partial<CampaignSessionRecord>) {
   if (change.document !== undefined) cells["Document"] = change.document
   if (change.eventIds !== undefined && change.legacyEvents !== undefined) cells["Événements (JSON)"] = eventsJson({ eventIds: change.eventIds, legacyEvents: change.legacyEvents })
   if (change.hidden !== undefined) cells["Cachés (JSON)"] = JSON.stringify(change.hidden)
+  if (change.placeLinks !== undefined) cells["Lieux liés (JSON)"] = JSON.stringify(change.placeLinks)
+  if (change.calendar !== undefined) cells["Calendrier"] = change.calendar
+  if (change.startDate !== undefined) cells["Date de début"] = change.startDate
+  if (change.endDate !== undefined) cells["Date de fin"] = change.endDate
   return cells
 }
 
@@ -198,6 +235,7 @@ function sessionRow(session: CampaignSessionRecord) {
     JSON.stringify(session.characterIds), JSON.stringify(session.npcIds), JSON.stringify(session.shopIds),
     session.createdByUid, session.createdAt, session.updatedAt,
     session.places, session.document, eventsJson(session), JSON.stringify(session.hidden),
+    JSON.stringify(session.placeLinks), session.calendar, session.startDate, session.endDate,
   ]
 }
 
@@ -309,6 +347,10 @@ export async function createCampaignSession(campaignId: string, name: string, cr
     eventIds: [],
     legacyEvents: [],
     hidden: [],
+    placeLinks: [],
+    calendar: "",
+    startDate: "",
+    endDate: "",
   }
   // Tout ce qu'une nouvelle session reçoit est caché aux joueurs jusqu'à ce que le MJ le révèle.
   session.hidden = sessionItemKeys(session)
@@ -354,6 +396,28 @@ export async function updateSessionTexts(campaignId: string, sessionId: string, 
   return updateSession(campaignId, sessionId, () => ({
     ...(texts.places !== undefined ? { places: texts.places.slice(0, 45_000) } : {}),
     ...(texts.document !== undefined ? { document: texts.document.slice(0, 45_000) } : {}),
+  }))
+}
+
+/**
+ * Lie ou délie des lieux de l'Index des lieux, appliqués à la liste relue juste avant d'écrire.
+ * Un lieu lié arrive caché aux joueurs, comme le reste, jusqu'à ce que le MJ le révèle.
+ */
+export async function updateSessionPlaces(campaignId: string, sessionId: string, change: { add?: SessionPlace[]; remove?: string[] }) {
+  return updateSession(campaignId, sessionId, (session) => {
+    const removed = new Set(change.remove ?? [])
+    const kept = session.placeLinks.filter((place) => !removed.has(place.id))
+    const placeLinks = [...kept, ...(change.add ?? []).filter((place) => !removed.has(place.id) && !kept.some((known) => known.id === place.id))].slice(0, 200)
+    return { placeLinks, hidden: hiddenAfterChange(session.hidden, "place", session.placeLinks.map((place) => place.id), placeLinks.map((place) => place.id)) }
+  }, { lists: true })
+}
+
+/** Les dates en jeu de la session (vides : effacées). */
+export async function updateSessionDates(campaignId: string, sessionId: string, dates: { calendar: string; startDate: string; endDate: string }) {
+  return updateSession(campaignId, sessionId, () => ({
+    calendar: dates.startDate ? dates.calendar.slice(0, 120) : "",
+    startDate: dates.startDate.slice(0, 120),
+    endDate: dates.startDate ? dates.endDate.slice(0, 120) : "",
   }))
 }
 

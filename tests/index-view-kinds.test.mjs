@@ -308,3 +308,18 @@ test("le survol au passage de la souris se garde dans la présentation (absent :
   assert.equal(views.cleanPresentation({ kind: "calendar", hover: "-" }).hover, "-");
   assert.equal(views.cleanPresentation({ kind: "list" }).hover, undefined);
 });
+
+test("calendrier du monde : Cir'Hoit d'office (quelle que soit son écriture), sinon le premier de l'index, sinon le réel", () => {
+  const world = (name) => ({ name, era: "", description: "", months: [{ name: "Brumaire", days: 30, season: "" }], seasons: [], weekdays: [] });
+  assert.equal(calendars.defaultWorldCalendar([world("Calendrier des Elfes"), world("Calendrier de Cir'Hoit")]).name, "Calendrier de Cir'Hoit");
+  assert.equal(calendars.defaultWorldCalendar([world("Calendrier des Elfes"), world("cirhoit")]).name, "cirhoit");
+  assert.equal(calendars.defaultWorldCalendar([world("Calendrier des Elfes")]).name, "Calendrier des Elfes");
+  assert.equal(calendars.defaultWorldCalendar([]).name, calendars.REAL_CALENDAR);
+  const list = [world("Calendrier des Elfes"), world("Cir'Hoit")];
+  assert.equal(calendars.calendarNamed(list, "").name, "Cir'Hoit");
+  assert.equal(calendars.calendarNamed(list, "calendrier des elfes").name, "Calendrier des Elfes");
+  assert.equal(calendars.calendarNamed(list, "Disparu"), null);
+  // Une date écrite par le sélecteur se relit dans son calendrier.
+  const elfes = list[0];
+  assert.deepEqual(calendars.parseCalendarDate(calendars.formatCalendarDate({ year: 1023, month: 0, day: 12 }, elfes), elfes), { year: 1023, month: 0, day: 12 });
+});

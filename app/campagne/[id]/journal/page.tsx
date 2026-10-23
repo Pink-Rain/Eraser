@@ -31,8 +31,8 @@ const visualIndexes = { place: "places", creature: "creatures", item: OBJECT_REF
  * leur nom dans leurs index (déjà en cache). Seuls l'image, le type, la couleur et l'icône
  * sortent : rien de privé. Une lecture qui échoue laisse les pastilles d'avant.
  */
-async function noteVisuals(notes: SessionNote[] | null): Promise<Record<string, JournalVisual>> {
-  const links = [...new Set((notes ?? []).flatMap((note) => [...note.links, ...(note.type === "butin" && note.title ? [`item:${note.title}`] : [])]))]
+async function noteVisuals(notes: SessionNote[] | null, extraLinks: string[] = []): Promise<Record<string, JournalVisual>> {
+  const links = [...new Set([...(notes ?? []).flatMap((note) => [...note.links, ...(note.type === "butin" && note.title ? [`item:${note.title}`] : [])]), ...extraLinks])]
   const requests: Array<{ link: string; request: ReferenceRequest }> = links.flatMap((link) => {
     const kind = link.slice(0, link.indexOf(":")) as keyof typeof visualIndexes
     const name = link.slice(link.indexOf(":") + 1).trim()
@@ -105,18 +105,19 @@ export default async function CampaignJournalPage({ params, searchParams }: { pa
   const ownIds = mine.map((character) => character.id)
   const veiledCharacters = reader.manager ? new Set<string>() : new Set(hiddenCharacters.filter((characterId) => !ownIds.includes(characterId)))
   const members = listedMembers.filter((member) => !veiledCharacters.has(member.id))
-  // Le joueur de chaque personnage, pour sa carte (« • Nom du joueur »), comme sur la page de campagne.
-  const [visuals, players, authors] = await Promise.all([
-    noteVisuals(notes),
-    playerNamesFor(account, members.map((member) => member.ownerUid)).catch(() => new Map<string, string>()),
-    noteAuthors(id, notes ?? [], members),
-  ])
-  const ownedMembers = new Set(mine.map((character) => character.id).filter((characterId) => members.some((member) => member.id === characterId)))
   const list = (sessions ?? []).map((session) => {
     if (reader.manager) return session
     const shown = revealedSession(session)
     return { ...shown, characterIds: shown.characterIds.filter((characterId) => !veiledCharacters.has(characterId)) }
   })
+  // Le joueur de chaque personnage, pour sa carte (« • Nom du joueur »), comme sur la page de campagne.
+  const [visuals, players, authors] = await Promise.all([
+    // Les lieux liés dans le Créateur de session ont leur image et leur type, comme ceux des notes.
+    noteVisuals(notes, list.flatMap((session) => session.placeLinks.map((place) => `place:${place.name}`))),
+    playerNamesFor(account, members.map((member) => member.ownerUid)).catch(() => new Map<string, string>()),
+    noteAuthors(id, notes ?? [], members),
+  ])
+  const ownedMembers = new Set(mine.map((character) => character.id).filter((characterId) => members.some((member) => member.id === characterId)))
   // Un joueur ne voit que ce qui est entré dans une session ; la préparation du MJ reste à lui.
   const inSessions = { npcs: new Set(list.flatMap((session) => session.npcIds)), shops: new Set(list.flatMap((session) => [...session.shopIds, ...session.eventIds.filter((entry) => entry.startsWith("shop:")).map((entry) => entry.slice(5))])), events: new Set(list.flatMap((session) => session.eventIds)) }
   const shown = <T extends { id: string }>(items: T[], set: Set<string>) => reader.manager ? items : items.filter((item) => set.has(item.id))
@@ -132,6 +133,10 @@ export default async function CampaignJournalPage({ params, searchParams }: { pa
     eventIds: session.eventIds.filter((entry) => !entry.startsWith("shop:")),
     // Les lieux notés par le MJ en préparant la session : à lui seul.
     places: reader.manager ? session.places : "",
+    placeLinks: session.placeLinks,
+    calendar: session.calendar,
+    startDate: session.startDate,
+    endDate: session.endDate,
     // Le MJ voit ce qui reste caché aux joueurs ; un joueur ne voit les personnages cachés ni dans le groupe, ni parmi les absents.
     ...(reader.manager ? { hidden: session.hidden } : { veiledCharacterIds: (sessions ?? []).find((candidate) => candidate.id === session.id)?.characterIds.filter((characterId) => !session.characterIds.includes(characterId)) ?? [] }),
   }))

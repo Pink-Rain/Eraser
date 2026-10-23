@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { sessionManager } from "@/lib/session-access"
-import { deleteCampaignSession, renameCampaignSession, saveSessionBanner, updateSessionEvents, updateSessionMembership, updateSessionTexts, updateSessionVisibility, type SessionMembership } from "@/lib/campaign-sessions"
+import { cleanSessionPlace, deleteCampaignSession, renameCampaignSession, saveSessionBanner, updateSessionDates, updateSessionEvents, updateSessionMembership, updateSessionPlaces, updateSessionTexts, updateSessionVisibility, type SessionMembership } from "@/lib/campaign-sessions"
 
 function ids(value: unknown) {
   return Array.isArray(value) && value.length <= 200 && value.every((item) => typeof item === "string" && item.length > 0 && item.length <= 200) ? value as string[] : undefined
@@ -30,7 +30,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (!(file instanceof File)) throw new Error("INVALID_BANNER")
       return NextResponse.json({ session: await saveSessionBanner(id, sessionId, file) })
     }
-    const body = (await request.json()) as { name?: unknown; add?: unknown; remove?: unknown; places?: unknown; document?: unknown; events?: unknown; visibility?: unknown }
+    const body = (await request.json()) as { name?: unknown; add?: unknown; remove?: unknown; places?: unknown; document?: unknown; events?: unknown; visibility?: unknown; placeLinks?: unknown; dates?: unknown }
+    // Les lieux de l'Index des lieux liés ou déliés.
+    if (body.placeLinks && typeof body.placeLinks === "object") {
+      const change = body.placeLinks as Record<string, unknown>
+      const add = Array.isArray(change.add) ? change.add.slice(0, 50).flatMap((item) => cleanSessionPlace(item) ?? []) : undefined
+      return NextResponse.json({ session: await updateSessionPlaces(id, sessionId, { add, remove: ids(change.remove) }) })
+    }
+    // Les dates en jeu (calendrier du monde).
+    if (body.dates && typeof body.dates === "object") {
+      const dates = body.dates as Record<string, unknown>
+      const field = (key: string) => typeof dates[key] === "string" ? dates[key] as string : ""
+      return NextResponse.json({ session: await updateSessionDates(id, sessionId, { calendar: field("calendar"), startDate: field("startDate"), endDate: field("endDate") }) })
+    }
     // Révéler ou recacher des choses de la session aux joueurs (leurs clés « npc:ID »…), ou toutes.
     if (body.visibility && typeof body.visibility === "object") {
       const change = body.visibility as Record<string, unknown>

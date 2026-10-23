@@ -45,9 +45,14 @@ export const characterSecondaryCalculatedFields = [
   { valueIndex: 23, label: "Réussite critique" },
 ] as const
 export const characterSecondaryCalculationHeaders = characterSecondaryCalculatedFields.flatMap(({ label }) => [`${label} — Bonus/Malus`, `${label} — Modificateur`])
-export const characterValueHeaders = [...characterBaseHeaders, ...characterNarrativeHeaders, ...characterCharacteristicCriticalHeaders, ...characterSecondaryCalculationHeaders, ...characterSkills.flatMap((skill) => characterSkillMetrics.map((metric) => `${skill.name} — ${metric}`)), "Onglets personnalisés", "Sorts de classe choisis JSON"]
-export const characterCustomTabsIndex = characterValueHeaders.length - 2
-export const characterClassChoicesIndex = characterValueHeaders.length - 1
+/** Ajoutées après les autres (alpha 257) : la naissance, la date écrite dans son calendrier. */
+export const characterBirthHeaders = ["Date de naissance", "Calendrier de naissance", "Lieu de naissance"] as const
+export const characterValueHeaders = [...characterBaseHeaders, ...characterNarrativeHeaders, ...characterCharacteristicCriticalHeaders, ...characterSecondaryCalculationHeaders, ...characterSkills.flatMap((skill) => characterSkillMetrics.map((metric) => `${skill.name} — ${metric}`)), "Onglets personnalisés", "Sorts de classe choisis JSON", ...characterBirthHeaders]
+export const characterCustomTabsIndex = characterValueHeaders.indexOf("Onglets personnalisés")
+export const characterClassChoicesIndex = characterValueHeaders.indexOf("Sorts de classe choisis JSON")
+export const characterBirthDateIndex = characterValueHeaders.indexOf("Date de naissance")
+export const characterBirthCalendarIndex = characterValueHeaders.indexOf("Calendrier de naissance")
+export const characterBirthPlaceIndex = characterValueHeaders.indexOf("Lieu de naissance")
 export const characterSheetHeaders = ["ID", "Joueur", ...characterValueHeaders]
 export const characterNarrativeStart = characterBaseHeaders.length
 export const characterCriticalStart = characterNarrativeStart + characterNarrativeHeaders.length

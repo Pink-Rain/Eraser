@@ -87,8 +87,24 @@ identifiants de ses personnages, PNJs et magasins ; la colonne « Ajouté au
 créateur de session » des PNJs et magasins vaut « Oui » tant qu’ils figurent dans
 au moins une session.
 
+Depuis l’alpha 257, une session garde aussi ses lieux de l’Index des lieux
+(« Lieux liés (JSON) » : identifiant, nom, onglet ; clé de visibilité `place:ID`) et
+ses dates en jeu (« Calendrier », « Date de début », « Date de fin », écrites telles
+qu’affichées : « 12 Brumaire 1023 AC »). Le Créateur cherche un lieu dans l’index
+et en ajoute un absent (action `ensure` de `/api/resources/world-indexes`) ; l’ancien
+texte « Lieux de la session » reste affiché tant qu’il n’est pas vide. Le journal
+montre les dates à tous et ajoute les lieux liés à ceux que citent les notes.
+
+Les dates du monde (naissance sur la fiche, sessions) se choisissent dans
+`components/eraser/calendar-date-field.tsx` : le calendrier de Cir’Hoit de l’Index
+des calendriers d’office (`defaultWorldCalendar`, `lib/calendars.ts`), un autre au
+besoin. `/api/calendars` ne renvoie que les calendriers, lisibles par les joueurs.
+La fiche range « Date de naissance », « Calendrier de naissance » et « Lieu de
+naissance » après « Sorts de classe choisis JSON » (`characterBirthHeaders`) ; les
+index des onglets personnalisés et des choix de classe sont cherchés par leur nom.
+
 Ce que les joueurs voient d’une session est réglé dans la colonne « Cachés (JSON) »
-(`lib/session-reveal.ts`, clés `character:ID`, `npc:ID`, `shop:ID`, `event:ID`) :
+(`lib/session-reveal.ts`, clés `character:ID`, `npc:ID`, `shop:ID`, `event:ID`, `place:ID`) :
 toute chose ajoutée arrive cachée, l’œil du Créateur la révèle, le journal des
 joueurs ne montre que ce qui est révélé (`revealedSession`). Une case vide (sessions
 d’avant l’alpha 237) ne cache rien ; une case illisible cache tout. La vitrine d’un

@@ -3,7 +3,7 @@
 import { NO_CLASS } from "@/lib/class-visibility"
 import { displayedMultipleValue } from "@/lib/multiple-values"
 import { useEffect, useRef, useState } from "react"
-import { ArrowUpRight, CalendarPlus, CircleMinus, CircleUserRound, ImagePlus, LoaderCircle, Pencil, Plus, Trash2, UsersRound } from "lucide-react"
+import { ArrowUpRight, CalendarDays, CalendarPlus, CircleMinus, CircleUserRound, ImagePlus, LoaderCircle, Pencil, Plus, Trash2, UsersRound } from "lucide-react"
 import Link from "next/link"
 
 import {
@@ -19,6 +19,8 @@ import { CreateSessionDialog, deleteSession, patchSession, SESSION_UPDATED_EVENT
 import { SavedShopCollection } from "@/components/eraser/shop-generator"
 import { SessionEvents } from "@/components/eraser/session-events"
 import { RichTextField } from "@/components/eraser/rich-text"
+import { CalendarDateField } from "@/components/eraser/calendar-date-field"
+import { SessionPlaces } from "@/components/eraser/session-places"
 import { RevealAllBar, RevealToggle, SessionRevealProvider } from "@/components/eraser/session-reveal"
 import { hiddenAfterChange, sessionItemKey, sessionItemKeys, type SessionRevealKind } from "@/lib/session-reveal"
 import { replaceAppUrl } from "@/components/eraser/app-tabs"
@@ -69,6 +71,17 @@ function PlayerCard({ member, pending, onRemove }: { member: SessionMember; pend
 }
 
 type Membership = { characterIds?: string[]; npcIds?: string[]; shopIds?: string[] }
+
+/** La session après un lieu lié ou délié, ou des dates changées, telle que le serveur l'écrira. */
+function withPlacesAndDates(session: CampaignSessionRecord, body: Exclude<Parameters<typeof patchSession>[2], FormData>): CampaignSessionRecord | null {
+  if (body.dates) return { ...session, calendar: body.dates.startDate ? body.dates.calendar : "", startDate: body.dates.startDate, endDate: body.dates.startDate ? body.dates.endDate : "" }
+  if (!body.placeLinks) return null
+  const removed = new Set(body.placeLinks.remove ?? [])
+  const current = session.placeLinks ?? []
+  const kept = current.filter((place) => !removed.has(place.id))
+  const placeLinks = [...kept, ...(body.placeLinks.add ?? []).filter((place) => !kept.some((known) => known.id === place.id))]
+  return { ...session, placeLinks, hidden: hiddenAfterChange(session.hidden ?? [], "place", current.map((place) => place.id), placeLinks.map((place) => place.id)) }
+}
 
 /** La session après des ajouts et retraits, telle que le serveur l'écrira : une chose ajoutée arrive cachée. */
 function withMembership(session: CampaignSessionRecord, add: Membership, remove: Membership): CampaignSessionRecord {
@@ -137,12 +150,13 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
     const before = session
     const seq = ++changeSeq.current
     const membership = !(body instanceof FormData) && (body.add || body.remove) ? body : null
-    if (membership) replace(withMembership(session, membership.add ?? {}, membership.remove ?? {}))
+    const shown = membership ? withMembership(session, membership.add ?? {}, membership.remove ?? {}) : body instanceof FormData ? null : withPlacesAndDates(session, body)
+    if (shown) replace(shown)
     try {
       const saved = await patchSession(campaignId, session.id, body)
       if (changeSeq.current === seq) replace(saved)
     } catch (caught) {
-      if (membership && changeSeq.current === seq) replace(before)
+      if (shown && changeSeq.current === seq) replace(before)
       throw caught
     }
   }
@@ -261,8 +275,27 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
       <RevealAllBar hiddenCount={hiddenCount} total={allKeys.length} pending={Boolean(savingReveal)} onAll={(all) => void changeVisibility({ all }, "*")} />
 
       <section>
-        <SectionTitle>Lieux de la session</SectionTitle>
-        <RichTextField key={`places:${session.id}`} value={session.places} onCommit={(value) => void saveText("places", value)} minHeight="min-h-20" ariaLabel="Lieux de la session" placeholder="Les lieux que les joueurs traverseront : ville, auberge, donjon…" />
+        <SectionTitle>Date en jeu</SectionTitle>
+        {/* Calendrier de Cir'Hoit d'office ; le journal l'affiche à tous, seul le MJ la change ici. */}
+        <CalendarDateField range label="Date de la session" value={{ calendar: session.calendar ?? "", start: session.startDate ?? "", end: session.endDate ?? "" }} onCommit={(next) => { void change({ dates: { calendar: next.calendar, startDate: next.start, endDate: next.end ?? "" } }).catch((caught) => setError(caught instanceof Error ? caught.message : "La date n’a pas pu être enregistrée.")) }} className="max-w-md">
+          <span className="flex items-center gap-3 rounded-2xl border bg-card/75 px-4 py-3 shadow-sm">
+            <CalendarDays className="size-5 shrink-0 text-primary" />
+            <span className="min-w-0 flex-1">{session.startDate
+              ? <><span className="block font-display text-lg font-semibold">{session.endDate ? `${session.startDate} → ${session.endDate}` : session.startDate}</span><span className="block text-[11px] text-muted-foreground">{session.calendar}</span></>
+              : <span className="block text-sm text-muted-foreground">Choisir la date (calendrier de Cir’Hoit)…</span>}</span>
+            <Pencil className="size-3.5 shrink-0 text-muted-foreground" />
+          </span>
+        </CalendarDateField>
+      </section>
+
+      <section>
+        <SectionTitle count={session.placeLinks?.length ?? 0}>Lieux de la session</SectionTitle>
+        <SessionPlaces places={session.placeLinks ?? []} onAdd={(place) => void change({ placeLinks: { add: [place] } }).catch((caught) => setError(caught instanceof Error ? caught.message : "Le lieu n’a pas pu être lié."))} onRemove={(place) => void change({ placeLinks: { remove: [place.id] } }).catch((caught) => setError(caught instanceof Error ? caught.message : "Le lieu n’a pas pu être retiré."))} />
+        {/* L'ancien texte libre des lieux reste lisible et modifiable tant qu'il contient quelque chose. */}
+        {(session.places ?? "").replace(/<[^>]+>/g, "").trim() && <div className="mt-4">
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Notes sur les lieux (ancien texte)</p>
+          <RichTextField key={`places:${session.id}`} value={session.places} onCommit={(value) => void saveText("places", value)} minHeight="min-h-16" ariaLabel="Notes sur les lieux" />
+        </div>}
       </section>
 
       <section className="border-t pt-8">

@@ -344,6 +344,38 @@ test("Session : une liste illisible n'est jamais remplacée par une liste vide, 
   assert.equal(google.grid(id, "Sessions")[2][4], "[\"PJ-1\", oups");
 });
 
+test("Session : lieux de l'Index des lieux liés (cachés aux joueurs d'abord) et dates en jeu, dans leurs propres colonnes", async () => {
+  const id = fresh("sessions");
+  google.addSpreadsheet(id, [{ title: "Sessions", grid: [sessionHeaders,
+    ["S-1", "CAMP-1", "Ouverture", "", "[]", "[]", "[]", "mj-1", "2026-09-01", "2026-09-01"],
+  ] }]);
+  await jdr.saveJdrSheet({ key: "sessions", spreadsheetId: id, name: "Sessions", tabName: "Sessions", webViewLink: "" });
+  const sessions = await vite.ssrLoadModule("/lib/campaign-sessions.ts");
+  const reveal = await vite.ssrLoadModule("/lib/session-reveal.ts");
+  const linked = await sessions.updateSessionPlaces("CAMP-1", "S-1", { add: [{ id: "LIE-1", name: "Valombre", tab: "Villes" }, { id: "LIE-2", name: "Forêt grise", tab: "Régions" }] });
+  assert.deepEqual(linked.placeLinks.map((place) => place.id), ["LIE-1", "LIE-2"]);
+  assert.deepEqual(linked.hidden, ["place:LIE-1", "place:LIE-2"]);
+  // Un joueur ne voit que les lieux révélés.
+  const shown = await sessions.updateSessionVisibility("CAMP-1", "S-1", { reveal: ["place:LIE-2"] });
+  assert.deepEqual(reveal.revealedSession(shown).placeLinks.map((place) => place.name), ["Forêt grise"]);
+  const dated = await sessions.updateSessionDates("CAMP-1", "S-1", { calendar: "Calendrier de Cir'Hoit", startDate: "12 Brumaire 1023", endDate: "14 Brumaire 1023" });
+  assert.equal(dated.startDate, "12 Brumaire 1023");
+  const headers = google.grid(id, "Sessions")[0];
+  const row = google.grid(id, "Sessions")[1];
+  const cell = (name) => row[headers.indexOf(name)];
+  // Les colonnes d'avant n'ont pas bougé ; les nouvelles sont ajoutées à droite.
+  assert.deepEqual(headers.slice(0, sessionHeaders.length), sessionHeaders);
+  assert.equal(cell("Calendrier"), "Calendrier de Cir'Hoit");
+  assert.equal(cell("Date de fin"), "14 Brumaire 1023");
+  assert.deepEqual(JSON.parse(cell("Lieux liés (JSON)")).map((place) => place.id), ["LIE-1", "LIE-2"]);
+  // Délier un lieu le retire aussi des cachés ; effacer la date vide les trois cases.
+  const unlinked = await sessions.updateSessionPlaces("CAMP-1", "S-1", { remove: ["LIE-1"] });
+  assert.deepEqual(unlinked.placeLinks.map((place) => place.id), ["LIE-2"]);
+  assert.equal(unlinked.hidden.includes("place:LIE-1"), false);
+  const cleared = await sessions.updateSessionDates("CAMP-1", "S-1", { calendar: "Calendrier de Cir'Hoit", startDate: "", endDate: "14 Brumaire 1023" });
+  assert.deepEqual([cleared.calendar, cleared.startDate, cleared.endDate], ["", "", ""]);
+});
+
 test("Tabletop : une feuille réglée en français garde ses décimales, un changement n'écrit que sa case", async () => {
   const id = fresh("tabletop");
   google.addSpreadsheet(id, [

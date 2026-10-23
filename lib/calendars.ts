@@ -214,3 +214,18 @@ export function addMonths(calendar: CalendarDefinition, year: number, month: num
   const total = year * count + month + delta
   return { year: Math.floor(total / count), month: ((total % count) + count) % count }
 }
+
+/**
+ * Le calendrier du monde proposé d'office (dates de naissance, dates des sessions) : celui de
+ * Cir'Hoit dans l'Index des calendriers, sinon le premier de l'index, sinon le calendrier réel.
+ */
+export function defaultWorldCalendar(calendars: CalendarDefinition[]) {
+  return calendars.find((calendar) => /\bcir ?hoi/.test(fold(calendar.name))) ?? calendars.find((calendar) => calendar.name !== REAL_CALENDAR) ?? realCalendar
+}
+
+/** Le calendrier d'un nom (vide : celui du monde) ; `null` s'il n'est plus dans l'index. */
+export function calendarNamed(calendars: CalendarDefinition[], name: string | undefined) {
+  if (!name?.trim()) return defaultWorldCalendar(calendars)
+  if (fold(name) === fold(REAL_CALENDAR)) return realCalendar
+  return calendars.find((calendar) => fold(calendar.name) === fold(name)) ?? null
+}

@@ -45,6 +45,9 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
+  characterBirthCalendarIndex,
+  characterBirthDateIndex,
+  characterBirthPlaceIndex,
   characterClassChoicesIndex,
   characterCustomTabsIndex,
   characterNarrativeStart,
@@ -53,6 +56,7 @@ import {
   characterSkillMetrics,
   characterValueHeaders,
 } from "@/lib/character-sheet-schema"
+import { CalendarDateField } from "@/components/eraser/calendar-date-field"
 import {
   builtinCharacterCatalog,
   builtinPrincipalColors,
@@ -1733,13 +1737,16 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
               <div className="xl:col-span-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Level</p><Stepper label="Level" value={values[3]} onCommit={commitLevel} /></div>
             </div>
             <div className="grid gap-x-8 gap-y-4 py-4 sm:grid-cols-2 xl:grid-cols-12">
-              <div className="xl:col-span-6"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Langues parlées</p><MultipleValues label="une langue" value={values[24]} onCommit={(value) => commit(24, value)} /></div>
-              <div className="xl:col-span-6"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Titres honorifiques</p><MultipleValues selectActive label="un titre" value={values[35]} onCommit={(value) => commit(35, value)} /></div>
+              <div className="xl:col-span-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Langues parlées</p><MultipleValues label="une langue" value={values[24]} onCommit={(value) => commit(24, value)} /></div>
+              <div className="xl:col-span-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Titres honorifiques</p><MultipleValues selectActive label="un titre" value={values[35]} onCommit={(value) => commit(35, value)} /></div>
+              <div className="xl:col-span-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Religions</p><MultipleValues label="une religion" value={values[37]} onCommit={(value) => commit(37, value)} /></div>
+              <div className="xl:col-span-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Autre</p><InlineEdit compact label="Autre" value={values[7]} onCommit={(value) => commit(7, value)}><p className="mt-1 text-sm font-medium">{values[7] || "—"}</p></InlineEdit></div>
             </div>
             <div className="grid gap-x-8 gap-y-4 py-4 sm:grid-cols-2 xl:grid-cols-12">
               {[{ index: 4, label: "Taille" }, { index: 5, label: "Poids" }, { index: 6, label: "Âge" }].map((field) => <div key={field.index} className="xl:col-span-2"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{field.label}</p><InlineEdit compact label={field.label} value={values[field.index]} onCommit={(value) => commit(field.index, value)}><p className="mt-1 text-sm font-medium">{values[field.index] || "—"}</p></InlineEdit></div>)}
-              <div className="xl:col-span-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Religions</p><MultipleValues label="une religion" value={values[37]} onCommit={(value) => commit(37, value)} /></div>
-              <div className="xl:col-span-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Autre</p><InlineEdit compact label="Autre" value={values[7]} onCommit={(value) => commit(7, value)}><p className="mt-1 text-sm font-medium">{values[7] || "—"}</p></InlineEdit></div>
+              {/* La date dans le calendrier de Cir'Hoit d'office (un autre au besoin), gardé à côté. */}
+              <div className="xl:col-span-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Date de naissance</p><CalendarDateField label="Date de naissance" value={{ calendar: values[characterBirthCalendarIndex] || "", start: values[characterBirthDateIndex] || "" }} onCommit={(next) => { void commit(characterBirthDateIndex, next.start); if ((values[characterBirthCalendarIndex] || "") !== next.calendar) void commit(characterBirthCalendarIndex, next.calendar) }} /></div>
+              <div className="xl:col-span-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Lieu de naissance</p><InlineEdit compact label="Lieu de naissance" value={values[characterBirthPlaceIndex]} onCommit={(value) => commit(characterBirthPlaceIndex, value)}><p className="mt-1 text-sm font-medium">{values[characterBirthPlaceIndex] || "—"}</p></InlineEdit></div>
             </div>
           </div>
           <div className="mt-5">

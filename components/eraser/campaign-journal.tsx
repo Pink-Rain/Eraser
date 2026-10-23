@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
 import Link from "next/link"
 import dynamic from "next/dynamic"
-import { ArrowUpRight, BookOpen, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleUserRound, Feather, Lock, NotebookPen, NotebookText, Plus, Store, type LucideIcon } from "lucide-react"
+import { ArrowUpRight, BookOpen, CalendarDays, Check, Hourglass, ChevronDown, ChevronLeft, ChevronRight, CircleUserRound, Feather, Lock, NotebookPen, NotebookText, Plus, Store, type LucideIcon } from "lucide-react"
 
 import { replaceAppUrl } from "@/components/eraser/app-tabs"
 import { RevealToggle, SessionRevealProvider } from "@/components/eraser/session-reveal"
@@ -37,6 +37,10 @@ const JournalShopWindow = dynamic(() => import("@/components/eraser/journal-shop
 export type JournalSession = { id: string; name: string; createdAt: string }
 export type JournalSessionDetail = JournalSession & {
   bannerUrl: string; characterIds: string[]; npcIds: string[]; shopIds: string[]; eventIds: string[]; places: string
+  /** Les lieux de l'Index des lieux liés dans le Créateur de session (pour un joueur : ceux révélés). */
+  placeLinks?: Array<{ id: string; name: string; tab: string }>
+  /** La date en jeu (calendrier du monde), choisie par le MJ dans le Créateur de session. */
+  calendar?: string; startDate?: string; endDate?: string
   /** Les marchés ambulants de la session (rangés parmi ses événements), aussi dans `shopIds`. */
   marketIds?: string[]
   /** Pour le MJ : ce que le Créateur de session cache encore aux joueurs (« npc:ID », « event:shop:ID »…). */
@@ -564,6 +568,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
       session.npcIds.forEach((id) => mark(`npc:${id}`, position))
       session.shopIds.forEach((id) => mark(`shop:${id}`, position))
       session.eventIds.forEach((id) => mark(`event:${id}`, position))
+      session.placeLinks?.forEach((place) => mark(`place:${place.name}`, position))
     })
     for (const note of notes) {
       const position = rank.get(note.sessionId)
@@ -606,7 +611,11 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
   const otherEvents = sessionEvents.filter((event) => event.kind === "other")
   const sessionShops = byId(shops, current.shopIds)
   const namesIn = (kind: "place" | "creature" | "item") => [...new Set(here.flatMap((note) => note.links.filter((link) => link.startsWith(`${kind}:`)).map((link) => link.slice(kind.length + 1))))]
-  const places = namesIn("place")
+  // Les lieux liés à la session d'abord, puis ceux que les notes citent (une seule carte par nom).
+  const placeKey = (name: string) => name.trim().toLocaleLowerCase("fr")
+  const linkedPlaces = current.placeLinks ?? []
+  const linkedNames = new Set(linkedPlaces.map((place) => placeKey(place.name)))
+  const places = [...linkedPlaces.map((place) => place.name), ...namesIn("place").filter((name) => !linkedNames.has(placeKey(name)))]
   const loot = here.filter((note) => note.type === "butin")
   // Un objet déjà raconté par un butin, une créature déjà présente comme événement : une seule carte.
   const same = (name: string) => name.trim().toLocaleLowerCase("fr")
@@ -689,6 +698,8 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
   const prev = sessions[index - 1]
   const next = sessions[index + 1]
   const date = sessionDate(current.createdAt)
+  // La date en jeu : « 12 Brumaire 1023 » ou « 12 → 14 Brumaire 1023 » (le calendrier en bulle).
+  const worldDate = current.startDate ? (current.endDate ? `${current.startDate} → ${current.endDate}` : current.startDate) : ""
   const banner = current.bannerUrl && brokenBanner !== current.bannerUrl ? current.bannerUrl : ""
   const eventColor = sessionNoteType("evenement").color
 
@@ -727,6 +738,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
                       <span className="text-banner-gold">S{index + 1}</span> — {current.name}
                     </span>
                     <span className="mt-1.5 inline-flex items-center gap-1.5 text-[12.5px] text-banner-ink/80">
+                      {worldDate && <><Hourglass className="size-3.5" aria-hidden /><span title={current.calendar}>{worldDate}</span><span aria-hidden>·</span></>}
                       {date && <><CalendarDays className="size-3.5" aria-hidden />{date}<span className="hidden sm:inline" aria-hidden>·</span></>}
                       <span className="hidden sm:inline">toutes les sessions</span>
                       <ChevronDown className={cn("size-3.5 transition-transform", listOpen && "rotate-180")} aria-hidden />
@@ -772,6 +784,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
             <span className="absolute inset-y-0 left-0 w-1 bg-journal" aria-hidden />
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <h2 id="journal-bilan" className="font-display text-[1.35rem] font-semibold">Bilan de la session</h2>
+              {worldDate && <span className="inline-flex items-center gap-1 text-xs font-medium text-journal-ink" title={current.calendar ? `Date en jeu · ${current.calendar}` : "Date en jeu"}><Hourglass className="size-3.5" aria-hidden />{worldDate}</span>}
               {date && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><CalendarDays className="size-3.5 text-journal-ink" aria-hidden />{date}</span>}
             </div>
             {summaries.length ? <div className="mt-2.5 space-y-3">{summaries.map((note, position) => <figure key={note.id} className="max-w-[70ch]">
@@ -819,8 +832,8 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
                 <p className="mb-1.5 flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.08em] text-muted-foreground"><Lock className="size-3" aria-hidden />Préparation du MJ · visible par toi seul</p>
                 <RichTextView html={current.places} className="text-sm" />
               </div>}
-              {places.length ? <div className={cardGrid}>{places.map((name) => <EntityCard key={name} kind="place" name={name} hint={visualOf(`place:${name}`)?.type} image={visualOf(`place:${name}`)?.image} icon={linkKindLabels.place.icon} square link={`place:${name}`} tags={seenTag(`place:${name}`)} />)}</div>
-                : !current.places && <EmptyHint icon={linkKindLabels.place.icon}>Aucun lieu noté. Lie une note à un lieu de l’Index des lieux.</EmptyHint>}
+              {places.length ? <div className={cardGrid}>{places.map((name) => { const linked = linkedPlaces.find((place) => placeKey(place.name) === placeKey(name)); return <EntityCard key={name} kind="place" name={name} hint={visualOf(`place:${name}`)?.type ?? linked?.tab} image={visualOf(`place:${name}`)?.image} icon={linkKindLabels.place.icon} square link={`place:${name}`} tags={seenTag(`place:${name}`)} reveal={linked ? { kind: "place", id: linked.id } : undefined} /> })}</div>
+                : !current.places && <EmptyHint icon={linkKindLabels.place.icon}>Aucun lieu pour l’instant : le MJ les lie dans le Créateur de session, et les notes qui citent un lieu de l’index s’y ajoutent.</EmptyHint>}
             </Section>
 
             <Section id="journal-pnjs" icon={linkKindLabels.npc.icon} title="PNJs" count={npcCount}>
