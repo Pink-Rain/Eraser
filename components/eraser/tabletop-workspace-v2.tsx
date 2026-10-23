@@ -61,6 +61,7 @@ import type {
   TabletopTokenRecord,
 } from "@/lib/tabletop-schema"
 import { replaceAppUrl } from "@/components/eraser/app-tabs"
+import { chatMessageTime } from "@/lib/chat-time"
 import { cn } from "@/lib/utils"
 import { ownedBy } from "@/lib/ownership"
 
@@ -117,9 +118,10 @@ function syncMap(map: TabletopMapRecord): SyncMap {
   }
 }
 
-function formatActivityTime(value: string) {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" }).format(date)
+/** L'heure du message, et sa date en petit (JJ/MM/AA) : une partie peut s'étaler sur des jours. */
+function ActivityTime({ value }: { value: string }) {
+  const { time, date, title } = chatMessageTime(value)
+  return <time dateTime={value} title={title} className="ml-auto shrink-0 font-normal tabular-nums text-muted-foreground">{date && <span className="mr-1 text-[9.5px] opacity-75">{date}</span>}{time}</time>
 }
 
 async function responseJson<T>(response: Response) {
@@ -1451,7 +1453,7 @@ export function TabletopWorkspace({ canManage, pageLinked, pageName, roomKey, re
             <div className="flex items-center gap-2 border-b p-3"><MessageCircle className="size-4 text-primary" /><div><h2 className="font-display font-semibold">Direct</h2><p className="text-[10px] text-muted-foreground">Tu écris en tant que {speakerName}</p></div><Badge variant="secondary" className="ml-auto">{peerIds.length + 1}</Badge><Button variant="ghost" size="icon-sm" onClick={() => setChatOpen(false)}><X /></Button></div>
             {!canManage && ownedSpeakers.length > 1 && <div className="border-b px-3 py-2"><NativeSelect value={speaker?.id || ""} onChange={(event) => setSpeakerId(event.target.value)} aria-label="Personnage qui parle">{ownedSpeakers.map((character) => <NativeSelectOption key={character.id} value={character.id}>{character.name}</NativeSelectOption>)}</NativeSelect></div>}
             <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
-              {activities.map((activity) => <div key={activity.id} className={cn("rounded-xl border p-2.5", activity.kind === "dice" ? "border-primary/20 bg-primary/6" : "bg-background/60")}><div className="flex items-center gap-1.5 text-xs font-semibold">{activity.kind === "dice" && <Dices className="size-3.5 text-primary" />}{activity.authorName}{activity.audience !== "public" && <Badge variant="outline" className="h-5 text-[9px]">{activity.audience === "gm" ? "MJ seulement" : `À ${activity.recipientName}`}</Badge>}<span className="ml-auto font-normal text-muted-foreground">{formatActivityTime(activity.createdAt)}</span></div>{activity.kind === "dice" ? <p className="mt-1 text-sm"><span className="font-mono font-semibold">{activity.diceExpression}</span><br /><span>{activity.diceResult}</span></p> : <p className="mt-1 whitespace-pre-wrap break-words text-sm">{activity.text}</p>}</div>)}
+              {activities.map((activity) => <div key={activity.id} className={cn("rounded-xl border p-2.5", activity.kind === "dice" ? "border-primary/20 bg-primary/6" : "bg-background/60")}><div className="flex items-center gap-1.5 text-xs font-semibold">{activity.kind === "dice" && <Dices className="size-3.5 text-primary" />}{activity.authorName}{activity.audience !== "public" && <Badge variant="outline" className="h-5 text-[9px]">{activity.audience === "gm" ? "MJ seulement" : `À ${activity.recipientName}`}</Badge>}<ActivityTime value={activity.createdAt} /></div>{activity.kind === "dice" ? <p className="mt-1 text-sm"><span className="font-mono font-semibold">{activity.diceExpression}</span><br /><span>{activity.diceResult}</span></p> : <p className="mt-1 whitespace-pre-wrap break-words text-sm">{activity.text}</p>}</div>)}
               {!activities.length && <p className="py-10 text-center text-xs text-muted-foreground">Le chat et les dés apparaîtront ici.</p>}
               <div ref={activityEndRef} />
             </div>

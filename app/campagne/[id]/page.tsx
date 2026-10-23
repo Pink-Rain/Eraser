@@ -9,6 +9,7 @@ import { authorizedAccount, type AuthorizedUser } from "@/lib/server-auth"
 import { identityUidsForUser } from "@/lib/identity-links"
 import { playerNamesFor } from "@/lib/chat-accounts"
 import { ownedBy } from "@/lib/ownership"
+import { campaignRoll20Url, campaignRoll20UrlAvailable } from "@/lib/campaign-roll20-url"
 import { campaignHidingAvailable, hiddenCampaignCharacters, visibleCampaignCharacters } from "@/lib/campaign-hidden-characters"
 
 export const dynamic = "force-dynamic"
@@ -27,7 +28,7 @@ async function CampaignDashboardData({
   // Chaque partie de la page se lit à part : quand Google refuse une lecture (tous les
   // joueurs ouvrent la campagne en même temps), seule cette partie le dit, au lieu de
   // « Impossible d'afficher cette page » pour tout le monde sauf un.
-  const [listed, npcRead, hidden] = await Promise.all([
+  const [listed, npcRead, hidden, roll20Url] = await Promise.all([
     listCampaignMembers(campaign.id).catch((error) => {
       console.error("CAMPAIGN_MEMBERS_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
       return []
@@ -38,6 +39,8 @@ async function CampaignDashboardData({
     }),
     // Les personnages que le MJ cache aux autres joueurs (serveur partagé).
     hiddenCampaignCharacters(campaign.id),
+    // Le lien de la partie Roll20, montré à toute la table (serveur partagé).
+    campaignRoll20Url(campaign.id),
   ])
   const { npcs: groupNpcs, unavailable: npcsUnavailable } = npcRead
   // Le joueur de chaque personnage, pour sa carte (« • Nom du joueur »).
@@ -50,7 +53,7 @@ async function CampaignDashboardData({
   const members = visibleCampaignCharacters(listed, hidden, { manager: canManage, ownIds: owned }).map((character) => ({ ...character, playerName: players.get(character.ownerUid) ?? "" }))
   // Les joueurs ne voient ni les notes MJ ni la note de fond du PNJ.
   const visibleNpcs = canManage ? groupNpcs : groupNpcs.map((npc) => ({ ...npc, gmNotes: "", lore: "" }))
-  return <CampaignDashboard initialCampaign={campaign} initialMembers={members} initialGroupNpcs={visibleNpcs} npcsUnavailable={npcsUnavailable} canManage={canManage} ownedCharacterIds={owned} userEmail={userEmail} hiddenCharacterIds={canManage ? hidden : []} canHideCharacters={canManage && campaignHidingAvailable()} />
+  return <CampaignDashboard initialCampaign={campaign} initialMembers={members} initialGroupNpcs={visibleNpcs} npcsUnavailable={npcsUnavailable} canManage={canManage} ownedCharacterIds={owned} userEmail={userEmail} hiddenCharacterIds={canManage ? hidden : []} canHideCharacters={canManage && campaignHidingAvailable()} initialRoll20Url={roll20Url} canEditRoll20={canManage && campaignRoll20UrlAvailable()} />
 }
 
 export default async function CampaignDashboardPage({ params }: { params: Promise<{ id: string }> }) {

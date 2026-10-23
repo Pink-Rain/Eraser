@@ -9,8 +9,10 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import { CAMPAIGN_LIVE_OUT_EVENT, campaignLiveFromPayload, receiveCampaignChange, type CampaignLiveEnvelope } from "@/lib/campaign-live"
 import { rollDiceExpression } from "@/lib/math-expression"
 import type { TabletopActivityRecord } from "@/lib/tabletop-schema"
+import { chatMessageTime } from "@/lib/chat-time"
 import { cn } from "@/lib/utils"
 import { ownedBy } from "@/lib/ownership"
 
@@ -78,9 +80,10 @@ async function responseJson<T>(response: Response) {
   return payload
 }
 
-function formatActivityTime(value: string) {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" }).format(date)
+/** L'heure du message, et sa date en petit (JJ/MM/AA) : une partie peut s'étaler sur des jours. */
+function ActivityTime({ value }: { value: string }) {
+  const { time, date, title } = chatMessageTime(value)
+  return <time dateTime={value} title={title} className="ml-auto shrink-0 font-normal tabular-nums text-muted-foreground">{date && <span className="mr-1 text-[9.5px] opacity-75">{date}</span>}{time}</time>
 }
 
 export function GlobalTableChat({ user }: { user: ChatUser }) {
@@ -142,9 +145,14 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
 
   // À l'ouverture d'Eraser, le chat est sur « Général ». Ensuite, aller sur la page d'une
   // campagne (ou le bac à sable) passe sur son canal ; on revient à « Général » d'un choix.
+  // Une fenêtre qui s'ouvre (ou se recharge : « Actualiser », mise à jour) sur une page de
+  // campagne prend aussitôt son canal : le journal s'y met à jour en direct.
   const firstPath = useRef(true)
   useEffect(() => {
-    if (firstPath.current) { firstPath.current = false; return }
+    if (firstPath.current) {
+      firstPath.current = false
+      if (!/^\/campagne\/[^/]+/.test(pathname)) return
+    }
     const fromPath = pathname.match(/^\/campagne\/([^/]+)/)?.[1] || (pathname.startsWith("/bac-a-sable") ? "bac-a-sable" : "")
     if (!fromPath) return
     try { window.localStorage.setItem(LAST_CAMPAIGN_KEY, fromPath) } catch { /* private browsing */ }
@@ -197,6 +205,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
     if (!roomId || !warm || hideOnThisPage) return
     let cancelled = false
     let room: Room | null = null
+    let onLiveOut: ((event: Event) => void) | null = null
     const presence = presenceRef.current
     presence.clear()
     queueMicrotask(() => { if (!cancelled) { setConnection("connecting"); setOnline([]) } })
@@ -206,6 +215,19 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
       room = joinRoom({ appId: "com-eraser-jdr-chat-v1", password: campaignId }, roomId, { onJoinError: () => setConnection("error") })
       const activityAction = room.makeAction("activity")
       const presenceAction = room.makeAction("presence")
+      // Les notes de session et les sessions modifiées (lib/campaign-live.ts) : le même salon,
+      // sans connexion de plus, pour que le journal se mette à jour chez tout le monde.
+      const liveAction = room.makeAction("live")
+      liveAction.onMessage = (value) => {
+        const envelope = campaignLiveFromPayload(value)
+        if (envelope && envelope.campaignId === campaignId) receiveCampaignChange(envelope)
+      }
+      onLiveOut = (event: Event) => {
+        const detail = (event as CustomEvent<CampaignLiveEnvelope>).detail
+        if (detail?.campaignId !== campaignId) return
+        void liveAction.send(detail as unknown as JsonValue).catch(() => undefined)
+      }
+      window.addEventListener(CAMPAIGN_LIVE_OUT_EVENT, onLiveOut)
       activityAction.onMessage = (value) => {
         const activity = activityFromPayload(value)
         if (!activity || activity.mapId !== roomId) return
@@ -239,6 +261,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
       cancelled = true
       realtimeRef.current = null
       presence.clear()
+      if (onLiveOut) window.removeEventListener(CAMPAIGN_LIVE_OUT_EVENT, onLiveOut)
       if (room) void room.leave()
     }
   }, [roomId, campaignId, hideOnThisPage, markSeen, user.role, user.uid, warm])
@@ -369,7 +392,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
                   {activity.kind === "dice" && <Dices className="size-3.5 text-primary" />}
                   {activity.authorName}
                   {activity.audience !== "public" && <Badge variant="outline" className="h-5 text-[9px]">{audienceLabel(activity)}</Badge>}
-                  <span className="ml-auto font-normal text-muted-foreground">{formatActivityTime(activity.createdAt)}</span>
+                  <ActivityTime value={activity.createdAt} />
                 </div>
                 {activity.kind === "dice"
                   ? <p className="mt-1 text-sm"><span className="font-mono font-semibold">{activity.diceExpression}</span><br /><span>{activity.diceResult}</span></p>

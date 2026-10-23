@@ -6,6 +6,7 @@ import { CalendarPlus, Check, LoaderCircle, MapPinned, Plus, Search } from "luci
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { announceCampaignChange } from "@/lib/campaign-live"
 import type { CampaignSessionRecord, SessionMembership, SessionPlace } from "@/lib/campaign-sessions"
 import { cn } from "@/lib/utils"
 
@@ -30,6 +31,7 @@ export async function createSession(campaignId: string, name: string) {
   const payload = await sessionJson<{ session: CampaignSessionRecord }>(await fetch(sessionsUrl(campaignId), {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }),
   }), "La session n’a pas pu être créée.")
+  announceCampaignChange(campaignId, { kind: "session", sessionId: payload.session.id })
   return payload.session
 }
 
@@ -40,6 +42,8 @@ export async function patchSession(campaignId: string, sessionId: string, body: 
   const payload = await sessionJson<{ session: CampaignSessionRecord }>(await fetch(sessionsUrl(campaignId, sessionId), init), "La session n’a pas pu être modifiée.")
   // « Envoyer dans une autre session » modifie une session que la page garde en mémoire.
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent<CampaignSessionRecord>(SESSION_UPDATED_EVENT, { detail: payload.session }))
+  // Ce que le MJ révèle, cache ou ajoute arrive aussi dans le journal des autres.
+  announceCampaignChange(campaignId, { kind: "session", sessionId })
   return payload.session
 }
 
@@ -48,6 +52,7 @@ export const SESSION_UPDATED_EVENT = "eraser:session-updated"
 
 export async function deleteSession(campaignId: string, sessionId: string) {
   await sessionJson<{ ok: true }>(await fetch(sessionsUrl(campaignId, sessionId), { method: "DELETE" }), "La session n’a pas pu être supprimée.")
+  announceCampaignChange(campaignId, { kind: "session", sessionId })
 }
 
 /** De la plus récente à la plus ancienne. */

@@ -37,6 +37,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 import { loadWorldIndexNames } from "@/components/eraser/index-cells"
+import { announceCampaignChange } from "@/lib/campaign-live"
 import type { ChoiceSource } from "@/lib/index-columns"
 import {
   canEditSessionNote,
@@ -104,6 +105,8 @@ export async function saveSessionNoteRequest(campaignId: string, note: Partial<S
   const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/session-notes`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ note }) })
   const payload = (await response.json().catch(() => ({}))) as { note?: SessionNote; error?: string }
   if (!response.ok || !payload.note) throw new Error(payload.error || "La note n’a pas pu être enregistrée.")
+  // Les autres pages ouvertes sur la campagne la reçoivent tout de suite (une note publique seulement).
+  announceCampaignChange(campaignId, { kind: "note", note: payload.note })
   return payload.note
 }
 
@@ -111,6 +114,7 @@ async function deleteSessionNoteRequest(campaignId: string, noteId: string) {
   const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/session-notes?note=${encodeURIComponent(noteId)}`, { method: "DELETE" })
   const payload = (await response.json().catch(() => ({}))) as { error?: string }
   if (!response.ok) throw new Error(payload.error || "La note n’a pas pu être supprimée.")
+  announceCampaignChange(campaignId, { kind: "note-deleted", noteId })
 }
 
 /** Cocher ou décocher une étape de quête : cochée dans la session affichée. */
@@ -445,7 +449,7 @@ export function SessionNotesBoard({ campaignId, sessions, sessionId, notes, onNo
   const activeFilter = filter && counts.has(filter) ? filter : ""
   const visible = here
     .filter((note) => !activeFilter || note.type === activeFilter)
-    .filter((note) => !folded || fold(`${note.title} ${note.text} ${note.moment} ${note.authorName}`).includes(folded))
+    .filter((note) => !folded || fold(`${note.title} ${note.text} ${note.moment} ${note.authorName} ${authorLabel ? authorLabel(note) : ""}`).includes(folded))
   const groups = sessionNoteTypes.map((type) => ({ type, notes: visible.filter((note) => note.type === type.key) })).filter((group) => group.notes.length)
   const eventOrder = new Map(here.filter((note) => note.type === "evenement").map((note, index) => [note.id, index + 1]))
   const toggleGroup = (key: string, open: boolean) => setOpened((current) => {

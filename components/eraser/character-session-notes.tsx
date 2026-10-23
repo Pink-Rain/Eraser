@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, LoaderCircle } from "lucide-react"
 
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { SessionNotesBoard, SessionQuestChains, type JournalSessionRef, type SessionNoteEntities } from "@/components/eraser/session-notes"
+import { onCampaignChange, upsertSessionNote } from "@/lib/campaign-live"
 import type { SessionNote } from "@/lib/session-note-rules"
 import { cn } from "@/lib/utils"
 
@@ -41,6 +42,18 @@ export function CharacterSessionNotes({ characterId, campaigns }: { characterId:
       .catch((caught) => { if (alive) setError(caught instanceof Error ? caught.message : "Les notes n’ont pas pu être chargées.") })
     return () => { alive = false; window.clearTimeout(timer) }
   }, [campaignId, characterId])
+
+  // Les notes de la campagne écrites ailleurs arrivent en direct (lib/campaign-live.ts).
+  useEffect(() => {
+    if (!campaignId) return
+    return onCampaignChange(campaignId, (message) => {
+      if (message.kind === "session") return
+      setLoaded((value) => !value || value.campaignId !== campaignId ? value : {
+        ...value,
+        notes: message.kind === "note" ? upsertSessionNote(value.notes, message.note) : value.notes.filter((note) => note.id !== message.noteId),
+      })
+    })
+  }, [campaignId])
 
   if (!campaigns.length) return <section className="rounded-2xl border border-dashed p-4 text-sm text-muted-foreground">Les notes de session arrivent quand ce personnage rejoint une campagne.</section>
   const ready = loaded?.campaignId === campaignId ? loaded : null

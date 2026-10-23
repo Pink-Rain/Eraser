@@ -3,11 +3,13 @@
 import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
 import Link from "next/link"
 import dynamic from "next/dynamic"
+import { useRouter } from "next/navigation"
 import { ArrowUpRight, BookOpen, CalendarDays, Check, Hourglass, ChevronDown, ChevronLeft, ChevronRight, CircleUserRound, Feather, Lock, NotebookPen, NotebookText, Plus, Store, type LucideIcon } from "lucide-react"
 
 import { replaceAppUrl } from "@/components/eraser/app-tabs"
 import { RevealToggle, SessionRevealProvider } from "@/components/eraser/session-reveal"
 import { patchSession } from "@/components/eraser/session-picker"
+import { onCampaignChange, upsertSessionNote } from "@/lib/campaign-live"
 import { RichTextView } from "@/components/eraser/rich-text"
 import { RestButton, sendSatiety } from "@/components/eraser/satiety"
 import {
@@ -87,6 +89,8 @@ type JournalContext = {
   sessionNumber: (sessionId: string) => number
   currentId: string
   openNote: (noteId: string) => void
+  /** La signature d'une note : le personnage de son joueur, ou « MJ - pseudo ». */
+  authorLabel: (note: SessionNote) => string
   /** Les couleurs de la campagne, pour les fenêtres posées hors de la page (portails). */
   vars: CSSProperties
 }
@@ -384,7 +388,7 @@ function NpcHistoryDialog({ npc, rows, onClose, onGoSession }: { npc: NpcHistory
                       <button type="button" onClick={() => pick(note.id)} style={tone(type.color)}
                         className="grid w-full grid-cols-[1rem_minmax(0,1fr)] gap-x-2 rounded-lg border border-border/60 bg-card px-2.5 py-1.5 text-left outline-none transition-colors hover:border-tone/45 hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/40">
                         <TypeIcon className="row-span-2 mt-0.5 size-3.5 text-tone" aria-hidden />
-                        <span className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-tone">{type.label}{note.authorName && <span className="font-medium normal-case tracking-normal text-muted-foreground"> · {note.authorName}</span>}</span>
+                        <span className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-tone">{type.label}{journal.authorLabel(note) && <span className="font-medium normal-case tracking-normal text-muted-foreground"> · {journal.authorLabel(note)}</span>}</span>
                         <span className={cn("line-clamp-3 text-[13px] leading-snug", note.type === "citation" && "font-display italic")}>{note.type === "citation" ? `« ${note.text} »` : note.title && note.text ? `${note.title} — ${note.text}` : note.title || note.text}</span>
                       </button>
                     </li>
@@ -491,7 +495,9 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
     return link ? objectMedia(link, link.slice(5)) : undefined
   }
   const initial = sessions.findIndex((session) => session.id === initialSessionId)
-  const [index, setIndex] = useState(initial >= 0 ? initial : sessions.length - 1)
+  const [chosen, setIndex] = useState(initial >= 0 ? initial : sessions.length - 1)
+  // Une session supprimée ailleurs (le journal se relit en direct) : la dernière qui reste.
+  const index = Math.max(0, Math.min(chosen, sessions.length - 1))
   const [listOpen, setListOpen] = useState(false)
   const [notes, setNotes] = useState(initialNotes)
   const [brokenBanner, setBrokenBanner] = useState("")
@@ -500,7 +506,12 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
   const [npcHistory, setNpcHistory] = useState<NpcHistory | null>(null)
   const [openShop, setOpenShop] = useState("")
   // Ce que le MJ vient de révéler ou cacher, par session (la page n'est pas relue pour si peu).
-  const [hiddenBySession, setHiddenBySession] = useState<Record<string, string[]>>({})
+  // Relue (une session modifiée ailleurs), la page repart de ce que dit le serveur.
+  const [hiddenState, setHiddenState] = useState<{ sessions: JournalSessionDetail[]; bySession: Record<string, string[]> }>({ sessions, bySession: {} })
+  const hiddenBySession = hiddenState.sessions === sessions ? hiddenState.bySession : {}
+  const setHiddenBySession = (update: (all: Record<string, string[]>) => Record<string, string[]>) =>
+    setHiddenState((state) => ({ sessions, bySession: update(state.sessions === sessions ? state.bySession : {}) }))
+  const [openSummaries, setOpenSummaries] = useState<Set<string>>(new Set())
   const [savingReveal, setSavingReveal] = useState<string | null>(null)
   const toastTimer = useRef(0)
   const board = useRef<SessionNotesHandle>(null)
@@ -525,6 +536,23 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
     toastTimer.current = window.setTimeout(() => setToast(""), 2600)
   }
   useEffect(() => () => window.clearTimeout(toastTimer.current), [])
+
+  // En direct : les notes des autres arrivent telles quelles ; une session modifiée par le MJ
+  // (ce qu'il révèle ou cache, un PNJ ajouté…) fait relire la page, avec les droits du lecteur.
+  const router = useRouter()
+  useEffect(() => {
+    let refresh = 0
+    const stop = onCampaignChange(campaignId, (message) => {
+      if (message.kind === "note") setNotes((current) => upsertSessionNote(current, message.note))
+      else if (message.kind === "note-deleted") setNotes((current) => current.filter((note) => note.id !== message.noteId))
+      else {
+        // Plusieurs yeux cliqués d'affilée : une seule relecture.
+        window.clearTimeout(refresh)
+        refresh = window.setTimeout(() => router.refresh(), 1_200)
+      }
+    })
+    return () => { stop(); window.clearTimeout(refresh) }
+  }, [campaignId, router])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -596,6 +624,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
     sessionNumber: (sessionId: string) => (rank.get(sessionId) ?? 0) + 1,
     currentId: current.id,
     openNote: (noteId: string) => board.current?.focusNote(noteId),
+    authorLabel,
     vars,
   }
   const here = notes.filter((note) => note.sessionId === current.id)
@@ -787,12 +816,20 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
               {worldDate && <span className="inline-flex items-center gap-1 text-xs font-medium text-journal-ink" title={current.calendar ? `Date en jeu · ${current.calendar}` : "Date en jeu"}><Hourglass className="size-3.5" aria-hidden />{worldDate}</span>}
               {date && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><CalendarDays className="size-3.5 text-journal-ink" aria-hidden />{date}</span>}
             </div>
-            {summaries.length ? <div className="mt-2.5 space-y-3">{summaries.map((note, position) => <figure key={note.id} className="max-w-[70ch]">
-              <p className={cn("whitespace-pre-wrap font-display text-[1.05rem] leading-relaxed sm:text-[1.12rem]", position === 0 && "first-letter:float-left first-letter:mr-2 first-letter:mt-1.5 first-letter:font-semibold first-letter:text-[3.15rem] first-letter:leading-[0.78] first-letter:text-journal-ink")}>{note.text || note.title}</p>
-              <figcaption className="mt-1 text-xs text-muted-foreground">
-                <button type="button" onClick={() => journal.openNote(note.id)} className="rounded-sm underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/50">{note.authorName ? `Résumé de ${note.authorName}` : "Voir la note"}</button>
-              </figcaption>
-            </figure>)}</div>
+            {/* Le résumé en petit, replié au-delà de quelques lignes : le bilan reste lisible d'un coup d'œil. */}
+            {summaries.length ? <div className="mt-2 space-y-2.5">{summaries.map((note) => {
+              const body = note.text || note.title
+              const open = openSummaries.has(note.id)
+              const long = body.length > 320 || body.split("\n").length > 4
+              const author = authorLabel(note)
+              return <figure key={note.id} className="max-w-[72ch]">
+                <p className={cn("whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/85", long && !open && "line-clamp-4")}>{body}</p>
+                <figcaption className="mt-1 flex flex-wrap items-center gap-x-2 text-[11.5px] text-muted-foreground">
+                  <button type="button" onClick={() => journal.openNote(note.id)} className="rounded-sm underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/50">{author ? `— ${author}` : "Voir la note"}</button>
+                  {long && <button type="button" aria-expanded={open} onClick={() => setOpenSummaries((current) => { const next = new Set(current); if (open) next.delete(note.id); else next.add(note.id); return next })} className="rounded-sm font-medium text-journal-ink underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/50">{open ? "Réduire" : "Lire la suite"}</button>}
+                </figcaption>
+              </figure>
+            })}</div>
               : <EmptyHint icon={BookOpen} className="mt-3" action={<Button type="button" size="xs" variant="outline" onClick={() => newNote("resume")}><Feather />Écrire le résumé</Button>}>Pas encore de résumé pour cette session.</EmptyHint>}
             <div className="mt-4 grid grid-cols-2 gap-2 min-[520px]:grid-cols-4">
               {tiles.map((tile) => {
@@ -857,7 +894,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
             <Section id="journal-objets" icon={linkKindLabels.item.icon} title="Objets" count={loot.length + items.length}>
               {loot.length + items.length ? <div className={cardGrid}>
                 {loot.map((note) => <EntityCard key={note.id} kind="item" name={note.title || sessionNoteLabel(note, 80)} media={lootMedia(note)} icon={LootIcon} color={sessionNoteType("butin").color} square
-                  link={[`note:${note.id}`, ...(note.title ? [`item:${note.title}`] : [])]} tags={<><Tag dot={sessionNoteType("butin").color}>Butin</Tag>{note.authorName && <Tag>noté par {note.authorName}</Tag>}</>}>
+                  link={[`note:${note.id}`, ...(note.title ? [`item:${note.title}`] : [])]} tags={<><Tag dot={sessionNoteType("butin").color}>Butin</Tag>{authorLabel(note) && <Tag>noté par {authorLabel(note)}</Tag>}</>}>
                   {note.title && note.text && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{note.text}</p>}
                   <button type="button" onClick={() => journal.openNote(note.id)} className="mt-1.5 rounded-sm text-[11.5px] font-medium text-journal-ink underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/50">Ouvrir la note</button>
                 </EntityCard>)}

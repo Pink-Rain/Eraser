@@ -58,11 +58,13 @@ async function noteVisuals(notes: SessionNote[] | null, extraLinks: string[] = [
 /**
  * Qui a écrit les notes, pour leur étiquette : le MJ de la campagne, ou les personnages de son
  * joueur (seulement ceux que le lecteur voit). Lu dans les index locaux et les liens d'identité.
+ * Le lecteur, le MJ et les joueurs de la campagne sont connus d'avance : leur prochaine note
+ * (écrite ici, ou reçue en direct) est signée de leur personnage, pas du nom de leur compte.
  */
-async function noteAuthors(campaignId: string, notes: SessionNote[], members: Array<{ id: string; name: string; ownerUid: string; updatedAt: string }>): Promise<Record<string, JournalAuthor>> {
-  const uids = [...new Set(notes.map((note) => note.authorUid).filter(Boolean))]
-  if (!uids.length) return {}
+async function noteAuthors(campaignId: string, notes: SessionNote[], members: Array<{ id: string; name: string; ownerUid: string; updatedAt: string }>, viewerUid: string): Promise<Record<string, JournalAuthor>> {
   const campaign = await getCampaignDashboard(null, campaignId).catch(() => null)
+  const uids = [...new Set([...notes.map((note) => note.authorUid), viewerUid, campaign?.mjUid ?? "", ...members.map((member) => member.ownerUid)].filter(Boolean))]
+  if (!uids.length) return {}
   const entries = await Promise.all(uids.map(async (uid): Promise<[string, JournalAuthor]> => {
     const identities = await identityUidsForUser(uid).catch(() => [uid])
     return [uid, {
@@ -115,7 +117,7 @@ export default async function CampaignJournalPage({ params, searchParams }: { pa
     // Les lieux liés dans le Créateur de session ont leur image et leur type, comme ceux des notes.
     noteVisuals(notes, list.flatMap((session) => session.placeLinks.map((place) => `place:${place.name}`))),
     playerNamesFor(account, members.map((member) => member.ownerUid)).catch(() => new Map<string, string>()),
-    noteAuthors(id, notes ?? [], members),
+    noteAuthors(id, notes ?? [], members, account.uid),
   ])
   const ownedMembers = new Set(mine.map((character) => character.id).filter((characterId) => members.some((member) => member.id === characterId)))
   // Un joueur ne voit que ce qui est entré dans une session ; la préparation du MJ reste à lui.

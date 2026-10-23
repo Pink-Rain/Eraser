@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { saveCampaignBanner } from "@/lib/campaign-banners"
+import { setCampaignRoll20Url } from "@/lib/campaign-roll20-url"
 import { getCampaignForMj, updateCampaignForMj } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
 
@@ -8,6 +9,8 @@ function campaignErrorMessage(code: string) {
   if (code === "INVALID_BANNER") return "Choisis une image de moins de 10 Mo."
   if (code === "CAMPAIGN_ROW_NOT_FOUND") return "Cette campagne n’est plus dans la feuille « Campagnes ». Recharge la page."
   if (code === "CAMPAIGNS_SHEET_UNAVAILABLE") return "La feuille « Campagnes » n’est pas reliée."
+  if (code === "INVALID_ROLL20_URL") return "Colle le lien de la partie tel que Roll20 le donne (https://app.roll20.net/…)."
+  if (code === "SHARED_STORE_UNAVAILABLE") return "Le serveur partagé est injoignable : le lien Roll20 n’a pas pu être enregistré."
   return "La campagne n’a pas pu être modifiée."
 }
 
@@ -32,6 +35,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ campaign })
     }
     const patch = (await request.json()) as Record<string, string>
+    // Le lien de la partie Roll20 : sur le serveur partagé, pas dans la feuille « Campagnes ».
+    if (typeof patch.roll20Url === "string") {
+      if (account.role !== "admin" && !await getCampaignForMj(account.uid, id)) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
+      return NextResponse.json({ roll20Url: await setCampaignRoll20Url(id, patch.roll20Url) })
+    }
     const campaign = await updateCampaignForMj(account.role === "admin" ? null : account.uid, id, {
       ...(typeof patch.name === "string" ? { name: patch.name } : {}),
       ...(typeof patch.description === "string" ? { description: patch.description } : {}),

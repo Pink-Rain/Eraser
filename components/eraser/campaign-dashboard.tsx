@@ -4,7 +4,7 @@ import { NO_CLASS } from "@/lib/class-visibility"
 import Link from "next/link"
 import dynamic from "next/dynamic"
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react"
-import { ArrowUpRight, Backpack, BookOpen, Check, CircleUserRound, Eye, EyeOff, ImagePlus, Pencil, Plus, Save, Trash2, Upload, Users, X } from "lucide-react"
+import { ArrowUpRight, Backpack, BookOpen, Check, CircleUserRound, Dices, ExternalLink, Eye, EyeOff, ImagePlus, Link2, Pencil, Plus, Save, Trash2, Upload, Users, X } from "lucide-react"
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { RichTextView } from "@/components/eraser/rich-text"
@@ -47,7 +47,7 @@ function DeferredCampaignInventory({ campaignId, readOnly }: { campaignId: strin
 }
 
 export function CampaignDashboard({
-  initialCampaign, initialMembers, initialGroupNpcs, npcsUnavailable = false, canManage, ownedCharacterIds, userEmail, hiddenCharacterIds = [], canHideCharacters = false,
+  initialCampaign, initialMembers, initialGroupNpcs, npcsUnavailable = false, canManage, ownedCharacterIds, userEmail, hiddenCharacterIds = [], canHideCharacters = false, initialRoll20Url = "", canEditRoll20 = false,
 }: {
   initialCampaign: CampaignRecord
   initialMembers: CampaignMemberRecord[]
@@ -61,6 +61,10 @@ export function CampaignDashboard({
   hiddenCharacterIds?: string[]
   /** Le serveur partagé est là : le MJ peut cacher un personnage aux autres joueurs. */
   canHideCharacters?: boolean
+  /** Le lien de la partie Roll20, montré à toute la table. */
+  initialRoll20Url?: string
+  /** Le MJ peut coller ce lien (serveur partagé joignable). */
+  canEditRoll20?: boolean
 }) {
   const [campaign, setCampaign] = useState(initialCampaign)
   const [hiddenCharacters, setHiddenCharacters] = useState(hiddenCharacterIds)
@@ -93,6 +97,10 @@ export function CampaignDashboard({
   const [bannerUrl, setBannerUrl] = useState(campaign.bannerUrl)
   const [bannerFile, setBannerFile] = useState<File | null>(null)
   const [accentColor, setAccentColor] = useState(campaign.accentColor)
+  const [roll20Url, setRoll20Url] = useState(initialRoll20Url)
+  const [roll20Draft, setRoll20Draft] = useState(initialRoll20Url)
+  const [bannerError, setBannerError] = useState("")
+  const [savingBanner, setSavingBanner] = useState(false)
   const [addingCharacter, setAddingCharacter] = useState(false)
   const [availableCharacters, setAvailableCharacters] = useState<CharacterRecord[]>([])
   const [availableLoading, setAvailableLoading] = useState(false)
@@ -135,28 +143,58 @@ export function CampaignDashboard({
     if (!await update({ description }).catch(() => false)) { setCampaign(before); setEditingDescription(true) }
   }
 
+  /** Le lien Roll20 seul (serveur partagé) ; rend le lien gardé, ou lève l'erreur à montrer. */
+  async function saveRoll20Url(value: string) {
+    const response = await fetch(`/api/campaigns/${encodeURIComponent(campaign.id)}`, {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ roll20Url: value }),
+    })
+    const payload = (await response.json().catch(() => ({}))) as { roll20Url?: string; error?: string }
+    if (!response.ok || typeof payload.roll20Url !== "string") throw new Error(payload.error || "Le lien Roll20 n’a pas pu être enregistré.")
+    return payload.roll20Url
+  }
+
   async function saveBanner(event: FormEvent) {
     event.preventDefault()
-    let response: Response
-    if (bannerFile) {
-      const form = new FormData()
-      form.append("banner", bannerFile)
-      form.append("accentColor", accentColor)
-      response = await fetch(`/api/campaigns/${encodeURIComponent(campaign.id)}`, { method: "PATCH", body: form })
-    } else {
-      response = await fetch(`/api/campaigns/${encodeURIComponent(campaign.id)}`, {
-        method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ bannerUrl, accentColor }),
-      })
-    }
-    const payload = (await response.json()) as { campaign?: CampaignRecord }
-    if (payload.campaign) {
+    if (savingBanner) return
+    setSavingBanner(true); setBannerError("")
+    try {
+      // Le lien Roll20 d'abord : refusé (lien mal collé), le formulaire reste ouvert et rien d'autre ne change.
+      if (canEditRoll20 && roll20Draft.trim() !== roll20Url) {
+        const saved = await saveRoll20Url(roll20Draft)
+        setRoll20Url(saved); setRoll20Draft(saved)
+      }
+      const bannerChanged = Boolean(bannerFile) || bannerUrl !== campaign.bannerUrl || accentColor !== campaign.accentColor
+      if (!bannerChanged) { setEditingBanner(false); return }
+      let response: Response
+      if (bannerFile) {
+        const form = new FormData()
+        form.append("banner", bannerFile)
+        form.append("accentColor", accentColor)
+        response = await fetch(`/api/campaigns/${encodeURIComponent(campaign.id)}`, { method: "PATCH", body: form })
+      } else {
+        response = await fetch(`/api/campaigns/${encodeURIComponent(campaign.id)}`, {
+          method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ bannerUrl, accentColor }),
+        })
+      }
+      const payload = (await response.json().catch(() => ({}))) as { campaign?: CampaignRecord; error?: string }
+      if (!payload.campaign) throw new Error(payload.error || "La bannière n’a pas pu être enregistrée.")
       setCampaign(payload.campaign)
       window.dispatchEvent(new CustomEvent("eraser:campaign-updated", { detail: payload.campaign }))
       setBannerUrl(payload.campaign.bannerUrl)
       setAccentColor(payload.campaign.accentColor)
       setBannerFile(null)
       setEditingBanner(false)
+    } catch (caught) {
+      setBannerError(caught instanceof Error ? caught.message : "La modification n’a pas pu être enregistrée.")
+    } finally {
+      setSavingBanner(false)
     }
+  }
+
+  /** Ouvre « Modifier » sur le lien Roll20 (le MJ qui n'en a pas encore mis). */
+  function editRoll20() {
+    setEditingBanner(true)
+    window.setTimeout(() => document.getElementById("campaign-roll20")?.focus(), 0)
   }
 
   async function addCharacter() {
@@ -227,7 +265,7 @@ export function CampaignDashboard({
           <div className="absolute inset-0 flex items-center justify-center text-[#d4c3a8]/45"><ImagePlus className="size-14" /></div>
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/15 to-black/15" />
-        {canManage && <Button type="button" variant="secondary" size="sm" className="absolute right-5 top-5" onClick={() => setEditingBanner((value) => !value)}><Pencil />Modifier</Button>}
+        {canManage && <Button type="button" variant="secondary" size="sm" className="absolute right-5 top-5" onClick={() => { setBannerError(""); setRoll20Draft(roll20Url); setEditingBanner((value) => !value) }}><Pencil />Modifier</Button>}
         <div className="absolute inset-x-0 bottom-0 px-5 pb-7 sm:px-8">
           {editingTitle ? (
             <div className="flex max-w-2xl gap-2"><Input value={title} onChange={(event) => setTitle(event.target.value)} className="h-12 bg-background/95 text-xl" autoFocus /><Button onClick={saveTitle} size="lg"><Check /></Button></div>
@@ -243,6 +281,18 @@ export function CampaignDashboard({
               {campaign.description || "Double-cliquer pour ajouter une description…"}
             </button>
           ) : campaign.description ? <RichTextView html={campaign.description} className="mt-2 max-w-3xl text-sm leading-6 text-white/80" /> : null}
+          {/* La partie Roll20 de la campagne, à un clic pour toute la table (ouverte dans le navigateur). */}
+          {roll20Url ? (
+            <a href={roll20Url} target="_blank" rel="noreferrer" title={roll20Url} className="mt-4 inline-flex max-w-full items-center gap-2 rounded-full bg-white/95 py-2 pl-3 pr-4 text-sm font-semibold text-[#24211d] shadow-md outline-none transition hover:-translate-y-px hover:bg-white focus-visible:ring-2 focus-visible:ring-white/80">
+              <span className="flex size-6 shrink-0 items-center justify-center rounded-full text-white" style={{ backgroundColor: campaign.accentColor }}><Dices className="size-3.5" /></span>
+              <span className="truncate">Rejoindre la partie sur Roll20</span>
+              <ExternalLink className="size-3.5 shrink-0 opacity-60" />
+            </a>
+          ) : canEditRoll20 && !editingBanner ? (
+            <button type="button" onClick={editRoll20} className="mt-4 inline-flex items-center gap-2 rounded-full border border-dashed border-white/45 px-3.5 py-1.5 text-xs font-medium text-white/80 outline-none transition hover:border-white/80 hover:text-white focus-visible:ring-2 focus-visible:ring-white/80">
+              <Link2 className="size-3.5" />Ajouter le lien de la partie Roll20
+            </button>
+          ) : null}
         </div>
       </section>
 
@@ -252,7 +302,9 @@ export function CampaignDashboard({
             <div className="grid gap-2"><Label htmlFor="banner-url">URL de l’image</Label><Input id="banner-url" type="url" value={bannerUrl} onChange={(event) => { setBannerUrl(event.target.value); setBannerFile(null) }} placeholder="https://…" /></div>
             <div className="grid gap-2"><Label htmlFor="banner-file">Importer depuis l’ordinateur</Label><Input id="banner-file" type="file" accept="image/*" onChange={(event) => setBannerFile(event.target.files?.[0] || null)} /></div>
             <div className="grid gap-2"><Label htmlFor="campaign-accent">Couleur d’accent</Label><div className="flex items-center gap-3"><Input id="campaign-accent" type="color" value={accentColor} onChange={(event) => setAccentColor(event.target.value)} className="w-16 px-1" /><span className="text-sm font-medium tabular-nums text-muted-foreground">{accentColor}</span></div></div>
-            <div className="flex items-end gap-2"><Button type="submit"><Upload />Enregistrer</Button><Button type="button" variant="ghost" onClick={() => setEditingBanner(false)}>Annuler</Button></div>
+            {canEditRoll20 && <div className="grid gap-2 sm:col-span-2"><Label htmlFor="campaign-roll20">Lien de la partie Roll20</Label><Input id="campaign-roll20" type="url" inputMode="url" value={roll20Draft} onChange={(event) => setRoll20Draft(event.target.value)} placeholder="https://app.roll20.net/join/…" /><p className="text-xs text-muted-foreground">Les joueurs le retrouvent sur cette page, dans le bouton « Rejoindre la partie sur Roll20 ». Vide : le bouton disparaît.</p></div>}
+            <div className="flex items-end gap-2"><Button type="submit" disabled={savingBanner}>{savingBanner ? <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : <Upload />}Enregistrer</Button><Button type="button" variant="ghost" disabled={savingBanner} onClick={() => { setBannerError(""); setRoll20Draft(roll20Url); setEditingBanner(false) }}>Annuler</Button></div>
+            {bannerError && <p className="text-sm text-destructive sm:col-span-2" role="alert">{bannerError}</p>}
           </div>
         </form>
       )}
