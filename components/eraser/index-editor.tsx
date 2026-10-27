@@ -13,6 +13,7 @@ import { ColumnDescriptionButton, ColumnLockButton, ColumnTypeMenu } from "@/com
 import { IndexPresentationsEditor, LIST_FAMILY, MAIN_PRESENTATION_ID, PresentationsPanel } from "@/components/eraser/index-presentations-editor"
 import { columnStyleCss, pillStyle, stylePalette } from "@/components/eraser/index-style"
 import { creatableKinds } from "@/lib/index-schema-shared"
+import { isNameColumn, linkedColumnProblems } from "@/lib/world-index-definitions"
 import { defaultRarityOptions, placeSourcesOf, RARITY_PLACES_HEADER } from "@/lib/rarity-places"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
@@ -31,6 +32,7 @@ import {
   indexColumnKinds,
   isColorSourceSpec,
   isComputedSpec,
+  isIdHeader,
   normalizeSpec,
   placementOf,
   randomSourceLabels,
@@ -92,6 +94,26 @@ type DraftTab = { id: string; original?: string; name: string; itemLabel?: strin
 
 let draftCounter = 0
 const nextId = () => `draft-${draftCounter++}`
+
+/**
+ * La colonne de cet index que `link` vise alors qu'elle répond déjà à une autre colonne liée
+ * (elle perdrait ce lien) : le serveur le refuse, l'éditeur le dit avant. D'après ce qui est
+ * enregistré, comme le serveur.
+ */
+function takenAnswer(tabs: DraftTab[], indexKey: string, tabName: string, header: string, link: NonNullable<IndexColumnSpec["link"]>) {
+  if (link.index !== indexKey) return undefined
+  for (const tab of tabs) {
+    if (tab.removed || !tab.original || (link.tab !== "*" && tab.original !== link.tab)) continue
+    for (const column of tab.columns) {
+      if (!column.original || foldName(column.original) !== foldName(link.column)) continue
+      // « Allié de » qui se répond à elle-même, dans son onglet.
+      if (tab.original === tabName && foldName(column.original) === foldName(header)) continue
+      const answer = column.originalSpec?.kind === "linked" ? column.originalSpec.link : undefined
+      if (answer && !(answer.index === indexKey && foldName(answer.column) === foldName(header))) return { tab: tab.original, column: answer.column }
+    }
+  }
+  return undefined
+}
 
 /**
  * Les colonnes qu'une mise en page peut placer : celles de la fiche (sauf l'identifiant et
@@ -257,6 +279,9 @@ type SettingsProps = {
   tabs: DraftTab[]
   family: IndexEditorModel["family"]
   indexKey: string
+  /** La colonne réglée et son onglet (nom enregistré) : une colonne liée vers cet index s'y repère. */
+  header?: string
+  tabName?: string
   sampleRows: Array<Record<string, string>>
   openGuide: (section: GuideSection) => void
   /** L'apparence (couleurs, groupes, ordre des options) : modifiable même quand le type est verrouillé. */
@@ -541,7 +566,7 @@ function ButtonsEditor({ spec, onChange, disabled, siblings, tabs, targets, fami
 }
 
 function TypeSettings(props: SettingsProps) {
-  const { spec, onChange, disabled, targets, siblings } = props
+  const { spec, onChange, disabled, targets, siblings, indexKey, tabs } = props
   const set = (changes: Partial<IndexColumnSpec>) => onChange({ ...spec, ...changes })
   const targetOf = (index: string | undefined) => targets.find((target) => target.index === index)
   const relations = siblings.filter((column) => !column.removed && (column.spec.kind === "linked" || column.spec.kind === "linked-choice"))
@@ -603,12 +628,34 @@ function TypeSettings(props: SettingsProps) {
     }
     case "linked": {
       const link = spec.link ?? { index: targets[0]?.index ?? "peoples", tab: "*", column: "" }
-      const target = targetOf(link.index)
       if (!spec.link && disabled) return <p className="text-xs text-muted-foreground">Colonne liée prévue par Eraser.</p>
-      return <div className="grid gap-2 sm:grid-cols-3">
-        <label className={smallLabel}>Index lié<NativeSelect disabled={disabled} value={link.index} onChange={(event) => set({ link: { ...link, index: event.target.value as typeof link.index, tab: "*" } })}>{targets.map((item) => <NativeSelectOption key={item.index} value={item.index}>{item.title}</NativeSelectOption>)}</NativeSelect></label>
-        <label className={smallLabel}>Onglet<NativeSelect disabled={disabled} value={link.tab} onChange={(event) => set({ link: { ...link, tab: event.target.value } })}><NativeSelectOption value="*">Tous les onglets</NativeSelectOption>{(target?.tabs ?? []).map((tab) => <NativeSelectOption key={tab.name} value={tab.name}>{tab.name}</NativeSelectOption>)}</NativeSelect></label>
-        <label className={smallLabel}>Colonne qui répond, en face<Input disabled={disabled} value={link.column} placeholder="Créée si elle n’existe pas" onChange={(event) => set({ link: { ...link, column: event.target.value } })} /></label>
+      // Cet index (« Se recycle en » ↔ « Recyclage de » dans les items) : ses onglets enregistrés,
+      // ou ceux de l'éditeur pour un index encore à créer.
+      const self = link.index === indexKey
+      const ownTabs = tabs.filter((item) => !item.removed && item.name.trim()).map((item) => ({ name: item.original ?? item.name.trim(), columns: item.columns.filter((column) => !column.removed).map((column) => column.original ?? column.header.trim()) }))
+      const target = self ? targetOf(indexKey) ?? { index: link.index, title: "", tabs: ownTabs } : targetOf(link.index)
+      const header = props.header ?? ""
+      const answer = link.column.replace(/\s+/g, " ").trim()
+      const covered = (target?.tabs ?? []).filter((tab) => link.tab === "*" || tab.name === link.tab)
+      const suggestions = [...new Set(covered.flatMap((tab) => tab.columns).filter((column) => column.trim() && !isIdHeader(column) && !isNameColumn(column)))]
+      const exists = covered.some((tab) => tab.columns.some((column) => foldName(column) === foldName(answer)))
+      const where = `${link.tab === "*" ? "tous les onglets" : `l’onglet ${link.tab}`} ${self ? "de cet index" : `de ${target?.title ?? "l’index lié"}`}`
+      const taken = !disabled && answer ? takenAnswer(tabs, indexKey, props.tabName ?? "", header, { ...link, column: answer }) : undefined
+      return <div className="grid gap-2">
+        <div className="grid gap-2 sm:grid-cols-3">
+          <label className={smallLabel}>Index lié<NativeSelect disabled={disabled} value={link.index} onChange={(event) => set({ link: { ...link, index: event.target.value as typeof link.index, tab: "*" } })}>
+            <NativeSelectOption value={indexKey}>Cet index{targetOf(indexKey)?.title ? ` (${targetOf(indexKey)?.title})` : ""}</NativeSelectOption>
+            {targets.filter((item) => item.index !== indexKey).map((item) => <NativeSelectOption key={item.index} value={item.index}>{item.title}</NativeSelectOption>)}
+          </NativeSelect></label>
+          <label className={smallLabel}>Onglet<NativeSelect disabled={disabled} value={link.tab} onChange={(event) => set({ link: { ...link, tab: event.target.value } })}><NativeSelectOption value="*">Tous les onglets</NativeSelectOption>{(target?.tabs ?? []).map((tab) => <NativeSelectOption key={tab.name} value={tab.name}>{tab.name}</NativeSelectOption>)}</NativeSelect></label>
+          <label className={smallLabel}>Colonne qui répond, en face<Input disabled={disabled} list="eraser-linked-answers" value={link.column} placeholder="Créée si elle n’existe pas" onChange={(event) => set({ link: { ...link, column: event.target.value } })} /><datalist id="eraser-linked-answers">{suggestions.map((column) => <option key={column} value={column} />)}</datalist></label>
+        </div>
+        {answer && (isNameColumn(answer) || isIdHeader(answer)) ? <p className="text-xs text-destructive">« {answer} » ne peut pas répondre à une colonne liée : chaque ligne est retrouvée par elle. Choisis une autre colonne, ou un nom nouveau.</p>
+          : taken ? <p className="text-xs text-destructive">« {answer} » ({taken.tab}) répond déjà à « {taken.column} » : choisis une autre colonne, ou un nom nouveau qu’Eraser créera.</p>
+          : answer && self && foldName(answer) === foldName(header) ? <p className="text-xs text-muted-foreground"><b>Lien symétrique</b> : « {header} » se répond à elle-même, dans {where}. Écrire « B » dans « {header} » de la ligne « A » inscrit « A » dans « {header} » de « B », et l’inverse.</p>
+          : answer && self ? <p className="text-xs text-muted-foreground"><b>Lien dans cet index</b> : « {answer} » répond dans {where}{exists ? " (reprise là où elle existe déjà, son contenu est gardé)" : " : Eraser la crée, inutile de l’ajouter"}. Écrire « B » dans « {header || "cette colonne"} » de la ligne « A » inscrit « A » dans « {answer} » de « B », et l’inverse.</p>
+          : answer ? <p className="text-xs text-muted-foreground">« {answer} » répond dans {where}{exists ? "" : " : Eraser la crée"}. Chaque nom écrit d’un côté s’inscrit de l’autre.</p>
+          : null}
       </div>
     }
     case "lookup":
@@ -845,9 +892,16 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
     // la feuille (« Rareté » en double) ne doivent pas empêcher d'enregistrer autre chose.
     ...candidate.columns.filter((item) => !item.removed && item.header.trim() !== item.original).map((item) => headerProblem(item.header, candidate.columns.filter((other) => other.id !== item.id && !other.removed).map((other) => other.header))),
     ...candidate.columns.filter((item) => !item.removed && item.spec.kind === "linked" && item.spec.link && !item.spec.link.column.trim() && !item.original).map((item) => `« ${item.header} » : une colonne liée doit nommer la colonne qui lui répond en face.`),
+    // Une colonne liée nouvelle (ou devenue liée) vers cet index ne prend pas la réponse d'un autre lien.
+    ...candidate.columns.flatMap((item) => {
+      const link = item.spec.kind === "linked" ? item.spec.link : undefined
+      if (item.removed || !link?.column.trim() || (item.original && item.originalSpec?.link)) return []
+      const taken = takenAnswer(tabs, model.key, candidate.original ?? candidate.name.trim(), item.header.trim(), { ...link, column: link.column.replace(/\s+/g, " ").trim() })
+      return taken ? [`« ${item.header} » : « ${link.column.trim()} » (${taken.tab}) répond déjà à « ${taken.column} ».`] : []
+    }),
     ...candidate.columns.filter((item) => !item.removed && item.spec.kind === "formula" && item.spec.formula?.expression.trim() && formulaProblem(item.spec.formula.expression)).map((item) => `« ${item.header} » : ${formulaProblem(item.spec.formula!.expression)}`),
     ...candidate.columns.filter((item) => !item.removed && item.spec.kind === "gauge" && gaugeScaleOf(item.spec.gauge) === "from-column" && !item.spec.gauge?.maxColumn).map((item) => `« ${item.header} » : choisis la colonne qui donne le maximum de la jauge.`),
-  ].filter(Boolean).map((problem) => `${candidate.name} : ${problem}`)), [tabs])
+  ].filter(Boolean).map((problem) => `${candidate.name} : ${problem}`)).concat(linkedColumnProblems(model.key, operations)), [model.key, operations, tabs])
 
   // « Colonnes », ou la mise en page de la fiche ou du survol de l'onglet choisi.
   const [mode, setMode] = useState<EditorMode>(() => (initialMode === "cards" && !onSaveCards) || (initialMode.startsWith("view:") && !onSavePresentations) || (initialMode === "stats" && !statsPanel) || (initialMode === "items" && !itemsPanel) ? "columns" : initialMode)
@@ -1539,6 +1593,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
                 tabs={tabs}
                 family={model.family}
                 indexKey={model.key}
+                header={column.header.trim()}
+                tabName={tab.original ?? tab.name.trim()}
                 sampleRows={sampleRows[tab.original ?? tab.name] ?? []}
                 openGuide={(section) => setGuide(section)}
               />

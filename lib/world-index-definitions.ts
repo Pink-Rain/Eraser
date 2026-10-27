@@ -5,7 +5,7 @@
  */
 import { foldName, isIdHeader, objectColumnSpec, type ChoiceOption, type IndexColumnSpec, type TabColumnSettings } from "@/lib/index-columns"
 import { CALENDAR_COLOR_HEADER, CALENDAR_DAYS_HEADER, CALENDAR_DESCRIPTION_HEADER, CALENDAR_ERA_HEADER, CALENDAR_HEADER, CALENDAR_MONTHS_TAB, CALENDAR_ORDER_HEADER, CALENDAR_SEASON_HEADER, CALENDAR_SEASONS_TAB, CALENDAR_WEEKDAYS_TAB, CALENDARS_TAB } from "@/lib/calendars"
-import { objectColumnPolicy, type ColumnPolicy } from "@/lib/index-schema-shared"
+import { objectColumnPolicy, type ColumnPolicy, type SchemaOperation } from "@/lib/index-schema-shared"
 import { stateFxList } from "@/lib/state-fx"
 import { isRarityPlacesHeader, rarityPlacesSpec } from "@/lib/rarity-places"
 import {
@@ -582,6 +582,40 @@ export const defaultWorldIndexLinks: Array<[WorldIndexLinkEnd, WorldIndexLinkEnd
 /** Ce côté de lien concerne-t-il cet onglet ? */
 export function linkEndCovers(end: WorldIndexLinkEnd, index: WorldIndexKey, tab: string) {
   return end.index === index && (end.tab === "*" || end.tab === tab)
+}
+
+/**
+ * Ce qui empêche d'enregistrer des colonnes liées (`index` : leur index, « » pour un index pas
+ * encore créé). La colonne qui répond n'est ni le nom ni l'identifiant. Dans un même index,
+ * une colonne qui répond ajoutée en même temps que celle qui la nomme (« Recyclage de » avec
+ * « Se recycle en ») la vise en retour : sinon son réglage, écrit après, effacerait le lien.
+ * L'éditeur le dit avant d'enregistrer ; le serveur refuse de même.
+ */
+export function linkedColumnProblems(index: string, operations: SchemaOperation[]) {
+  const columns = operations.flatMap((operation) => {
+    if (operation.op === "add-column") return [{ tab: operation.tab, header: operation.header.trim(), spec: operation.spec, added: true }]
+    if (operation.op === "spec") return [{ tab: operation.tab, header: operation.header.trim(), spec: operation.spec, added: false }]
+    if (operation.op === "add-tab") return operation.columns.map((column) => ({ tab: operation.name.trim(), header: column.header.trim(), spec: column.spec, added: true }))
+    return []
+  })
+  const problems: string[] = []
+  for (const column of columns) {
+    const link = column.spec.kind === "linked" ? column.spec.link : undefined
+    const answer = link?.column.replace(/\s+/g, " ").trim() ?? ""
+    if (!link || !answer) continue
+    if (isNameColumn(answer) || isIdHeader(answer)) {
+      problems.push(`« ${column.header} » : la colonne qui répond ne peut pas être « ${answer} », chaque ligne est retrouvée par elle.`)
+      continue
+    }
+    if (link.index !== index || !column.added) continue
+    for (const other of columns) {
+      if (other === column || !other.added || foldName(other.header) !== foldName(answer) || (link.tab !== "*" && link.tab !== other.tab)) continue
+      const back = other.spec.kind === "linked" ? other.spec.link : undefined
+      if (back && back.index === index && foldName(back.column) === foldName(column.header) && (back.tab === "*" || back.tab === column.tab)) continue
+      problems.push(`« ${other.header} » (${other.tab}) répondra à « ${column.header} » : règle-la en Colonne liée ↔ vers « ${column.header} » de cet index, ou ne l’ajoute pas, Eraser la crée.`)
+    }
+  }
+  return [...new Set(problems)]
 }
 
 export function isBuiltinWorldIndexKey(value: unknown): value is BuiltinWorldIndexKey {

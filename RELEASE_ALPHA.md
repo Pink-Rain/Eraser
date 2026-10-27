@@ -1,28 +1,22 @@
-# Eraser 0.1.1-alpha.261 — Toute la table sur la même page
+# Eraser 0.1.1-alpha.262 — Un index qui se répond
 
 Cette version arrive **sans réinstallation** (enveloppe 10, comme l'alpha 238) : Eraser la
 télécharge, redémarre son serveur et recharge la page tout seul. Rien n'est modifié dans Google
-Sheets.
+Sheets tant que tu ne crées pas de colonne.
 
-- **Journal en direct** : une note de session écrite, modifiée, cochée ou supprimée apparaît
-  tout de suite chez les autres joueurs qui ont le journal ouvert (et dans l'onglet Journal de
-  leur fiche, vue « Campagne »), sans actualiser. Quand le MJ révèle ou cache quelque chose,
-  ajoute un PNJ, un magasin ou un événement à une session (journal ou Créateur de session), le
-  journal des joueurs se relit seul, un peu plus d'une seconde après son dernier clic.
-  Le message passe par le salon en direct du chat de la campagne, déjà ouvert : aucune lecture
-  Google de plus pour les notes. Seules les notes publiques voyagent ; les notes privées des
-  fiches restent à leur auteur.
-- **Le chat suit la campagne après « Actualiser »** : une fenêtre rechargée (F5, mise à jour)
-  sur une page de campagne reprend le canal de cette campagne au lieu de « Général ». À
-  l'ouverture d'Eraser, le chat reste sur « Général ».
-- **Résumé de session en petit** : dans le bilan du journal, le résumé s'écrit en petit, sans
-  lettrine, et se replie au-delà de quatre lignes (« Lire la suite »).
-- **Notes signées du personnage** : le résumé, le butin et l'historique d'un PNJ signent du
-  personnage du joueur (ou « MJ - pseudo »), comme le panneau des notes. Ta première note, et
-  celles reçues en direct, ne signent plus du nom du compte.
-- **Lien Roll20 sur le tableau de bord** : le MJ colle le lien de sa partie Roll20 dans
-  « Modifier » (sur la bannière) ou via « Ajouter le lien de la partie Roll20 ». Toute la table
-  voit alors le bouton « Rejoindre la partie sur Roll20 », qui l'ouvre dans le navigateur. Le
-  lien est gardé sur le serveur partagé ; seuls les liens https de roll20.net sont acceptés.
-- **Date dans le chat** : chaque message et chaque jet porte sa date en petit (JJ/MM/AA) avant
-  l'heure, dans le chat d'Eraser comme dans celui du tabletop ; la date complète au survol.
+- **Colonne liée ↔ vers son propre index** : dans « Modifier », « Index lié » propose d'abord
+  « Cet index ». Deux colonnes d'un même index se répondent alors (par exemple « Se recycle en »
+  et « Recyclage de » dans les items) : écrire « Fer » dans « Se recycle en » de l'Épée inscrit
+  « Épée » dans « Recyclage de » du Fer, et l'inverse. Une seule colonne à créer : Eraser crée
+  celle qui répond dans les onglets choisis. Une colonne peut aussi se répondre à elle-même
+  (« Allié de », dans les deux sens). Une ligne ne se cite jamais en retour. Marche aussi dans un
+  index qu'on est en train de créer.
+- **D'un onglet à l'autre, sans doublon** : posée dans plusieurs onglets, la colonne a une réponse
+  qui les vise tous. Un nom cité est cherché dans chacun d'eux ; avant, il pouvait être recréé en
+  double dans un onglet où il n'était pas. Un nom absent n'est créé qu'une fois, dans un onglet qui
+  a la colonne d'en face. Les liens entre deux index (des items vers les lieux…) en profitent aussi.
+- **L'éditeur explique avant d'enregistrer** : une phrase sous le réglage dit ce qui va se passer,
+  et la colonne qui répond propose les colonnes existantes. Refusés d'avance, sans rien écrire dans
+  Sheets : « Nom » ou « ID » comme colonne qui répond, une colonne qui répond déjà à une autre (elle
+  perdrait son lien), une colonne qui répond ajoutée en même temps sous un autre type. Les deux
+  colonnes créées ensemble et réglées l'une vers l'autre sont acceptées.

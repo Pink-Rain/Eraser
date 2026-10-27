@@ -296,3 +296,98 @@ test("Onglets d'items réunis et renommés dans Sheets : l'index les montre sans
   assert.deepEqual(data.tables.map((table) => table.tabName), ["Items"]);
   assert.deepEqual(data.tables[0].rows.map((row) => row.values[0]), ["OBJ-1", "ARM-1"]);
 });
+
+test("Colonne liée vers son propre index : les deux colonnes se répondent d'un onglet à l'autre, sans doublon", async () => {
+  const world = await vite.ssrLoadModule("/lib/world-indexes.ts");
+  const id = objectsFile([
+    { title: "Armes", grid: [["ID", "Nom", "Type"], ["ARM-1", "Épée", "Arme"], ["ARM-2", "Hache", "Arme"]] },
+    { title: "Ressources", grid: [["ID", "Nom", "Type"], ["RES-1", "Fer", "Métal"], ["RES-2", "Bois", "Bois"]] },
+  ]);
+  await readItems();
+  const recycles = { kind: "linked", link: { index: "objects", tab: "*", column: "Recyclage de" } };
+  // La colonne est ajoutée dans un onglet, puis dans l'autre : l'autre côté naît dans tous les onglets.
+  await world.applyWorldSchemaOperations("objects", [{ op: "add-column", tab: "Armes", header: "Se recycle en", spec: recycles }]);
+  await world.applyWorldSchemaOperations("objects", [{ op: "add-column", tab: "Ressources", header: "Se recycle en", spec: recycles }]);
+  for (const tab of ["Armes", "Ressources"]) assert.ok(google.grid(id, tab)[0].includes("Recyclage de"), tab);
+  const row = (tab, name) => {
+    const grid = google.grid(id, tab);
+    const found = grid.find((line) => line[1] === name);
+    return found && Object.fromEntries(grid[0].map((header, column) => [header, found[column] ?? ""]));
+  };
+  const at = (tab, name) => google.grid(id, tab).findIndex((line) => line[1] === name) + 1;
+  // L'Épée (Armes) se recycle en Fer (Ressources) : le Fer est « Recyclage de » l'Épée.
+  await world.updateWorldIndexCell("objects", "Armes", { rowNumber: at("Armes", "Épée"), id: "ARM-1", name: "Épée" }, "Se recycle en", "Fer");
+  assert.equal(row("Ressources", "Fer")["Recyclage de"], "Épée");
+  // Dans l'autre sens, depuis le Fer : la Hache est trouvée dans son onglet, jamais recréée ailleurs.
+  await world.updateWorldIndexCell("objects", "Ressources", { rowNumber: at("Ressources", "Fer"), id: "RES-1", name: "Fer" }, "Recyclage de", "Épée, Hache");
+  assert.equal(row("Armes", "Hache")["Se recycle en"], "Fer");
+  assert.equal(row("Armes", "Épée")["Se recycle en"], "Fer");
+  assert.deepEqual(google.grid(id, "Ressources").slice(1).map((line) => line[1]), ["Fer", "Bois"]);
+  assert.deepEqual(google.grid(id, "Armes").slice(1).map((line) => line[1]), ["Épée", "Hache"]);
+  // Dans le même onglet aussi : le Bois se recycle en Fer.
+  await world.updateWorldIndexCell("objects", "Ressources", { rowNumber: at("Ressources", "Bois"), id: "RES-2", name: "Bois" }, "Se recycle en", "Fer");
+  assert.equal(row("Ressources", "Fer")["Recyclage de"], "Épée, Hache, Bois");
+  // Un nom retiré d'un côté disparaît de l'autre ; une ligne ne se cite pas elle-même en retour.
+  await world.updateWorldIndexCell("objects", "Ressources", { rowNumber: at("Ressources", "Fer"), id: "RES-1", name: "Fer" }, "Recyclage de", "Hache, Bois, Fer");
+  assert.equal(row("Armes", "Épée")["Se recycle en"], "");
+  assert.equal(row("Ressources", "Fer")["Se recycle en"], "");
+  // Un nom absent de l'index naît une seule fois, dans un onglet qui a la colonne d'en face.
+  await world.updateWorldIndexCell("objects", "Armes", { rowNumber: at("Armes", "Hache"), id: "ARM-2", name: "Hache" }, "Se recycle en", "Fer, Cuivre");
+  const copper = ["Armes", "Ressources"].flatMap((tab) => google.grid(id, tab).filter((line) => line[1] === "Cuivre").map(() => tab));
+  assert.equal(copper.length, 1, JSON.stringify(copper));
+  assert.equal(row(copper[0], "Cuivre")["Recyclage de"], "Hache");
+  // L'éditeur explique le lien : chaque colonne nomme celle qui lui répond.
+  const model = await world.worldEditorModel("objects");
+  const answer = model.tabs.find((tab) => tab.name === "Ressources").columns.find((column) => column.header === "Recyclage de");
+  assert.equal(answer.spec.kind, "linked");
+  assert.equal(answer.spec.link.index, "objects");
+  assert.match(answer.policy.reasons[0], /Se recycle en/);
+});
+
+test("Colonne liée vers son propre index : les deux côtés ajoutés ensemble, un lien symétrique, et ce qui ne peut pas répondre", async () => {
+  const world = await vite.ssrLoadModule("/lib/world-indexes.ts");
+  const id = objectsFile([
+    { title: "Armes", grid: [["ID", "Nom", "Type"], ["ARM-1", "Épée", "Arme"], ["ARM-2", "Hache", "Arme"]] },
+    { title: "Ressources", grid: [["ID", "Nom", "Type"], ["RES-1", "Fer", "Métal"]] },
+  ]);
+  await readItems();
+  const linked = (tab, column) => ({ kind: "linked", link: { index: "objects", tab, column } });
+  // Les deux colonnes créées dans le même enregistrement : la seconde, déjà née du premier lien, est réglée.
+  await world.applyWorldSchemaOperations("objects", [
+    { op: "add-column", tab: "Armes", header: "Se recycle en", spec: linked("*", "Recyclage de") },
+    { op: "add-column", tab: "Armes", header: "Recyclage de", spec: linked("Armes", "Se recycle en") },
+  ]);
+  const headers = google.grid(id, "Armes")[0];
+  assert.equal(headers.filter((header) => header === "Recyclage de").length, 1);
+  assert.equal(headers.filter((header) => header === "Se recycle en").length, 1);
+  assert.ok(google.grid(id, "Ressources")[0].includes("Recyclage de"));
+  // Un lien symétrique : « Allié de » se répond à elle-même, d'un onglet à l'autre.
+  await world.applyWorldSchemaOperations("objects", [{ op: "add-column", tab: "Armes", header: "Allié de", spec: linked("*", "Allié de") }]);
+  assert.ok(google.grid(id, "Ressources")[0].includes("Allié de"));
+  const row = (tab, name) => {
+    const grid = google.grid(id, tab);
+    const found = grid.find((line) => line[1] === name);
+    return Object.fromEntries(grid[0].map((header, column) => [header, found[column] ?? ""]));
+  };
+  await world.updateWorldIndexCell("objects", "Armes", { rowNumber: 2, id: "ARM-1", name: "Épée" }, "Allié de", "Hache, Fer");
+  assert.equal(row("Armes", "Hache")["Allié de"], "Épée");
+  assert.equal(row("Ressources", "Fer")["Allié de"], "Épée");
+  assert.equal(row("Armes", "Épée")["Allié de"], "Hache, Fer");
+  assert.deepEqual(google.grid(id, "Ressources").slice(1).map((line) => line[1]), ["Fer"]);
+  // Le nom, l'identifiant ou une colonne qui répond déjà à une autre : refusés, sans rien écrire.
+  const before = google.grid(id, "Armes")[0].join("|");
+  await assert.rejects(() => world.applyWorldSchemaOperations("objects", [{ op: "add-column", tab: "Armes", header: "Fondu", spec: linked("*", "Nom") }]), /ne peut pas être « Nom »/);
+  await assert.rejects(() => world.applyWorldSchemaOperations("objects", [{ op: "add-column", tab: "Armes", header: "Fondu", spec: linked("*", "ID") }]), /INDEX_SCHEMA_INVALID/);
+  await assert.rejects(() => world.applyWorldSchemaOperations("objects", [{ op: "add-column", tab: "Armes", header: "Fondu", spec: linked("*", "Recyclage de") }]), /répond déjà à « Se recycle en »/);
+  // Ajoutée en même temps avec un autre type, la colonne qui répond effacerait le lien : refusé d'avance.
+  await assert.rejects(() => world.applyWorldSchemaOperations("objects", [
+    { op: "add-column", tab: "Armes", header: "Fondu en", spec: { kind: "rich" } },
+    { op: "add-column", tab: "Armes", header: "Fondu de", spec: linked("*", "Fondu en") },
+  ]), /« Fondu en » \(Armes\) répondra à « Fondu de »/);
+  assert.equal(google.grid(id, "Armes")[0].join("|"), before);
+  assert.ok(!google.grid(id, "Ressources")[0].includes("Fondu"));
+  // L'éditeur dit la même chose avant d'enregistrer.
+  const definitions = await vite.ssrLoadModule("/lib/world-index-definitions.ts");
+  assert.deepEqual(definitions.linkedColumnProblems("objects", [{ op: "add-column", tab: "Armes", header: "A", spec: linked("*", "B") }, { op: "add-column", tab: "Armes", header: "B", spec: linked("Armes", "A") }]), []);
+  assert.equal(definitions.linkedColumnProblems("objects", [{ op: "spec", tab: "Armes", header: "A", spec: linked("*", "Nom") }]).length, 1);
+});

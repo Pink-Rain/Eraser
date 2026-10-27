@@ -61,6 +61,7 @@ import {
   isNameColumn,
   labelColumnIndex,
   linkEndCovers,
+  linkedColumnProblems,
   nameColumnIndex,
   splitNames,
   worldColumnPolicy,
@@ -1280,20 +1281,42 @@ async function writeNewRow(key: WorldIndexKey, table: PlainTable, tabName: strin
   return { rowNumber, id }
 }
 
+/**
+ * Un côté d'en face. `among` : la même colonne y répond depuis plusieurs onglets (« Se
+ * recycle en » posée dans les armes et dans les ressources) ; une ligne citée est cherchée
+ * dans chacun (voir `linkEndsOf`).
+ */
+type LinkAnswer = WorldIndexLinkEnd & { among?: string[] }
+
+/** Les onglets où chercher, et au besoin créer, une ligne citée de l'autre côté. */
+async function answerTabs(end: LinkAnswer) {
+  if (!end.among) return end.tab === "*" ? (await tabsOf(end.index)).map((tab) => tab.name) : [end.tab]
+  const names = new Set((await tabsOf(end.index)).map((tab) => tab.name))
+  const known = end.among.filter((tab) => names.has(tab))
+  return known.length ? known : end.among
+}
+
+/** Ce côté d'en face concerne-t-il cet onglet ? */
+function answerCovers(end: LinkAnswer, index: WorldIndexKey, tab: string) {
+  return end.among ? end.index === index && end.among.includes(tab) : linkEndCovers(end, index, tab)
+}
+
 /** La ligne `name` parmi les onglets couverts par `end` ; -1 si elle n'existe nulle part. */
-async function locateLinked(end: WorldIndexLinkEnd, name: string) {
-  const tabs = end.tab === "*" ? (await tabsOf(end.index)).map((tab) => tab.name) : [end.tab]
+async function locateLinked(end: LinkAnswer, name: string) {
+  const tabs = await answerTabs(end)
+  let home: { tab: string; table: PlainTable } | undefined
   for (const tab of tabs) {
     const table = await plainTable(end.index, tab)
     const rowIndex = findRowByName(table, name)
     if (rowIndex > 0) return { tab, table, rowIndex }
+    home ??= columnOf(table.headers, end.column) >= 0 ? { tab, table } : undefined
   }
-  // Absente : elle sera créée dans le premier onglet couvert.
-  return { tab: tabs[0], table: await plainTable(end.index, tabs[0]), rowIndex: -1 }
+  // Absente : elle sera créée dans le premier onglet couvert qui a la colonne d'en face.
+  return { ...(home ?? { tab: tabs[0], table: await plainTable(end.index, tabs[0]) }), rowIndex: -1 }
 }
 
 /** Inscrit `value` dans la colonne `end` de la ligne `targetName`, créée au besoin. */
-async function addLink(end: WorldIndexLinkEnd, targetName: string, value: string) {
+async function addLink(end: LinkAnswer, targetName: string, value: string) {
   const { tab, table, rowIndex } = await locateLinked(end, targetName)
   const nameColumn = nameColumnIndex(table.headers)
   const linkColumn = columnOf(table.headers, end.column)
@@ -1314,7 +1337,7 @@ async function addLink(end: WorldIndexLinkEnd, targetName: string, value: string
  * Retire `value` de la colonne `end` de la ligne `targetName`, ou l'y renomme en
  * `replacement`. Seul le lien bouge : l'entité d'en face n'est jamais supprimée.
  */
-async function removeLink(end: WorldIndexLinkEnd, targetName: string, value: string, replacement?: string) {
+async function removeLink(end: LinkAnswer, targetName: string, value: string, replacement?: string) {
   const { tab, table, rowIndex } = await locateLinked(end, targetName)
   const linkColumn = columnOf(table.headers, end.column)
   if (linkColumn < 0 || rowIndex <= 0) return false
@@ -1327,14 +1350,29 @@ async function removeLink(end: WorldIndexLinkEnd, targetName: string, value: str
   return true
 }
 
-/** Les colonnes liées d'un onglet, chacune avec la colonne qui lui répond. */
+/**
+ * Les colonnes liées d'un onglet, chacune avec la colonne qui lui répond. Une colonne
+ * qui répond à la même colonne posée dans plusieurs onglets (« Recyclage de » face à « Se
+ * recycle en » des armes et des ressources, dans le même index) n'a qu'un côté d'en face,
+ * sur tous ces onglets : un nom cité y est cherché partout, et créé une seule fois.
+ */
 function linkEndsOf(key: WorldIndexKey, tabName: string) {
-  return linksOf(key).flatMap((pair) => ([[pair[0], pair[1]], [pair[1], pair[0]]] as const).filter(([end]) => linkEndCovers(end, key, tabName)))
+  const ends: Array<[WorldIndexLinkEnd, LinkAnswer]> = []
+  for (const pair of linksOf(key)) {
+    for (const [end, other] of [[pair[0], pair[1]], [pair[1], pair[0]]] as const) {
+      if (!linkEndCovers(end, key, tabName)) continue
+      const same = ends.find(([seen, answer]) => foldName(seen.column) === foldName(end.column) && answer.index === other.index && foldName(answer.column) === foldName(other.column))
+      if (!same) ends.push([end, other])
+      else if (other.tab === "*") same[1] = other
+      else if (same[1].tab !== "*" && !(same[1].among ?? [same[1].tab]).includes(other.tab)) same[1] = { ...same[1], among: [...(same[1].among ?? [same[1].tab]), other.tab] }
+    }
+  }
+  return ends
 }
 
-function isSelfLink(key: WorldIndexKey, tabName: string, other: WorldIndexLinkEnd, target: string, name: string) {
+function isSelfLink(key: WorldIndexKey, tabName: string, other: LinkAnswer, target: string, name: string) {
   // Un peuple n'est pas son propre ancêtre.
-  return linkEndCovers(other, key, tabName) && foldName(target) === foldName(name)
+  return answerCovers(other, key, tabName) && foldName(target) === foldName(name)
 }
 
 /**
@@ -1706,7 +1744,7 @@ export function deleteWorldIndexRows(key: WorldIndexKey, tabName: string, rows: 
       for (const [end, other] of linkEndsOf(key, tabName)) {
         for (const linked of splitNames(before.rows[target.rowNumber - 1]?.[columnOf(before.headers, end.column)] || "")) {
           // Une ligne supprimée en même temps n'a pas besoin d'être nettoyée.
-          if (linkEndCovers(other, key, tabName) && deletedNames.has(foldName(linked))) continue
+          if (answerCovers(other, key, tabName) && deletedNames.has(foldName(linked))) continue
           await removeLink(other, linked, name)
         }
       }
@@ -2013,19 +2051,56 @@ function assertPolicy(allowed: boolean, reasons: string[]) {
 }
 
 /**
+ * L'autre côté d'une colonne liée, vérifié avant que rien ne soit écrit : la colonne qui
+ * répond n'est ni le nom ni l'identifiant (chaque ligne est retrouvée par eux), et ne répond
+ * pas déjà à une autre colonne (un lien de départ compris), qu'elle perdrait.
+ */
+async function reciprocalOf(key: WorldIndexKey, tab: string, header: string, link: NonNullable<IndexColumnSpec["link"]>) {
+  const column = link.column.replace(/\s+/g, " ").trim()
+  if (!column) throw new Error("INDEX_SCHEMA_INVALID:Une colonne liée doit nommer la colonne qui lui répond en face.")
+  if (isNameColumn(column) || foldName(column) === foldName(ID_HEADER)) throw new Error(`INDEX_SCHEMA_INVALID:« ${column} » ne peut pas répondre à une colonne liée : chaque ligne est retrouvée par elle.`)
+  const target = await workbook(link.index, { strict: true })
+  const tabs = link.tab === "*" ? target.definition.tabs.map((item) => item.name) : [link.tab]
+  // La colonne qui se répond à elle-même, dans son propre onglet (« Allié de »).
+  const self = (targetTab: string) => link.index === key && targetTab === tab && foldName(column) === foldName(header)
+  // Ce qu'elle lie déjà, si elle répond à une autre colonne.
+  const answers = (targetTab: string, entries: SchemaEntry[]) => {
+    const spec = effectiveColumnSpec(link.index, targetTab, column, entries)
+    return spec.kind === "linked" && spec.link && !trashed(findEntry(entries, targetTab, column)) ? spec.link : undefined
+  }
+  const backHere = (answer: WorldIndexLinkEnd) => answer.index === key && foldName(answer.column) === foldName(header)
+  for (const targetTab of tabs) {
+    const answer = self(targetTab) ? undefined : answers(targetTab, target.schema)
+    if (answer && !backHere(answer)) throw new Error(`INDEX_SCHEMA_INVALID:« ${column} »${tabs.length > 1 ? ` (onglet ${targetTab})` : ""} répond déjà à « ${answer.column} » : choisis une autre colonne qui réponde.`)
+  }
+  return { target, tabs, column, self, answers, backHere }
+}
+
+/**
  * Crée l'autre côté d'une colonne liée : la colonne qui lui répond dans l'index visé,
  * déclarée dans son propre schéma. Une colonne déjà présente est reprise telle quelle.
  * L'index visé et son schéma sont relus à l'instant : celui d'un classeur partagé (les
  * créatures et leurs sorts) porte aussi les réglages de l'autre index, jamais réécrits d'avant.
+ * L'index visé peut être celui de la colonne (« Se recycle en » ↔ « Recyclage de » dans les
+ * items), et la colonne se répondre à elle-même (« Allié de », dans les deux sens). Posée dans
+ * plusieurs onglets, elle a pour réponse une colonne qui les vise tous. Renvoie les colonnes
+ * qui lui répondent, par onglet.
  */
 async function ensureReciprocal(key: WorldIndexKey, tab: string, header: string, link: NonNullable<IndexColumnSpec["link"]>) {
-  const target = await workbook(link.index, { strict: true })
-  const tabs = link.tab === "*" ? target.definition.tabs.map((item) => item.name) : [link.tab]
-  for (const targetTab of tabs) await appendHeader(target.spreadsheetId, targetTab, link.column)
+  const { target, tabs, column, self, answers, backHere } = await reciprocalOf(key, tab, header, link)
+  for (const targetTab of tabs) await appendHeader(target.spreadsheetId, targetTab, column)
   await rewriteSchema(target.spreadsheetId, (entries) => {
-    for (const targetTab of tabs) upsertEntry(entries, targetTab, link.column, { spec: { kind: "linked", also: ["rich"], link: { index: key, tab, column: header } }, deletedAt: "" })
+    for (const targetTab of tabs) {
+      if (self(targetTab)) continue
+      const before = answers(targetTab, entries)
+      const kept = before && backHere(before) ? findEntry(entries, targetTab, column)?.spec : undefined
+      // La même colonne, posée dans un autre onglet, lui répondait déjà : elle les vise tous.
+      const back = before && backHere(before) && before.tab !== tab ? "*" : tab
+      upsertEntry(entries, targetTab, column, { spec: { ...kept, kind: "linked", also: ["rich"], link: { index: key, tab: back, column: header } }, deletedAt: "" })
+    }
   })
   forgetWorkbook(target.spreadsheetId)
+  return tabs.map((targetTab) => ({ index: link.index, tab: targetTab, column }))
 }
 
 /** Les valeurs d'une nouvelle ligne réglées sur les colonnes d'un onglet (« Valeur d'une nouvelle ligne »). */
@@ -2081,6 +2156,15 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
     const locks = await listIndexLocks(key)
     const entity = entityOf(key)
     const now = new Date().toISOString()
+    // Les colonnes de cet index créées en route comme réponse d'une colonne liée vers lui-même,
+    // avec la colonne à laquelle elles répondent : les ajouter ensuite ne fait que les régler.
+    const answered = new Map<string, { tab: string; header: string }>()
+    const slot = (tabName: string, header: string) => `${foldName(tabName)}\u0001${foldName(header)}`
+    const reciprocal = async (tabName: string, header: string, link: NonNullable<IndexColumnSpec["link"]>) => {
+      for (const end of await ensureReciprocal(key, tabName, header, link)) if (end.index === key) answered.set(slot(end.tab, end.column), { tab: tabName, header })
+    }
+    const [linkProblem] = linkedColumnProblems(key, operations)
+    if (linkProblem) throw new Error(`INDEX_SCHEMA_INVALID:${linkProblem}`)
     try {
       for (const operation of operations) {
         // Un index d'entités garde son seul onglet, celui que lit Eraser.
@@ -2090,6 +2174,7 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
           if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
           const name = operation.name.replace(/\s+/g, " ").trim()
           const columns = operation.columns.filter((column) => !["nom", "id"].includes(foldName(column.header)))
+          for (const column of columns) if (column.spec.kind === "linked" && column.spec.link) await reciprocalOf(key, name, column.header.trim(), column.spec.link)
           await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ addSheet: { properties: { title: name, gridProperties: { rowCount: 1000, columnCount: Math.max(26, columns.length + 2), frozenRowCount: 1, frozenColumnCount: 1 } } } }] }) })
           const headers = ["Nom", ...columns.map((column) => column.header.trim()), ID_HEADER]
           await updateRange(sheet.spreadsheetId, sheetTabRange(name, `A1:${columnName(headers.length)}1`), [headers], { valueInputOption: "RAW" })
@@ -2097,7 +2182,7 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
           for (const column of columns) {
             const header = column.header.trim()
             edit((entries) => upsertEntry(entries, name, header, { spec: column.spec, state: "ajouté", deletedAt: "" }))
-            if (column.spec.kind === "linked" && column.spec.link) await ensureReciprocal(key, name, header, column.spec.link)
+            if (column.spec.kind === "linked" && column.spec.link) await reciprocal(name, header, column.spec.link)
           }
           continue
         }
@@ -2175,12 +2260,20 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
         }
         const table = await plainTable(key, tab.name, [])
         if (operation.op === "add-column") {
-          const problem = headerProblem(operation.header, table.headers)
-          if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
           const header = operation.header.replace(/\s+/g, " ").trim()
-          await appendHeader(sheet.spreadsheetId, tab.name, header)
+          // Les deux côtés d'un lien vers cet index ajoutés ensemble : le premier a déjà créé le second.
+          const answers = answered.get(slot(tab.name, header))
+          const link = operation.spec.kind === "linked" ? operation.spec.link : undefined
+          if (answers && !(link && link.index === key && (link.tab === "*" || link.tab === answers.tab) && foldName(link.column) === foldName(answers.header))) throw new Error(`INDEX_SCHEMA_INVALID:« ${header} » est déjà la colonne qui répond à « ${answers.header} » : elle ne peut pas viser autre chose.`)
+          if (!answers) {
+            const problem = headerProblem(operation.header, table.headers)
+            if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
+            if (link) await reciprocalOf(key, tab.name, header, link)
+            await appendHeader(sheet.spreadsheetId, tab.name, header)
+          }
           edit((entries) => upsertEntry(entries, tab.name, header, { spec: operation.spec, state: "ajouté", deletedAt: "" }))
-          if (operation.spec.kind === "linked" && operation.spec.link) await ensureReciprocal(key, tab.name, header, operation.spec.link)
+          // Même déjà créée en face, la réponse est complétée : elle peut viser plus d'onglets.
+          if (link) await reciprocal(tab.name, header, link)
           continue
         }
         const column = columnOf(table.headers, operation.header)
@@ -2220,7 +2313,7 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
           const current = effectiveColumnSpec(key, tab.name, operation.header, schema)
           if (!isDisplayOnlyChange(current, operation.spec)) assertPolicy(policy.type || Boolean(operation.force), policy.reasons)
           edit((entries) => upsertEntry(entries, tab.name, operation.header, { spec: operation.spec }))
-          if (operation.spec.kind === "linked" && operation.spec.link && !current.link) await ensureReciprocal(key, tab.name, operation.header, operation.spec.link)
+          if (operation.spec.kind === "linked" && operation.spec.link && !current.link) await reciprocal(tab.name, operation.header, operation.spec.link)
           continue
         }
         if (operation.op === "remove-column") {

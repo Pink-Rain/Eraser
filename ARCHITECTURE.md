@@ -186,6 +186,26 @@ noms et ne se renomment jamais : actions `save-view`, `delete-view`,
 `save-view-preset`, clés `views` et `viewPresets` de l’API des réglages, portées
 du Worker, colonnes de la feuille, préfixe de version `vue:`, élément `@vue`.
 
+## Colonnes liées ↔
+
+Une colonne liée (`kind: "linked"`, `link: { index, tab, column }`) nomme la colonne qui lui
+répond en face ; écrire un nom d’un côté l’inscrit de l’autre (`propagateCellLinks`,
+`syncRowLinks` dans `lib/world-indexes.ts`). Les deux bouts sont dans le schéma de leur
+classeur (« Eraser · colonnes ») ; les liens de départ d’Eraser (`defaultWorldIndexLinks`)
+sont les mêmes réglages.
+- **Vers son propre index** : « Cet index » dans « Modifier » (« Se recycle en » ↔
+  « Recyclage de » dans les items), ou une colonne qui se répond à elle-même (« Allié de »),
+  comme Ancêtres ↔ Descendant des peuples. Une ligne ne se cite jamais en retour.
+- **Sur plusieurs onglets** : posée dans plusieurs onglets, la colonne a une réponse qui les
+  vise tous (`link.tab: "*"`, élargie par `ensureReciprocal`) ; les bouts d’en face d’une même
+  colonne sont réunis (`linkEndsOf`) : un nom cité y est cherché partout, et une ligne absente
+  n’est créée qu’une fois, dans le premier onglet qui a la colonne d’en face.
+- **Refusés avant toute écriture** (`reciprocalOf`, `linkedColumnProblems`, partagé avec
+  l’éditeur) : « Nom » ou « ID » comme réponse, une réponse qui répond déjà à une autre
+  colonne, et, dans un même index, une réponse ajoutée en même temps sous un autre type (son
+  réglage, écrit après, effacerait le lien). Ajoutées ensemble et se visant l’une l’autre, les
+  deux colonnes sont acceptées : la seconde, déjà créée par la première, est seulement réglée.
+
 ## L’Index des items, un index du moteur
 
 L’Index des items est l’index `objects` du moteur (`OBJECTS_INDEX_KEY`,

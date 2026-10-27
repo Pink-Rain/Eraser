@@ -52,7 +52,10 @@ export function NewIndexButton() {
       })
       const payload = (await response.json().catch(() => ({}))) as { index?: { key: string }; error?: string }
       if (!response.ok || !payload.index) throw new Error(payload.error || "L’index n’a pas pu être créé.")
-      const later = tabs.flatMap((tab) => tab.columns.filter((column) => relational(column.spec)).map((column): SchemaOperation => ({ op: "add-column", tab: tab.name, header: column.header, spec: column.spec })))
+      // « Cet index » (sa clé encore vide dans l'éditeur) : l'index qu'on vient de créer.
+      const created = payload.index.key as NonNullable<IndexColumnSpec["link"]>["index"]
+      const own = (spec: IndexColumnSpec): IndexColumnSpec => spec.link && !spec.link.index ? { ...spec, link: { ...spec.link, index: created } } : spec
+      const later = tabs.flatMap((tab) => tab.columns.filter((column) => relational(column.spec)).map((column): SchemaOperation => ({ op: "add-column", tab: tab.name, header: column.header, spec: own(column.spec) })))
       if (later.length) {
         const linked = await fetch("/api/resources/index-schema", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ family: "world", key: payload.index.key, operations: later }) })
         // L'index existe déjà : on l'ouvre quand même, les colonnes manquantes s'ajoutent depuis « Modifier ».
