@@ -15,7 +15,7 @@ import {
   updateRanges,
 } from "@/lib/google-sheets"
 import { withAsyncLock } from "@/lib/async-lock"
-import { cleanSessionNote, type SessionNote, type SessionNoteViewer, canEditSessionNote, canReadSessionNote } from "@/lib/session-note-rules"
+import { cleanSessionNote, compareSessionNotes, type SessionNote, type SessionNoteViewer, canEditSessionNote, canReadSessionNote } from "@/lib/session-note-rules"
 
 export * from "@/lib/session-note-rules"
 
@@ -35,13 +35,13 @@ function noteFromRow(row: string[]): SessionNote | null {
   try { quest = row[10] ? JSON.parse(row[10]) : null } catch { quest = null }
   return cleanSessionNote({
     id: row[0], campaignId: row[1], sessionId: row[2], private: row[3] === "Privée", characterId: row[4], type: row[5],
-    title: row[6], text: row[7], moment: row[8], links, quest, authorName: row[11], authorUid: row[12], createdAt: row[13], updatedAt: row[14],
+    title: row[6], text: row[7], moment: row[8], links, quest, authorName: row[11], authorUid: row[12], createdAt: row[13], updatedAt: row[14], order: row[15],
   })
 }
 
 function noteRow(note: SessionNote) {
   return [note.id, note.campaignId, note.sessionId, note.private ? "Privée" : "Publique", note.characterId, note.type, note.title, note.text, note.moment,
-    JSON.stringify(note.links), note.quest ? JSON.stringify(note.quest) : "", note.authorName, note.authorUid, note.createdAt, note.updatedAt]
+    JSON.stringify(note.links), note.quest ? JSON.stringify(note.quest) : "", note.authorName, note.authorUid, note.createdAt, note.updatedAt, note.order ? String(note.order) : ""]
 }
 
 function noteCells(note: SessionNote): Record<string, string> {
@@ -59,7 +59,7 @@ export async function listSessionNotes(campaignId: string, viewer: SessionNoteVi
   const named = await readNamedSheet(sheet.spreadsheetId, sheet.tabName, sessionNoteSheetHeaders)
   return named.rows.map((row) => noteFromRow(canonicalRow(named.columns, row)))
     .filter((note): note is SessionNote => Boolean(note && note.campaignId === campaignId && canReadSessionNote(note, viewer)))
-    .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    .sort(compareSessionNotes)
 }
 
 async function readNoteRows() {
@@ -87,9 +87,12 @@ export async function saveSessionNote(campaignId: string, value: unknown, viewer
     // Une nouvelle note privée appartient à un personnage ; une note existante garde sa visibilité.
     if (!current && clean.private && !clean.characterId) throw new Error("INVALID_NOTE")
     const now = new Date().toISOString()
+    // La place dans la frise ne change qu'en glissant l'événement (reorderSessionEvents) ; une
+    // note nouvelle, ou passée dans une autre session, arrive au bout de la frise.
+    const order = current && current.sessionId === clean.sessionId && clean.type === "evenement" ? current.order : 0
     const note: SessionNote = current
-      ? { ...clean, private: current.private, characterId: current.characterId, authorUid: current.authorUid, authorName: current.authorName, createdAt: current.createdAt, updatedAt: now }
-      : { ...clean, createdAt: now, updatedAt: now }
+      ? { ...clean, private: current.private, characterId: current.characterId, authorUid: current.authorUid, authorName: current.authorName, createdAt: current.createdAt, updatedAt: now, order }
+      : { ...clean, createdAt: now, updatedAt: now, order }
     // Une quête cochée garde la session où elle l'a été ; décochée, elle l'oublie.
     if (note.quest) note.quest = note.quest.done ? { ...note.quest, doneIn: note.quest.doneIn || note.sessionId } : { ...note.quest, doneIn: "" }
     if (index >= 0) {
@@ -105,6 +108,33 @@ export async function saveSessionNote(campaignId: string, value: unknown, viewer
     }
     clearSpreadsheetReadCache(sheet.spreadsheetId)
     return note
+  })
+}
+
+/**
+ * Range la frise d'une session : `ids`, les événements dans leur nouvel ordre, prennent les
+ * places 1, 2, 3… Seule la case « Ordre » (et « Modifié le ») de leurs lignes est écrite, en
+ * une fois. Chaque événement doit être de cette session et modifiable par ce compte.
+ */
+export async function reorderSessionEvents(campaignId: string, sessionId: string, ids: unknown, viewer: SessionNoteViewer) {
+  const list = Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string" && Boolean(id)) : []
+  if (!list.length || list.length > 500 || new Set(list).size !== list.length) throw new Error("INVALID_ORDER")
+  return withAsyncLock("session-notes", async () => {
+    const { sheet, columns, rows, startRow } = await readNoteRows()
+    const found = list.map((id) => {
+      const index = rows.findIndex((row) => row[0] === id && row[1] === campaignId)
+      const note = index >= 0 ? noteFromRow(rows[index]) : null
+      if (!note || note.sessionId !== sessionId || note.type !== "evenement") throw new Error("NOTE_NOT_FOUND")
+      if (!canEditSessionNote(note, viewer)) throw new Error("NOTE_FORBIDDEN")
+      return { index, note }
+    })
+    const now = new Date().toISOString()
+    const moved = found.flatMap(({ index, note }, position) => note.order === position + 1 ? [] : [{ index, note: { ...note, order: position + 1, updatedAt: now } }])
+    if (moved.length) {
+      await updateRanges(sheet.spreadsheetId, moved.flatMap(({ index, note }) => namedRowWrites(sheet.tabName, columns, startRow + index, { Ordre: String(note.order), "Modifié le": note.updatedAt })), { valueInputOption: "RAW" })
+      clearSpreadsheetReadCache(sheet.spreadsheetId)
+    }
+    return moved.map(({ note }) => note)
   })
 }
 

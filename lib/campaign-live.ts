@@ -1,4 +1,4 @@
-import { cleanSessionNote, type SessionNote } from "@/lib/session-note-rules"
+import { cleanSessionNote, compareSessionNotes, type SessionNote } from "@/lib/session-note-rules"
 
 /**
  * Ce qui change dans une campagne et que la table doit voir tout de suite : une note de
@@ -63,11 +63,15 @@ export function onCampaignChange(campaignId: string, handler: (message: Campaign
   return () => window.removeEventListener(CAMPAIGN_LIVE_IN_EVENT, listener)
 }
 
-/** Une note reçue (ou modifiée) dans une liste : remplacée si elle y est, ajoutée sinon. */
+/**
+ * Une note reçue (ou modifiée) dans une liste : remplacée si elle y est, ajoutée sinon, et la
+ * liste remise dans l'ordre du journal (un événement glissé ailleurs dans la frise y change de place).
+ */
 export function upsertSessionNote(notes: SessionNote[], note: SessionNote) {
   const at = notes.findIndex((entry) => entry.id === note.id)
-  if (at < 0) return [...notes, note].sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+  if (at < 0) return [...notes, note].sort(compareSessionNotes)
   // Une copie plus ancienne qui arrive après la nouvelle ne la remplace pas.
   if (notes[at].updatedAt > note.updatedAt) return notes
-  return notes.map((entry, position) => position === at ? note : entry)
+  const next = notes.map((entry, position) => position === at ? note : entry)
+  return notes[at].order === note.order ? next : next.sort(compareSessionNotes)
 }

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 
 import { listCampaignSessionsForDisplay } from "@/lib/campaign-sessions"
 import { campaignReader } from "@/lib/session-access"
-import { deleteSessionNote, listSessionNotes, saveSessionNote } from "@/lib/session-notes"
+import { deleteSessionNote, listSessionNotes, reorderSessionEvents, saveSessionNote } from "@/lib/session-notes"
 
 function errorMessage(error: unknown) {
   const code = error instanceof Error ? error.message : ""
@@ -10,6 +10,7 @@ function errorMessage(error: unknown) {
   if (code === "SESSION_NOT_FOUND") return "Cette session n’existe plus."
   if (code === "NOTE_FORBIDDEN") return "Seul l’auteur de cette note (ou le MJ) peut la modifier."
   if (code === "NOTE_NOT_FOUND") return "Cette note n’existe plus."
+  if (code === "INVALID_ORDER") return "Cet ordre n’a pas pu être lu."
   return "La note n’a pas pu être enregistrée."
 }
 
@@ -50,6 +51,23 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ note })
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 400 })
+  }
+}
+
+/** Ranger la frise d'une session : `{ sessionId, order: [ID des événements dans l'ordre] }`. */
+export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  const reader = await campaignReader(id)
+  if (!reader) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
+  try {
+    const body = (await request.json()) as { sessionId?: unknown; order?: unknown }
+    const sessionId = typeof body.sessionId === "string" ? body.sessionId : ""
+    const notes = await reorderSessionEvents(id, sessionId, body.order, { uid: reader.account.uid, manager: reader.manager })
+    return NextResponse.json({ notes })
+  } catch (error) {
+    const code = error instanceof Error ? error.message : ""
+    const message = code === "NOTE_FORBIDDEN" ? "Seul le MJ (ou l’auteur de chaque événement) peut changer leur ordre." : errorMessage(error)
+    return NextResponse.json({ error: message }, { status: 400 })
   }
 }
 

@@ -1,22 +1,27 @@
-# Eraser 0.1.1-alpha.262 — Un index qui se répond
+# Eraser 0.1.1-alpha.263 — Le grain de l'imprimerie
 
-Cette version arrive **sans réinstallation** (enveloppe 10, comme l'alpha 238) : Eraser la
-télécharge, redémarre son serveur et recharge la page tout seul. Rien n'est modifié dans Google
-Sheets tant que tu ne crées pas de colonne.
+Cette version arrive **sans réinstallation** (enveloppe 10, comme l'alpha 262) : Eraser la
+télécharge, redémarre son serveur et recharge la page tout seul. Dans Google Sheets, la feuille
+« Notes de session » gagne une colonne « Ordre », ajoutée à droite la première fois qu'on range
+une frise : rien n'est déplacé ni effacé.
 
-- **Colonne liée ↔ vers son propre index** : dans « Modifier », « Index lié » propose d'abord
-  « Cet index ». Deux colonnes d'un même index se répondent alors (par exemple « Se recycle en »
-  et « Recyclage de » dans les items) : écrire « Fer » dans « Se recycle en » de l'Épée inscrit
-  « Épée » dans « Recyclage de » du Fer, et l'inverse. Une seule colonne à créer : Eraser crée
-  celle qui répond dans les onglets choisis. Une colonne peut aussi se répondre à elle-même
-  (« Allié de », dans les deux sens). Une ligne ne se cite jamais en retour. Marche aussi dans un
-  index qu'on est en train de créer.
-- **D'un onglet à l'autre, sans doublon** : posée dans plusieurs onglets, la colonne a une réponse
-  qui les vise tous. Un nom cité est cherché dans chacun d'eux ; avant, il pouvait être recréé en
-  double dans un onglet où il n'était pas. Un nom absent n'est créé qu'une fois, dans un onglet qui
-  a la colonne d'en face. Les liens entre deux index (des items vers les lieux…) en profitent aussi.
-- **L'éditeur explique avant d'enregistrer** : une phrase sous le réglage dit ce qui va se passer,
-  et la colonne qui répond propose les colonnes existantes. Refusés d'avance, sans rien écrire dans
-  Sheets : « Nom » ou « ID » comme colonne qui répond, une colonne qui répond déjà à une autre (elle
-  perdrait son lien), une colonne qui répond ajoutée en même temps sous un autre type. Les deux
-  colonnes créées ensemble et réglées l'une vers l'autre sont acceptées.
+- **Les événements se rangent en les glissant** : dans le journal de campagne, la frise de la
+  session et le groupe « Événements » des notes se réordonnent au glisser-déposer. Un trait montre
+  où l'événement va se poser ; la frise change tout de suite, et revient comme avant (avec un
+  message) si l'enregistrement est refusé. Au clavier : la poignée ⋮⋮ puis ↑ ↓. Un événement ajouté
+  après coup arrive au bout de la frise, prêt à être glissé à sa place ; le modifier ne le déplace
+  pas. Les autres pages ouvertes sur la campagne voient le nouvel ordre aussitôt. Ça marche aussi
+  pour les notes privées d'un personnage dans sa fiche.
+- **Qui range** : le MJ, ou un joueur quand tous les événements de la session sont les siens (le
+  serveur le vérifie). Pendant une recherche ou un filtre, la liste n'est que partielle : on ne
+  range pas.
+- **Nouvelles polices** : tout Eraser passe à la famille IM Fell, embarquée dans l'application
+  (rien à télécharger en ligne). Texte en IM Fell Double Pica, titres en IM Fell Double Pica SC
+  (petites capitales) ; par touches, IM Fell English (« Avec empattement » des index, lettrines,
+  citations en italique), IM Fell English SC (en-tête des bannières, marque « Eraser ») et IM Fell
+  DW Pica (grands nombres des statistiques). Leur taille est réglée pour se lire comme avant, sans
+  rien faire déborder.
+- **Des chiffres qu'on lit** : les chiffres d'IM Fell sont à l'ancienne, leur « 1 » ressemble à un
+  « I » (« S1 » se lisait « SI », « 11 » « II »). Les chiffres seuls viennent d'EB Garamond, de la
+  même famille de caractères : niveaux, PV, dates et numéros de session restent nets.
+- Les documents de campagne gardent exactement leurs polices et leurs retours à la ligne.

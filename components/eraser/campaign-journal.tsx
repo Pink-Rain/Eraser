@@ -14,6 +14,8 @@ import { RichTextView } from "@/components/eraser/rich-text"
 import { RestButton, sendSatiety } from "@/components/eraser/satiety"
 import {
   EmptyHint,
+  EventDragHandle,
+  EventDropLine,
   LinkChip,
   SessionNotesBoard,
   SessionQuestChains,
@@ -21,6 +23,7 @@ import {
   noteTypeIcons,
   tone,
   useLinkLabel,
+  useSessionEventOrder,
   type JournalEntity,
   type SessionNoteEntities,
   type SessionNotesHandle,
@@ -28,7 +31,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { sessionNoteLabel, sessionNoteType, type SessionLinkKind, type SessionNote, type SessionNoteType } from "@/lib/session-note-rules"
+import { canEditSessionNote, sessionNoteLabel, sessionNoteType, sessionNotesOf, type SessionLinkKind, type SessionNote, type SessionNoteType } from "@/lib/session-note-rules"
 import type { SessionRevealKind } from "@/lib/session-reveal"
 import { ObjectIcon } from "@/components/eraser/object-icon"
 import { cn } from "@/lib/utils"
@@ -434,7 +437,7 @@ function BannerOrnament() {
 }
 
 function Eyebrow({ children }: { children: ReactNode }) {
-  return <p className="flex items-center justify-center gap-2.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-banner-ink/85 sm:gap-3 sm:tracking-[0.22em]">
+  return <p className="flex items-center justify-center gap-2.5 font-english-sc text-[14px] tracking-[0.12em] text-banner-ink/90 sm:gap-3 sm:tracking-[0.14em]">
     <span className="h-px w-5 bg-current opacity-60 sm:w-8" aria-hidden /><BookOpen className="size-3.5 shrink-0" aria-hidden /><span className="min-w-0 truncate">{children}</span><span className="h-px w-5 bg-current opacity-60 sm:w-8" aria-hidden />
   </p>
 }
@@ -606,6 +609,14 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
     return first
   }, [sessions, notes, rank])
 
+  // La frise de la session : ses événements, dans l'ordre où on les a rangés. Le MJ (ou l'auteur
+  // de chacun) les range en les glissant.
+  const timeline = current ? sessionNotesOf(notes, current.id).filter((note) => note.type === "evenement") : []
+  const eventDrag = useSessionEventOrder({
+    campaignId, sessionId: current?.id ?? "", notes, events: timeline, onNotesChange: setNotes, onError: say,
+    enabled: timeline.every((note) => canEditSessionNote(note, viewer)),
+  })
+
   if (!current) return <div className="journal w-full flex-1 px-4 py-9 sm:px-8 md:py-12" style={vars}>
     <div className="mx-auto max-w-xl overflow-hidden rounded-[1.6rem] border border-border/70 bg-card text-center shadow-sm">
       <div className="journal-banner-bg relative px-6 py-8 text-banner-ink"><BannerOrnament /><div className="relative"><Eyebrow>Journal de {campaignName}</Eyebrow></div></div>
@@ -627,7 +638,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
     authorLabel,
     vars,
   }
-  const here = notes.filter((note) => note.sessionId === current.id)
+  const here = sessionNotesOf(notes, current.id)
   const byId = <T extends { id: string }>(list: T[], ids: string[]) => ids.flatMap((id) => list.find((item) => item.id === id) ?? [])
   const group = byId(members, current.characterIds)
   // Les membres de la campagne qui n'ont pas été ajoutés à cette session (si elle a un groupe).
@@ -652,7 +663,6 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
   const creatureNames = new Set(creatureEvents.map((event) => same(event.name)))
   const creatures = namesIn("creature").filter((name) => !creatureNames.has(same(name)))
   const items = namesIn("item").filter((name) => !lootNames.has(same(name)))
-  const timeline = here.filter((note) => note.type === "evenement")
   const summaries = here.filter((note) => note.type === "resume")
   const isNew = (key: string) => firstSeen.get(key) === index
   // La fenêtre « Notes » d'un PNJ : chaque session où il apparaît ou qu'une note lui lie, dans l'ordre.
@@ -922,19 +932,22 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
                 </EntityCard>)}</div>}
                 {timeline.length > 0 && <div>
                   {otherEvents.length > 0 && <p className="mb-3 text-[10.5px] font-bold uppercase tracking-[0.09em] text-muted-foreground">Frise de la session</p>}
+                  <span className="sr-only" aria-live="polite">{eventDrag.status}</span>
                   <ol aria-label="Frise de la session" style={tone(eventColor)}>
                     {timeline.map((note, position) => {
                       const last = position === timeline.length - 1
                       const links = note.links.flatMap((link) => { const found = linkLabel(link); return found?.label ? [{ link, kind: found.kind, label: found.label }] : [] })
                       const all = openLinks.has(note.id)
-                      return <li key={note.id} className="grid grid-cols-[2rem_minmax(0,1fr)] gap-x-3 sm:grid-cols-[6.5rem_2rem_minmax(0,1fr)]">
+                      return <li key={note.id} {...eventDrag.item(note.id)} className={cn("group/event grid grid-cols-[2rem_minmax(0,1fr)] gap-x-3 transition-opacity sm:grid-cols-[6.5rem_2rem_minmax(0,1fr)]", eventDrag.isDragging(note.id) && "opacity-45")}>
                         <p className={cn("col-start-2 row-start-1 pb-1 text-[11.5px] font-semibold leading-tight text-tone [overflow-wrap:anywhere] sm:col-start-1 sm:pb-0 sm:pt-2 sm:text-right", !note.moment && "hidden sm:block")}>{note.moment || <span className="font-normal text-muted-foreground/60">—</span>}</p>
                         <div className="col-start-1 row-span-2 row-start-1 flex flex-col items-center sm:col-start-2 sm:row-span-1" aria-hidden>
                           <span className="flex size-8 shrink-0 items-center justify-center rounded-full border-[1.5px] border-tone bg-card font-display text-sm font-semibold tabular-nums text-tone shadow-[0_0_0_4px_var(--background)]">{position + 1}</span>
                           {!last && <span className="my-1 w-[1.5px] flex-1 rounded-full bg-gradient-to-b from-tone/55 to-border" />}
                         </div>
                         <div className={cn("col-start-2 row-start-2 min-w-0 sm:col-start-3 sm:row-start-1", !last && "pb-4")}>
-                          <div className="rounded-xl border border-border/70 bg-card px-3 py-2 shadow-[0_1px_2px_rgb(67_50_31/0.05)] transition-colors hover:border-tone/45">
+                          <div className={cn("relative rounded-xl border border-border/70 bg-card px-3 py-2 shadow-[0_1px_2px_rgb(67_50_31/0.05)] transition-colors hover:border-tone/45", eventDrag.active && "pr-8")}>
+                            <EventDropLine at={eventDrag.line(note.id)} />
+                            {eventDrag.active && <EventDragHandle id={note.id} onKeyDown={eventDrag.onHandleKey(note.id)} className="absolute right-1.5 top-1.5 size-6 opacity-45 group-hover/event:opacity-100 focus-visible:opacity-100" />}
                             <h3 className="font-display text-[15.5px] font-semibold leading-snug">
                               <button type="button" onClick={() => journal.openNote(note.id)} className="rounded-sm text-left outline-none hover:underline hover:decoration-border hover:underline-offset-4 focus-visible:ring-2 focus-visible:ring-ring/50">
                                 <span className="sr-only">Événement {position + 1}{note.moment ? `, ${note.moment}` : ""} : </span>{note.title || sessionNoteLabel(note, 70)}

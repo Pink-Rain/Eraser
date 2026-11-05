@@ -1428,6 +1428,25 @@ test("Notes de session : nettoyage, droits, « Mon perso » et quêtes en boucle
   assert.equal(done.done, true);
 });
 
+test("Notes de session : la frise suit l'ordre rangé, les événements ajoutés après vont au bout", async () => {
+  const rules = await vite.ssrLoadModule("/lib/session-note-rules.ts");
+  const base = { campaignId: "C", sessionId: "S1", authorUid: "a" };
+  const event = (id, createdAt, order) => rules.cleanSessionNote({ ...base, id, type: "evenement", text: id, createdAt, order });
+  // Seul un événement garde une place ; une place invalide est oubliée.
+  assert.equal(rules.cleanSessionNote({ ...base, type: "indice", text: "x", order: 3 }).order, 0);
+  assert.equal(event("E", "1", "2").order, 2);
+  assert.equal(event("E", "1", -4).order, 0);
+  assert.equal(event("E", "1", 1.5).order, 0);
+  const notes = [event("A", "1", 0), event("B", "2", 0), event("C", "3", 0), { ...event("D", "4", 0), sessionId: "S2" }];
+  assert.deepEqual(rules.sessionNotesOf(notes, "S1").map((note) => note.id), ["A", "B", "C"]);
+  const ranged = rules.withSessionEventOrder(notes, rules.moveInList(["A", "B", "C"], 2, 0));
+  assert.deepEqual(rules.sessionNotesOf(ranged, "S1").map((note) => note.id), ["C", "A", "B"]);
+  assert.equal(ranged[3], notes[3]);
+  assert.deepEqual(rules.sessionNotesOf([...ranged, event("E", "5", 0)], "S1").map((note) => note.id), ["C", "A", "B", "E"]);
+  assert.deepEqual(rules.moveInList(["A", "B", "C"], 0, 2), ["B", "C", "A"]);
+  assert.deepEqual(rules.moveInList(["A", "B"], 5, 0), ["A", "B"]);
+});
+
 test("Modifier › Vues : réglages par onglet, presets adaptés aux colonnes, tri et nouvelles tuiles", async () => {
   const views = await vite.ssrLoadModule("/lib/index-presentations.ts");
   // Un réglage inconnu, une vue « table » ou « stats » ne passent pas ; le kind suit la clé.

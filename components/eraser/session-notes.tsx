@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react"
+import { useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type Ref } from "react"
 import {
   BookOpen,
   Bookmark,
@@ -10,6 +10,7 @@ import {
   CircleHelp,
   Flag,
   Gem,
+  GripVertical,
   Hexagon,
   Link2,
   LoaderCircle,
@@ -41,11 +42,14 @@ import { announceCampaignChange } from "@/lib/campaign-live"
 import type { ChoiceSource } from "@/lib/index-columns"
 import {
   canEditSessionNote,
+  moveInList,
   sessionLinkKind,
   sessionNoteLabel,
   sessionNoteType,
   sessionNoteTypes,
+  sessionNotesOf,
   sessionQuestChains,
+  withSessionEventOrder,
   type SessionLinkKind,
   type SessionNote,
   type SessionNoteType,
@@ -115,6 +119,126 @@ async function deleteSessionNoteRequest(campaignId: string, noteId: string) {
   const payload = (await response.json().catch(() => ({}))) as { error?: string }
   if (!response.ok) throw new Error(payload.error || "La note n’a pas pu être supprimée.")
   announceCampaignChange(campaignId, { kind: "note-deleted", noteId })
+}
+
+async function reorderSessionEventsRequest(campaignId: string, sessionId: string, order: string[]) {
+  const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/session-notes`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId, order }) })
+  const payload = (await response.json().catch(() => ({}))) as { notes?: SessionNote[]; error?: string }
+  if (!response.ok || !Array.isArray(payload.notes)) throw new Error(payload.error || "L’ordre des événements n’a pas pu être enregistré.")
+  // Les autres pages ouvertes rangent leur frise de la même façon.
+  for (const note of payload.notes) announceCampaignChange(campaignId, { kind: "note", note })
+  return payload.notes
+}
+
+/* ---------- Ranger la frise ---------- */
+
+const EVENT_DRAG_TYPE = "application/x-eraser-session-event"
+
+/**
+ * Ranger les événements d'une session : glisser-déposer à la souris, ou ↑ ↓ sur la poignée au
+ * clavier. La frise change tout de suite ; un refus du serveur la remet comme elle était.
+ * `events` : les événements affichés, dans leur ordre ; `enabled` : le lecteur peut tous les
+ * modifier (le serveur le vérifie de nouveau).
+ */
+export function useSessionEventOrder({ campaignId, sessionId, notes, events, onNotesChange, enabled, onError }: {
+  campaignId: string
+  sessionId: string
+  notes: SessionNote[]
+  events: SessionNote[]
+  onNotesChange: (notes: SessionNote[]) => void
+  enabled: boolean
+  onError: (message: string) => void
+}) {
+  const [dragging, setDragging] = useState("")
+  const [target, setTarget] = useState<{ id: string; after: boolean } | null>(null)
+  const [status, setStatus] = useState("")
+  const latest = useRef(0)
+  const ids = events.map((note) => note.id)
+  const active = enabled && ids.length > 1
+
+  async function commit(next: string[]) {
+    if (next.every((id, index) => id === ids[index])) return
+    const mine = ++latest.current
+    const shown = withSessionEventOrder(notes, next)
+    onNotesChange(shown)
+    try {
+      const saved = new Map((await reorderSessionEventsRequest(campaignId, sessionId, next)).map((note) => [note.id, note]))
+      if (mine === latest.current) onNotesChange(shown.map((note) => saved.get(note.id) ?? note))
+    } catch (caught) {
+      if (mine !== latest.current) return
+      onNotesChange(notes)
+      onError(caught instanceof Error ? caught.message : "L’ordre des événements n’a pas pu être enregistré.")
+    }
+  }
+  // La place où l'événement tiré arriverait s'il était lâché là (`null` : il ne bougerait pas).
+  const landing = (over: string, after: boolean) => {
+    const from = ids.indexOf(dragging)
+    let to = ids.indexOf(over) + (after ? 1 : 0)
+    if (from < 0 || to < 0) return null
+    if (from < to) to -= 1
+    return to === from ? null : { from, to }
+  }
+  const end = () => { setDragging(""); setTarget(null) }
+
+  return {
+    active,
+    status,
+    /** Les poignées du glisser-déposer, à poser sur l'élément de liste de l'événement. */
+    item: (id: string) => active ? {
+      draggable: true,
+      onDragStart: (event: ReactDragEvent<HTMLElement>) => {
+        event.stopPropagation()
+        event.dataTransfer.effectAllowed = "move"
+        event.dataTransfer.setData(EVENT_DRAG_TYPE, id)
+        setDragging(id)
+      },
+      onDragEnd: end,
+      onDragOver: (event: ReactDragEvent<HTMLElement>) => {
+        if (!dragging) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = "move"
+        const box = event.currentTarget.getBoundingClientRect()
+        const after = event.clientY > box.top + box.height / 2
+        if (target?.id !== id || target.after !== after) setTarget({ id, after })
+      },
+      onDrop: (event: ReactDragEvent<HTMLElement>) => {
+        if (!dragging) return
+        event.preventDefault()
+        const move = target ? landing(target.id, target.after) : null
+        end()
+        if (move) void commit(moveInList(ids, move.from, move.to))
+      },
+    } : {},
+    /** Où dessiner le trait de dépose autour de cet événement. */
+    line: (id: string): "before" | "after" | null => target && target.id === id && landing(target.id, target.after) ? (target.after ? "after" : "before") : null,
+    isDragging: (id: string) => dragging === id,
+    /** La poignée : ↑ ↓ déplacent l'événement d'une place, le focus le suit. */
+    onHandleKey: (id: string) => (event: ReactKeyboardEvent<HTMLElement>) => {
+      const from = ids.indexOf(id)
+      const to = event.key === "ArrowUp" ? from - 1 : event.key === "ArrowDown" ? from + 1 : -1
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return
+      event.preventDefault()
+      if (from < 0 || to < 0 || to >= ids.length) return
+      void commit(moveInList(ids, from, to))
+      setStatus(`Événement placé en position ${to + 1} sur ${ids.length}.`)
+      window.requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-event-handle="${CSS.escape(id)}"]`)?.focus())
+    },
+  }
+}
+
+/** La poignée d'un événement rangeable (glisser, ou ↑ ↓ au clavier). */
+export function EventDragHandle({ id, onKeyDown, className }: { id: string; onKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => void; className?: string }) {
+  return <button type="button" data-event-handle={id} onKeyDown={onKeyDown} onClick={(event) => event.preventDefault()}
+    aria-label="Déplacer l’événement : flèches haut et bas" title="Glisser pour changer l’ordre (ou ↑ ↓ au clavier)"
+    className={cn("flex size-5 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground/70 outline-none transition-colors hover:bg-tone/10 hover:text-tone focus-visible:ring-2 focus-visible:ring-ring/50 active:cursor-grabbing", className)}>
+    <GripVertical className="size-3.5" aria-hidden />
+  </button>
+}
+
+/** Le trait qui montre où l'événement tiré va se poser. */
+export function EventDropLine({ at }: { at: "before" | "after" | null }) {
+  if (!at) return null
+  return <span className={cn("pointer-events-none absolute inset-x-1 z-10 h-[3px] rounded-full bg-tone shadow-[0_0_0_2px_var(--card)]", at === "before" ? "-top-[2px]" : "-bottom-[2px]")} aria-hidden />
 }
 
 /** Cocher ou décocher une étape de quête : cochée dans la session affichée. */
@@ -332,7 +456,9 @@ function writeOpened(scope: string, opened: Set<string>) {
   try { window.localStorage.setItem(openedKey(scope), JSON.stringify([...opened])) } catch { /* confort seulement */ }
 }
 
-function NoteRow({ note, sessionNumber, canEdit, linkLabel, onEdit, onDelete, onJump, onTick, expanded, onToggle, flash, order, author }: {
+function NoteRow({ note, sessionNumber, canEdit, linkLabel, onEdit, onDelete, onJump, onTick, expanded, onToggle, flash, order, author, drag }: {
+  /** Événement rangeable : la poignée et le glisser-déposer (voir useSessionEventOrder). */
+  drag?: ReturnType<typeof useSessionEventOrder>
   /** Qui l'a écrite, en étiquette : le personnage de l'auteur dans la session, ou « MJ - pseudo ». */
   author: string
   note: SessionNote
@@ -359,8 +485,12 @@ function NoteRow({ note, sessionNumber, canEdit, linkLabel, onEdit, onDelete, on
     : citation && note.title ? `— ${note.title}`
     : quest ? (quest.done ? (quest.doneIn && quest.doneIn !== note.sessionId ? `accomplie · cochée en S${sessionNumber(quest.doneIn)}` : "accomplie") : "en cours")
     : ""
-  return <li id={`note-${note.id}`} tabIndex={-1} style={tone(type.color)} className={cn("scroll-mt-6 rounded-lg border border-transparent outline-none transition-colors", expanded ? "border-border/80 bg-background/80 shadow-xs" : "hover:bg-background/60", flash && "journal-flash")}>
-    <div className="flex items-start gap-2 py-1.5 pl-1.5 pr-1">
+  const sortable = Boolean(drag?.active && note.type === "evenement")
+  return <li id={`note-${note.id}`} tabIndex={-1} style={tone(type.color)} {...(sortable ? drag?.item(note.id) : {})}
+    className={cn("group/note relative scroll-mt-6 rounded-lg border border-transparent outline-none transition-colors", expanded ? "border-border/80 bg-background/80 shadow-xs" : "hover:bg-background/60", flash && "journal-flash", sortable && drag?.isDragging(note.id) && "opacity-45")}>
+    {sortable && <EventDropLine at={drag?.line(note.id) ?? null} />}
+    <div className={cn("flex items-start gap-2 py-1.5 pl-1.5 pr-1", sortable && "gap-1.5 pl-0.5")}>
+      {sortable && drag && <EventDragHandle id={note.id} onKeyDown={drag.onHandleKey(note.id)} className="opacity-50 group-hover/note:opacity-100 focus-visible:opacity-100" />}
       {quest ? <QuestCheckbox className="mt-px" checked={quest.done} disabled={!canEdit} onChange={onTick} label={`${sessionNoteLabel(note, 60)} : accomplie`} />
         : <span className="mt-px flex size-5 shrink-0 items-center justify-center rounded-md bg-tone/12 text-tone" aria-hidden><TypeIcon className="size-3" /></span>}
       <button type="button" onClick={onToggle} aria-expanded={expanded} className="group/row flex min-w-0 flex-1 items-start gap-1.5 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
@@ -442,7 +572,7 @@ export function SessionNotesBoard({ campaignId, sessions, sessionId, notes, onNo
   const number = useMemo(() => new Map(sessions.map((session, index) => [session.id, index + 1])), [sessions])
   const sessionNumber = (value: string) => number.get(value) ?? 0
   const folded = fold(search)
-  const here = notes.filter((note) => note.sessionId === sessionId)
+  const here = sessionNotesOf(notes, sessionId)
   const counts = new Map<SessionNoteType, number>()
   for (const note of here) counts.set(note.type, (counts.get(note.type) ?? 0) + 1)
   // Un filtre sans note dans cette session (après un changement de session) ne cache rien.
@@ -451,7 +581,14 @@ export function SessionNotesBoard({ campaignId, sessions, sessionId, notes, onNo
     .filter((note) => !activeFilter || note.type === activeFilter)
     .filter((note) => !folded || fold(`${note.title} ${note.text} ${note.moment} ${note.authorName} ${authorLabel ? authorLabel(note) : ""}`).includes(folded))
   const groups = sessionNoteTypes.map((type) => ({ type, notes: visible.filter((note) => note.type === type.key) })).filter((group) => group.notes.length)
-  const eventOrder = new Map(here.filter((note) => note.type === "evenement").map((note, index) => [note.id, index + 1]))
+  const sessionEvents = here.filter((note) => note.type === "evenement")
+  const eventOrder = new Map(sessionEvents.map((note, index) => [note.id, index + 1]))
+  // Les événements se rangent en les glissant, quand toute la frise se voit (sans recherche ni
+  // filtre) et que le lecteur peut tous les modifier.
+  const drag = useSessionEventOrder({
+    campaignId, sessionId, notes, events: sessionEvents, onNotesChange, onError: setError,
+    enabled: !folded && !activeFilter && sessionEvents.every((note) => canEditSessionNote(note, viewer)),
+  })
   const toggleGroup = (key: string, open: boolean) => setOpened((current) => {
     const next = new Set(current)
     if (open) next.add(key); else next.delete(key)
@@ -536,6 +673,7 @@ export function SessionNotesBoard({ campaignId, sessions, sessionId, notes, onNo
       {toolbar}
     </div>
     {error && <p className="mt-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive" role="alert">{error}</p>}
+    <span className="sr-only" aria-live="polite">{drag.status}</span>
     {groups.length ? <ul className="mt-2.5 space-y-0.5">{groups.map(({ type, notes: list }) => {
       const open = filtering || opened.has(type.key)
       const GroupIcon = noteTypeIcons[type.key]
@@ -549,7 +687,7 @@ export function SessionNotesBoard({ campaignId, sessions, sessionId, notes, onNo
           </summary>
           <ul className="mb-1.5 space-y-px">{list.map((note) => <NoteRow key={note.id} note={note} sessionNumber={sessionNumber} canEdit={canEditSessionNote(note, viewer)} linkLabel={linkLabel}
             expanded={expanded.has(note.id)} onToggle={() => toggleNote(note.id)} onJump={jump} flash={flash === note.id} order={eventOrder.get(note.id) ?? 0}
-            onTick={(done) => void tick(note, done)} onEdit={() => setDraft({ ...note })} onDelete={() => void remove(note)} author={authorLabel ? authorLabel(note) : note.authorName} />)}</ul>
+            onTick={(done) => void tick(note, done)} onEdit={() => setDraft({ ...note })} onDelete={() => void remove(note)} author={authorLabel ? authorLabel(note) : note.authorName} drag={drag} />)}</ul>
         </details>
       </li>
     })}</ul>

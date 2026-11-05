@@ -3052,7 +3052,8 @@ const NPC_LAST_COLUMN = columnName(npcSheetHeaders.length)
 export const campaignEventSheetHeaders = ["ID", "ID campagne", "Type", "Référence", "Nom", "Icône", "Image", "Étiquette", "Couleur", "Description", "Créé par", "Créé le", "Modifié le"]
 // Les documents d'une campagne (page Document) : le fond et les zones de texte (JSON), le rendu dans Drive.
 export const campaignDocumentSheetHeaders = ["ID", "ID campagne", "ID session", "Titre", "Fond (JSON)", "Contenu (JSON)", "Version du rendu", "Créé par", "Créé le", "Modifié le"]
-export const sessionNoteSheetHeaders = ["ID", "ID campagne", "ID session", "Visibilité", "ID personnage", "Type", "Titre", "Texte", "Moment", "Liens (JSON)", "Quête (JSON)", "Auteur", "UID auteur", "Créé le", "Modifié le"]
+export const sessionNoteSheetHeaders = ["ID", "ID campagne", "ID session", "Visibilité", "ID personnage", "Type", "Titre", "Texte", "Moment", "Liens (JSON)", "Quête (JSON)", "Auteur", "UID auteur", "Créé le", "Modifié le", "Ordre"]
+// « Ordre » : la place d'un événement dans la frise de sa session, ajoutée à droite.
 // « Cachés (JSON) » : ce que le MJ n'a pas encore révélé aux joueurs (lib/session-reveal.ts), ajouté à droite.
 export const sessionSheetHeaders = ["ID", "ID campagne", "Titre", "Bannière", "Personnages (JSON)", "PNJs (JSON)", "Magasins (JSON)", "Créée par", "Créée le", "Modifiée le", "Lieux de la session", "Document", "Événements (JSON)", "Cachés (JSON)", "Lieux liés (JSON)", "Calendrier", "Date de début", "Date de fin"]
 
@@ -3208,7 +3209,7 @@ export const jdrSheetDefinitions: StructuredSheetDefinition[] = [
     tabName: "Notes",
     frozenColumns: 3,
     headers: sessionNoteSheetHeaders,
-    columnWidths: [180, 180, 180, 110, 180, 120, 220, 480, 140, 260, 220, 160, 190, 170, 170],
+    columnWidths: [180, 180, 180, 110, 180, 120, 220, 480, 140, 260, 220, 160, 190, 170, 170, 80],
   },
   {
     key: "tabletop",

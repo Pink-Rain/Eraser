@@ -131,6 +131,16 @@
   posé sur `<body>` à l'ouverture d'une fenêtre : chacun refait le style de toute la page. Les
   retouches de Radix et de trystero dans `vite.config.ts` sont à vérifier à toute montée de version.
 
+## Polices
+
+- L'interface est en IM Fell (texte : Double Pica ; titres `.font-display` : Double Pica SC ;
+  variantes `font-english`, `font-english-sc`, `font-dw`, `font-dw-sc`, `font-sc`), embarquée
+  dans `public/polices` et déclarée dans `app/globals.css` (`size-adjust` la ramène à la taille de
+  lecture). Les chiffres viennent d'« Eraser Chiffres » (EB Garamond, chiffres seuls) : le « 1 »
+  d'IM Fell se lit « I ». Garder « Eraser Chiffres » en tête de chaque pile.
+- Les polices des documents (`lib/document-model.ts`) sont à part : ne pas leur appliquer de
+  `size-adjust` ni réutiliser leur nom de famille (d'où « Eraser IM Fell English » pour l'interface).
+
 ## Tokens
 
 - Les cadres des tokens sont des images (`public/token-frames`), rendues une fois par le moteur

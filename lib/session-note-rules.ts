@@ -54,6 +54,11 @@ export type SessionNote = {
   moment: string
   links: string[]
   quest: SessionQuest | null
+  /**
+   * Événement : sa place dans la frise de sa session (1, 2, 3…), posée en le glissant ; 0 tant
+   * qu'il n'a jamais été rangé (il suit alors l'ordre d'écriture, après les événements rangés).
+   */
+  order: number
   authorName: string
   authorUid: string
   createdAt: string
@@ -64,6 +69,11 @@ export type SessionNoteViewer = { uid: string; manager: boolean }
 
 const text = (value: unknown, max: number) => typeof value === "string" ? value.slice(0, max) : ""
 const line = (value: unknown, max: number) => text(value, max * 2).replace(/\s+/g, " ").trim().slice(0, max)
+
+const eventOrder = (value: unknown) => {
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number(value.trim()) : NaN
+  return Number.isInteger(number) && number > 0 && number < 100_000 ? number : 0
+}
 
 /** Une note propre : champs connus, longueurs bornées, liens dédoublonnés ; `null` si inutilisable. */
 export function cleanSessionNote(value: unknown): SessionNote | null {
@@ -90,6 +100,7 @@ export function cleanSessionNote(value: unknown): SessionNote | null {
     moment: line(raw.moment, 60),
     links: links.filter((link) => link !== `note:${id}`),
     quest: type === "quete" ? { done: questRaw?.done === true, doneIn: line(questRaw?.doneIn, 120), after: line(questRaw?.after, 80) } : null,
+    order: type === "evenement" ? eventOrder(raw.order) : 0,
     authorName: line(raw.authorName, 80),
     authorUid: line(raw.authorUid, 160),
     createdAt: line(raw.createdAt, 40),
@@ -105,6 +116,37 @@ export function canReadSessionNote(note: Pick<SessionNote, "private" | "authorUi
 /** Chacun modifie ses notes ; le MJ et l'admin modifient aussi les notes publiques des autres. */
 export function canEditSessionNote(note: Pick<SessionNote, "private" | "authorUid">, viewer: SessionNoteViewer) {
   return note.authorUid === viewer.uid || (!note.private && viewer.manager)
+}
+
+/**
+ * L'ordre des notes : les événements rangés à la main d'abord (par leur place), puis tout le
+ * reste dans l'ordre d'écriture. Un événement ajouté après un rangement arrive donc à la fin
+ * de la frise, où on peut le glisser à sa place.
+ */
+export function compareSessionNotes(left: Pick<SessionNote, "order" | "createdAt">, right: Pick<SessionNote, "order" | "createdAt">) {
+  if (left.order && right.order && left.order !== right.order) return left.order - right.order
+  if (Boolean(left.order) !== Boolean(right.order)) return left.order ? -1 : 1
+  return left.createdAt.localeCompare(right.createdAt)
+}
+
+/** Les notes de la session, dans l'ordre du journal (frise comprise). */
+export function sessionNotesOf<T extends Pick<SessionNote, "sessionId" | "order" | "createdAt">>(notes: T[], sessionId: string) {
+  return notes.filter((note) => note.sessionId === sessionId).sort(compareSessionNotes)
+}
+
+/** La liste où l'élément à la place `from` est posé à la place `to` (les autres glissent). */
+export function moveInList<T>(list: T[], from: number, to: number) {
+  if (from === to || from < 0 || from >= list.length) return list
+  const next = [...list]
+  const [moved] = next.splice(from, 1)
+  next.splice(Math.max(0, Math.min(to, next.length)), 0, moved)
+  return next
+}
+
+/** Les notes avec la frise rangée dans l'ordre `ids` (places 1, 2, 3…) ; le reste ne bouge pas. */
+export function withSessionEventOrder<T extends Pick<SessionNote, "id" | "order">>(notes: T[], ids: string[]) {
+  const place = new Map(ids.map((id, index) => [id, index + 1]))
+  return notes.map((note) => place.has(note.id) && place.get(note.id) !== note.order ? { ...note, order: place.get(note.id)! } : note)
 }
 
 /** Le texte court d'une note (titre, sinon début du texte). */

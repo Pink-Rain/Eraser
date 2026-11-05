@@ -511,7 +511,7 @@ function DonutResult(ctx: Ctx) {
         <title>{`${statKeyLabel(part)} — ${formatStatNumber(part.value)} (${Math.round(((part.value ?? 0) / sum) * 100)} %)`}</title>
       </Hit>
     })}
-    <text x="120" y="124" textAnchor="middle" fontFamily="Georgia, serif" fontSize="30" fill="currentColor">{formatStatNumber(total)}</text>
+    <text x="120" y="124" textAnchor="middle" fontFamily="'Eraser Chiffres', 'IM Fell DW Pica', Georgia, serif" fontSize="30" fill="currentColor">{formatStatNumber(total)}</text>
     {!compact && <text x="120" y="146" textAnchor="middle" fontSize="12" fill={INK_2}>{stat.measure === "count" ? unitWord(prep.size) : measureWord(stat)}</text>}
   </svg>
   if (compact) return <div className="flex items-center gap-3">{ring}<ul className="grid min-w-0 gap-0.5 text-xs">{parts.slice(0, 4).map((part) => <li key={part.key} className="flex min-w-0 items-center gap-1.5"><span className="size-2.5 shrink-0 rounded-sm" style={{ backgroundColor: colorFor(part) }} /><span className="truncate">{statKeyLabel(part)}</span></li>)}</ul></div>
@@ -1010,7 +1010,7 @@ const A = SEQ
 const B = LINE
 const C = "#d07a12"
 const FORM_ICONS: Record<StatForm, ReactNode> = {
-  number: <><text x="20" y="18" textAnchor="middle" fontFamily="Georgia, serif" fontSize="15" fill={INK}>42</text><rect x="13" y="22" width="14" height="2.5" rx="1" fill={A} /></>,
+  number: <><text x="20" y="18" textAnchor="middle" fontFamily="'Eraser Chiffres', 'IM Fell DW Pica', Georgia, serif" fontSize="15" fill={INK}>42</text><rect x="13" y="22" width="14" height="2.5" rx="1" fill={A} /></>,
   gauge: <><rect x="3" y="11" width="34" height="7" rx="3.5" fill={B} /><rect x="3" y="11" width="22" height="7" rx="3.5" fill={A} /></>,
   histogram: <>{[5, 11, 18, 13, 7, 3].map((h, i) => <rect key={i} x={4 + i * 5.4} y={25 - h} width="5" height={h} fill={A} />)}</>,
   scatter: <>{[[8, 20], [12, 15], [17, 17], [21, 10], [26, 12], [31, 6], [14, 9], [28, 19]].map(([x, y], i) => <circle key={i} cx={x} cy={y} r="2.2" fill={A} />)}</>,

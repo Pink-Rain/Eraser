@@ -795,7 +795,7 @@ export function AppShell({
               </DropdownMenuContent>
             </DropdownMenu>
             <div className="min-w-0 group-data-[collapsible=icon]:hidden">
-              <p className="font-display truncate text-lg font-semibold tracking-wide">Eraser</p>
+              <p className="font-english-sc truncate text-xl tracking-wide">Eraser</p>
               <p className="truncate text-[11px] uppercase tracking-[0.2em] text-sidebar-foreground/55">
                 Carnet de campagne
               </p>

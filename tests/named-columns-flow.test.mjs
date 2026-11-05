@@ -586,3 +586,40 @@ test("Notes de session : publiques pour la table, privées pour leur seul auteur
   await notesModule.saveSessionNote("CAMP-N", { sessionId: "S-2", type: "rumeur", text: "On dit que…" }, brin, sessions);
   assert.equal(google.grid(sheet, "Notes").length, 5);
 });
+
+test("Notes de session : la frise se range en glissant, colonne « Ordre » ajoutée à droite, droits vérifiés", async () => {
+  const notesModule = await vite.ssrLoadModule("/lib/session-notes.ts");
+  const sheet = fresh("notes-frise");
+  google.addSpreadsheet(sheet, [{ title: "Notes", grid: [["ID", "ID campagne", "ID session", "Visibilité", "ID personnage", "Type", "Titre", "Texte", "Moment", "Liens (JSON)", "Quête (JSON)", "Auteur", "UID auteur", "Créé le", "Modifié le"]] }]);
+  await link("session_notes", sheet, "Notes");
+  const sessions = ["S-1", "S-2"];
+  const aelis = { uid: "aelis", manager: false, name: "Aelis" };
+  const mj = { uid: "mj", manager: true, name: "MJ" };
+  const write = (title, who = mj, sessionId = "S-1") => notesModule.saveSessionNote("CAMP-F", { sessionId, type: "evenement", title, text: title }, who, sessions);
+  const embuscade = await write("Embuscade");
+  const auberge = await write("Auberge", aelis);
+  const pont = await write("Le pont");
+  const ailleurs = await write("Ailleurs", mj, "S-2");
+  const frise = async () => notesModule.sessionNotesOf(await notesModule.listSessionNotes("CAMP-F", mj), "S-1").map((note) => note.title);
+  assert.deepEqual(await frise(), ["Embuscade", "Auberge", "Le pont"]);
+  // Aelis ne range pas une frise qui contient les événements du MJ ; un ordre faux est refusé.
+  await assert.rejects(notesModule.reorderSessionEvents("CAMP-F", "S-1", [pont.id, embuscade.id, auberge.id], aelis), /NOTE_FORBIDDEN/);
+  await assert.rejects(notesModule.reorderSessionEvents("CAMP-F", "S-1", [pont.id, pont.id], mj), /INVALID_ORDER/);
+  await assert.rejects(notesModule.reorderSessionEvents("CAMP-F", "S-1", [pont.id, ailleurs.id], mj), /NOTE_NOT_FOUND/);
+  await assert.rejects(notesModule.reorderSessionEvents("CAMP-AUTRE", "S-1", [pont.id], mj), /NOTE_NOT_FOUND/);
+  // Le MJ la range : seules les lignes déplacées sont écrites, la colonne « Ordre » arrive à droite.
+  const moved = await notesModule.reorderSessionEvents("CAMP-F", "S-1", [pont.id, embuscade.id, auberge.id], mj);
+  assert.deepEqual(moved.map((note) => [note.title, note.order]), [["Le pont", 1], ["Embuscade", 2], ["Auberge", 3]]);
+  assert.deepEqual(await frise(), ["Le pont", "Embuscade", "Auberge"]);
+  const grid = google.grid(sheet, "Notes");
+  assert.equal(grid[0][15], "Ordre");
+  assert.equal(record(grid, 1)["Ordre"], "2");
+  assert.equal(record(grid, 4)["Ordre"], undefined);
+  // Modifier un événement garde sa place ; un nouveau arrive au bout ; changé de session, il repart au bout.
+  await notesModule.saveSessionNote("CAMP-F", { ...pont, text: "Le pont s'effondre", order: 9 }, mj, sessions);
+  await write("Retour");
+  assert.deepEqual(await frise(), ["Le pont", "Embuscade", "Auberge", "Retour"]);
+  const parti = await notesModule.saveSessionNote("CAMP-F", { ...embuscade, sessionId: "S-2" }, mj, sessions);
+  assert.equal(parti.order, 0);
+  assert.deepEqual(await frise(), ["Le pont", "Auberge", "Retour"]);
+});
