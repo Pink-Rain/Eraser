@@ -20,10 +20,79 @@
  * « 11 » « II »). « Eraser Chiffres » prend les seuls chiffres (unicode-range 0-9) d'EB
  * Garamond, de la même famille de caractères ; il est en tête de chaque pile ci-dessous.
  *
+ * Deux polices qui tranchent, chacune à sa place : Cinzel (capitales gravées) pour les grands
+ * titres (`h1.font-display`, `.font-title`), Alegreya Sans pour les petites étiquettes (9 à
+ * 11,5 px, libellés en capitales espacées, touches) où IM Fell devient pâteuse. Elles gardent
+ * leurs propres chiffres (Cinzel : modernes ; Alegreya Sans : modernes par « lnum »).
+ * « Eraser Cinzel » reprend le fichier des documents sous un autre nom, comme English.
+ *
  * « Eraser IM Fell English » reprend le fichier des documents sous un autre nom : les
  * documents gardent leur « IM Fell English » sans retouche (le rendu doit couper les lignes
  * comme l'éditeur, voir components/eraser/document-render.ts).
  */
+@font-face {
+  font-family: "Eraser Cinzel";
+  src: url("/documents/polices/cinzel-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  size-adjust: 90%;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Eraser Cinzel";
+  src: url("/documents/polices/cinzel-latin-700-normal.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  size-adjust: 90%;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Eraser Alegreya Sans";
+  src: url("/polices/alegreya-sans-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  size-adjust: 106%;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Eraser Alegreya Sans";
+  src: url("/polices/alegreya-sans-latin-400-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+  size-adjust: 106%;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Eraser Alegreya Sans";
+  src: url("/polices/alegreya-sans-latin-500-normal.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  size-adjust: 106%;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Eraser Alegreya Sans";
+  src: url("/polices/alegreya-sans-latin-700-normal.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  size-adjust: 106%;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Eraser Alegreya Sans";
+  src: url("/polices/alegreya-sans-latin-800-normal.woff2") format("woff2");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+  size-adjust: 106%;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 @font-face {
   font-family: "Eraser Chiffres";
   src: url("/polices/eb-garamond-latin-400-normal.woff2") format("woff2");
@@ -236,6 +305,8 @@
   --font-english-sc: "Eraser Chiffres", "IM Fell English SC", "IM Fell Double Pica SC", Georgia, serif;
   --font-dw: "Eraser Chiffres", "IM Fell DW Pica", "IM Fell Double Pica", Georgia, serif;
   --font-dw-sc: "Eraser Chiffres", "IM Fell DW Pica SC", "IM Fell Double Pica SC", Georgia, serif;
+  --font-title: "Eraser Cinzel", "IM Fell Double Pica SC", Georgia, serif;
+  --font-label: "Eraser Alegreya Sans", "Segoe UI", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "Courier New", monospace;
 }
@@ -256,6 +327,22 @@ body {
 
 .font-display {
   font-family: var(--font-display);
+}
+
+/* Les grands titres : Cinzel, un peu espacé (les titres serrés d'avant l'étouffaient). */
+h1.font-display,
+.font-title {
+  font-family: var(--font-title);
+  letter-spacing: 0.01em;
+}
+
+/*
+ * Les petites étiquettes : Alegreya Sans, chiffres modernes. `:where` garde la règle faible ;
+ * une police choisie exprès (titre, empattement, chasse fixe…) reste la sienne.
+ */
+:where(.text-\[9px\], .text-\[9\.5px\], .text-\[10px\], .text-\[10\.5px\], .text-\[11px\], .text-\[11\.5px\], .uppercase[class*="tracking-"], kbd):not(.font-display, .font-title, .font-serif, .font-mono, .font-sc, .font-english, .font-english-sc, .font-dw, .font-dw-sc) {
+  font-family: var(--font-label);
+  font-feature-settings: "lnum" 1;
 }
 
 /* Les petites capitales n'ont pas d'italique : un titre en italique prend l'italique d'English. */

@@ -1,27 +1,22 @@
-# Eraser 0.1.1-alpha.263 — Le grain de l'imprimerie
+# Eraser 0.1.1-alpha.264 — Gravé et lisible
 
-Cette version arrive **sans réinstallation** (enveloppe 10, comme l'alpha 262) : Eraser la
-télécharge, redémarre son serveur et recharge la page tout seul. Dans Google Sheets, la feuille
-« Notes de session » gagne une colonne « Ordre », ajoutée à droite la première fois qu'on range
-une frise : rien n'est déplacé ni effacé.
+Cette version arrive **sans réinstallation** (enveloppe 10, comme l'alpha 263) : Eraser la
+télécharge, redémarre son serveur et recharge la page tout seul. Rien ne change dans Google Sheets.
 
-- **Les événements se rangent en les glissant** : dans le journal de campagne, la frise de la
-  session et le groupe « Événements » des notes se réordonnent au glisser-déposer. Un trait montre
-  où l'événement va se poser ; la frise change tout de suite, et revient comme avant (avec un
-  message) si l'enregistrement est refusé. Au clavier : la poignée ⋮⋮ puis ↑ ↓. Un événement ajouté
-  après coup arrive au bout de la frise, prêt à être glissé à sa place ; le modifier ne le déplace
-  pas. Les autres pages ouvertes sur la campagne voient le nouvel ordre aussitôt. Ça marche aussi
-  pour les notes privées d'un personnage dans sa fiche.
-- **Qui range** : le MJ, ou un joueur quand tous les événements de la session sont les siens (le
-  serveur le vérifie). Pendant une recherche ou un filtre, la liste n'est que partielle : on ne
-  range pas.
-- **Nouvelles polices** : tout Eraser passe à la famille IM Fell, embarquée dans l'application
-  (rien à télécharger en ligne). Texte en IM Fell Double Pica, titres en IM Fell Double Pica SC
-  (petites capitales) ; par touches, IM Fell English (« Avec empattement » des index, lettrines,
-  citations en italique), IM Fell English SC (en-tête des bannières, marque « Eraser ») et IM Fell
-  DW Pica (grands nombres des statistiques). Leur taille est réglée pour se lire comme avant, sans
-  rien faire déborder.
-- **Des chiffres qu'on lit** : les chiffres d'IM Fell sont à l'ancienne, leur « 1 » ressemble à un
-  « I » (« S1 » se lisait « SI », « 11 » « II »). Les chiffres seuls viennent d'EB Garamond, de la
-  même famille de caractères : niveaux, PV, dates et numéros de session restent nets.
-- Les documents de campagne gardent exactement leurs polices et leurs retours à la ligne.
+L'alpha 263 a habillé Eraser en IM Fell. Celle-ci ajoute deux polices qui tranchent avec elle,
+chacune à une seule place, pour que l'œil sache où il est :
+
+- **Cinzel pour les grands titres** : les titres de page et le titre de la session dans la
+  bannière du journal passent en capitales gravées, façon inscription romaine, avec leur vrai
+  gras. Les autres titres (sections, cartes, notes) restent en IM Fell Double Pica SC : la
+  hiérarchie se lit d'un coup d'œil. La taille est réglée pour que les titres longs tiennent,
+  y compris sur un petit écran.
+- **Alegreya Sans pour les petites étiquettes** : tout ce qui est écrit très petit (compteurs,
+  libellés en capitales comme « ÉVÉNEMENTS » ou « GROUPE », moments de la frise, « n°1 », touches
+  du clavier) passe dans une sans-serif aux racines calligraphiques, nette à 10 px, là où IM Fell
+  devenait pâteuse. Ses chiffres sont modernes : « 1 », « 11 », « 21 » sans hésitation.
+- Le texte courant reste en IM Fell Double Pica, avec les chiffres d'EB Garamond. Une police
+  choisie exprès (« Avec empattement », « Titre » dans les index…) reste la sienne. Les documents
+  de campagne gardent exactement leurs polices et leurs retours à la ligne.
+- Bannière du journal : l'en-tête « Journal de… » est un peu plus petit sur téléphone, pour ne
+  plus toucher le bord.

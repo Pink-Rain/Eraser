@@ -138,6 +138,10 @@
   dans `public/polices` et déclarée dans `app/globals.css` (`size-adjust` la ramène à la taille de
   lecture). Les chiffres viennent d'« Eraser Chiffres » (EB Garamond, chiffres seuls) : le « 1 »
   d'IM Fell se lit « I ». Garder « Eraser Chiffres » en tête de chaque pile.
+- Deux polices qui tranchent, à leur place seulement : Cinzel (« Eraser Cinzel », `font-title`)
+  pour les `h1.font-display` et le titre de la bannière du journal ; Alegreya Sans (`font-label`)
+  pour les petites étiquettes (`text-[9px]` à `text-[11.5px]`, `uppercase tracking-*`, `kbd`),
+  par une règle `:where(…)` de `app/globals.css`. Une police posée exprès sur l'élément gagne.
 - Les polices des documents (`lib/document-model.ts`) sont à part : ne pas leur appliquer de
   `size-adjust` ni réutiliser leur nom de famille (d'où « Eraser IM Fell English » pour l'interface).
 

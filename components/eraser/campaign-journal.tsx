@@ -437,7 +437,7 @@ function BannerOrnament() {
 }
 
 function Eyebrow({ children }: { children: ReactNode }) {
-  return <p className="flex items-center justify-center gap-2.5 font-english-sc text-[14px] tracking-[0.12em] text-banner-ink/90 sm:gap-3 sm:tracking-[0.14em]">
+  return <p className="flex items-center justify-center gap-2.5 font-english-sc text-[12.5px] tracking-[0.1em] text-banner-ink/90 sm:gap-3 sm:text-[14px] sm:tracking-[0.14em]">
     <span className="h-px w-5 bg-current opacity-60 sm:w-8" aria-hidden /><BookOpen className="size-3.5 shrink-0" aria-hidden /><span className="min-w-0 truncate">{children}</span><span className="h-px w-5 bg-current opacity-60 sm:w-8" aria-hidden />
   </p>
 }
@@ -773,7 +773,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
                 <PopoverTrigger asChild>
                   <button type="button" className="group/title min-w-0 rounded-2xl px-2 py-1.5 outline-none transition-colors hover:bg-banner-ink/8 focus-visible:ring-2 focus-visible:ring-white/80 sm:px-4" aria-label={`S${index + 1} - ${current.name}. Ouvrir la liste des sessions`}>
                     <span className="block text-[10.5px] font-semibold uppercase tracking-[0.2em] text-banner-ink/75">{index === sessions.length - 1 ? "Dernière session" : `Session ${index + 1} sur ${sessions.length}`}</span>
-                    <span className="mt-1 block text-balance font-display text-[1.7rem] font-semibold leading-[1.12] tracking-[-0.01em] [text-shadow:0_2px_14px_rgb(0_0_0/0.3)] sm:text-[2.1rem] lg:text-[2.6rem]">
+                    <span className="mt-1 block text-balance font-title text-[1.55rem] font-semibold leading-[1.12] [text-shadow:0_2px_14px_rgb(0_0_0/0.3)] sm:text-[1.9rem] lg:text-[2.3rem]">
                       <span className="text-banner-gold">S{index + 1}</span> — {current.name}
                     </span>
                     <span className="mt-1.5 inline-flex items-center gap-1.5 text-[12.5px] text-banner-ink/80">
