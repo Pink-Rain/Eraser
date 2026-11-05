@@ -106,6 +106,8 @@ type PickerProps = {
   trusted?: boolean
   /** Le menu s'ouvre ou se ferme (une colonne liée ne charge ses noms qu'ouverte, et enregistre en refermant). */
   onOpenChange?: (open: boolean) => void
+  /** Ce qu'affiche la case vide (« — » par défaut). */
+  emptyLabel?: string
 }
 
 /** Une valeur de liste en pastille, à la couleur de son option (ou de son groupe). */
@@ -127,7 +129,7 @@ function ChoicePill({ value, option, group, outside, renderValue, boxed = false,
  * hors liste reste affichée en italique, pour ne jamais être effacée par mégarde.
  * À choix multiple, un clic coche ou décoche une option et le menu reste ouvert.
  */
-export function ChoicePicker({ label, value, options, onChange, disabled = false, loading = false, allowCustom = false, multiple = false, groups = [], onCreate, createLabel, compact = true, renderValue, separator, strict = false, trusted = false, onOpenChange }: PickerProps) {
+export function ChoicePicker({ label, value, options, onChange, disabled = false, loading = false, allowCustom = false, multiple = false, groups = [], onCreate, createLabel, compact = true, renderValue, separator, strict = false, trusted = false, onOpenChange, emptyLabel = "—" }: PickerProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [creating, setCreating] = useState(false)
@@ -235,7 +237,7 @@ export function ChoicePicker({ label, value, options, onChange, disabled = false
 
   const closed = values.length
     ? <span className={`flex min-w-0 ${multiple || modes ? "flex-wrap gap-1 py-1" : ""} items-center`}>{current.map((item, index) => <span key={`${item.raw}:${index}`} className="contents">{modes && index > 0 && <span className="text-muted-foreground">|</span>}<ChoicePill value={item.option?.value ?? item.raw} option={item.option} group={groupOf(item.option)} outside={!item.option && !trusted} renderValue={renderValue} boxed={multiple && current.length > 1} strict={strict} /></span>)}</span>
-    : <span className="text-muted-foreground">—</span>
+    : <span className="text-muted-foreground">{emptyLabel}</span>
 
   const optionButton = (hit: ChoiceHit<ChoiceOption>, index: number) => <button
     key={hit.option.value}
@@ -517,7 +519,7 @@ function linkedNamesOf(value: string) {
  * dans un tableau), et les choix ne sont enregistrés qu'en refermant : une seule écriture,
  * et une seule mise à jour des colonnes d'en face, pour plusieurs noms ajoutés.
  */
-export function LinkedNamesPicker({ sources, value, onChange, label, compact = true, disabled = false }: { sources: ChoiceSource[]; value: string; onChange: (value: string) => void; label: string; compact?: boolean; disabled?: boolean }) {
+export function LinkedNamesPicker({ sources, value, onChange, label, compact = true, disabled = false, placeholder }: { sources: ChoiceSource[]; value: string; onChange: (value: string) => void; label: string; compact?: boolean; disabled?: boolean; /** Ce qu'affiche la case vide. */ placeholder?: string }) {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState<string | null>(null)
   const [shown, setShown] = useOptimistic(linkedNamesOf(value))
@@ -545,6 +547,7 @@ export function LinkedNamesPicker({ sources, value, onChange, label, compact = t
     compact={compact}
     disabled={disabled}
     createLabel={target}
+    emptyLabel={placeholder}
     // Le nom est créé par le serveur en enregistrant la case (avec la colonne qui répond en face).
     onCreate={async () => undefined}
     onOpenChange={(next) => { setOpen(next); if (!next) flush() }}
@@ -1421,7 +1424,7 @@ function IndexFieldOfType({ label, spec: input, value, onChange, long = false, a
     ? <span className="sr-only">{label}</span>
     : <span className={cn("flex items-center gap-1", labelLook?.className)} style={labelLook?.color ? { color: labelLook.color } : undefined}>{labelLook?.icon && <IndexIconGlyph icon={labelLook.icon} className="size-3.5" filled={false} />}{label}{spec.kind === "linked" && <Link2 className="size-3 text-primary" aria-label="Colonne liée" />}{spec.readOnly && <span className="font-normal text-muted-foreground" title="Lecture seule : se modifie ailleurs">· lecture seule</span>}{spec.description && <span className="font-normal text-muted-foreground" title={spec.description}>ⓘ</span>}</span>
   // Colonne liée ↔ dont la page connaît les onglets liés : les noms se choisissent dans une liste.
-  if (spec.kind === "linked" && spec.linkedFrom?.length) return <div className={`${fieldLabel} ${long ? "md:col-span-2" : ""}`}>{title}{styled(<LinkedNamesPicker compact={false} label={label} sources={spec.linkedFrom} value={value} disabled={disabled} onChange={onChange} />)}</div>
+  if (spec.kind === "linked" && spec.linkedFrom?.length) return <div className={`${fieldLabel} ${long ? "md:col-span-2" : ""}`}>{title}{styled(<LinkedNamesPicker compact={false} label={label} sources={spec.linkedFrom} value={value} disabled={disabled} placeholder={placeholder} onChange={onChange} />)}</div>
   switch (spec.kind) {
     case "choice":
       return <div className={fieldLabel}>{title}{styled(<ChoicePicker compact={false} label={label} value={value} options={spec.options ?? []} allowCustom={spec.allowCustom} multiple={spec.multiple} groups={spec.groups} disabled={disabled} onChange={onChange} />)}</div>

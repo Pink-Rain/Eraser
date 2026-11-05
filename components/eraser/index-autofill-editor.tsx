@@ -44,13 +44,15 @@ function sourceValues(source: Column, rows: string[], linked: string[]) {
 }
 
 /** Le champ d'une valeur : celui du type de la colonne, sans ce qui ne vaut que dans le tableau. */
-function fieldSpecOf(spec: IndexColumnSpec): IndexColumnSpec {
+function fieldSpecOf(spec: IndexColumnSpec, linkedFrom?: ChoiceSource[]): IndexColumnSpec {
   const field: IndexColumnSpec = { ...spec }
   for (const key of ["autoFill", "hidden", "readOnly", "placement", "defaultValue"] as const) delete field[key]
+  // Colonne liée ↔ : les noms se choisissent dans la liste de l'index d'en face, comme dans le tableau.
+  if (linkedFrom?.length) field.linkedFrom = linkedFrom
   return field
 }
 
-export function AutoFillSettingsEditor({ header, spec, columns, valuesOf, disabled, onChange, saved, fillOnSave, onFillOnSave, onFillNow }: {
+export function AutoFillSettingsEditor({ header, spec, columns, valuesOf, disabled, onChange, saved, fillOnSave, onFillOnSave, onFillNow, linkedFrom }: {
   /** La colonne réglée. */
   header: string
   spec: IndexColumnSpec
@@ -67,6 +69,8 @@ export function AutoFillSettingsEditor({ header, spec, columns, valuesOf, disabl
   onFillOnSave: (value: boolean) => void
   /** Remplit tout de suite les lignes existantes (réglage enregistré) ; renvoie le nombre de lignes changées. */
   onFillNow?: () => Promise<number>
+  /** Colonne liée ↔ : les onglets d'en face, d'où viennent les noms proposés pour chaque valeur. */
+  linkedFrom?: ChoiceSource[]
 }) {
   const settings = spec.autoFill
   const sources = columns.filter((column) => column.header.trim() && foldName(column.header) !== foldName(header) && canDecideAutoFill(column.spec) && !/^id$/i.test(column.header.trim()))
@@ -91,7 +95,7 @@ export function AutoFillSettingsEditor({ header, spec, columns, valuesOf, disabl
   const ruleOf = (value: string) => settings?.rules.find((rule) => foldName(rule.when) === foldName(value))
   const filtered = values.filter((value) => !query.trim() || foldName(value).includes(foldName(query)))
   const shown = showAll || query.trim() ? filtered : filtered.slice(0, SHOWN)
-  const fieldSpec = fieldSpecOf(spec)
+  const fieldSpec = fieldSpecOf(spec, linkedFrom)
 
   if (!canAutoFill(spec)) return null
 

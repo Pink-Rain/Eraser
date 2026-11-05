@@ -210,8 +210,10 @@ sont les mêmes réglages.
   fiche deviennent alors un `LinkedNamesPicker` (`index-cells.tsx`) au lieu d’un texte à
   virgules. Ses noms ne se chargent qu’à l’ouverture, ceux de l’index affiché viennent de la
   page (`provideWorldIndexData`, aucune relecture) ; les choix sont enregistrés en refermant, en
-  une écriture. Un nom absent est créé par le serveur à l’enregistrement, comme avant. Sans
-  `linkedFrom` (autres pages, remplissage automatique), la case reste du texte.
+  une écriture. Un nom absent est créé par le serveur à l’enregistrement, comme avant. Le
+  remplissage automatique (« Modifier ») reçoit les mêmes onglets (`linkedSourcesOf` passé à
+  `IndexEditor`, sinon le `link` réglé dans l’éditeur : `linkedFromOf`). Sans `linkedFrom`
+  (autres pages), la case reste du texte.
 
 ## Saisie des listes
 

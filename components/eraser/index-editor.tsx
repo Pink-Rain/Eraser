@@ -200,6 +200,24 @@ export function operationsOf(tabs: DraftTab[], originalTabOrder: string[] = []):
  * place, masquée ou non, et les onglets vers lesquels une ligne peut être déplacée.
  */
 /** Le remplissage automatique de deux réglages est-il le même (tel qu'il s'enregistre) ? */
+/**
+ * Colonne liée ↔ : d'où viennent les noms proposés dans l'éditeur. Les onglets d'en face connus
+ * de la page pour une colonne enregistrée (liens d'Eraser et réponses sur plusieurs onglets
+ * compris) ; sinon la réponse réglée ici (`link`).
+ */
+function linkedFromOf(spec: IndexColumnSpec, known: ChoiceSource[]): ChoiceSource[] | undefined {
+  if (spec.kind !== "linked") return undefined
+  if (known.length) return known
+  const link = spec.link
+  if (!link?.index) return undefined
+  return [link.tab === "*" || !link.tab ? { index: link.index, tab: "*" } : { index: link.index, tab: link.tab, onlyTab: true }]
+}
+
+function sameLink(spec: IndexColumnSpec, original: IndexColumnSpec) {
+  const [left, right] = [spec.link, original.link]
+  return !left && !right ? true : Boolean(left && right && left.index === right.index && left.tab === right.tab && foldName(left.column) === foldName(right.column))
+}
+
 function sameAutoFill(spec: IndexColumnSpec, original: IndexColumnSpec | undefined) {
   return JSON.stringify(cleanAutoFill(spec.autoFill) ?? null) === JSON.stringify(cleanAutoFill(original?.autoFill) ?? null)
 }
@@ -812,7 +830,7 @@ function useDragList<T extends { id: string }>(items: T[], onMove: (next: T[]) =
  * milieu, les réglages de la colonne choisie à droite, tous visibles. Rien n'est écrit
  * tant qu'on n'a pas enregistré ; le résumé dit exactement ce qui va changer.
  */
-export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {}, layouts = {}, onSaveLayouts, cardsIndex, cards = {}, onSaveCards, initialMode = "columns", initialTab, locks = {}, onSaveLocks, presentations = {}, onSavePresentations, viewPresets = [], onSaveViewPreset, onDeleteViewPreset, previewRows = {}, valuesOf, optionsOf, statsPanel, itemsPanel, stats = [], onFillAutoColumn }: {
+export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {}, layouts = {}, onSaveLayouts, cardsIndex, cards = {}, onSaveCards, initialMode = "columns", initialTab, locks = {}, onSaveLocks, presentations = {}, onSavePresentations, viewPresets = [], onSaveViewPreset, onDeleteViewPreset, previewRows = {}, valuesOf, optionsOf, linkedSourcesOf, statsPanel, itemsPanel, stats = [], onFillAutoColumn }: {
   model: IndexEditorModel
   open: boolean
   pending?: boolean
@@ -857,6 +875,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   previewRows?: Record<string, Array<Record<string, string>>>
   /** Les choix d'une colonne liste d'un onglet (couleurs des sections, du kanban). */
   optionsOf?: (tab: string, header: string) => Array<{ value: string; color?: string }>
+  /** Colonne liée ↔ enregistrée : les onglets d'en face, d'où viennent les noms proposés (remplissage automatique). */
+  linkedSourcesOf?: (tab: string, header: string) => ChoiceSource[]
   /** Les valeurs d'une colonne dans toutes les lignes de l'onglet (une par case), pas seulement celles des aperçus. */
   valuesOf?: (tab: string, header: string) => string[]
   /** Le constructeur des statistiques de l'index (onglet « Stats ») ; absent : pas d'onglet. */
@@ -1641,6 +1661,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               fillOnSave={fillOnSave[column.id] !== false}
               onFillOnSave={(value) => setFillOnSave((current) => ({ ...current, [column.id]: value }))}
               onFillNow={onFillAutoColumn && tab.original && column.original ? () => onFillAutoColumn(tab.original!, column.original!) : undefined}
+              linkedFrom={linkedFromOf(column.spec, linkedSourcesOf && tab.original && column.original && column.originalSpec?.kind === "linked" && sameLink(column.spec, column.originalSpec) ? linkedSourcesOf(tab.original, column.original) : [])}
             />
             <StyleSettings spec={column.spec} onChange={(spec) => updateColumn({ ...column, spec })} disabled={displayDisabled} colorColumns={tab.columns.filter((item) => item.id !== column.id && !item.removed && item.header.trim() && isColorSourceSpec(item.spec)).map((item) => item.header.trim())} />
           </> : <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">Choisis une colonne à gauche, ou ajoute-en une.</p>}

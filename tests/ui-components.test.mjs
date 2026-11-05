@@ -267,6 +267,26 @@ test("Colonne liée ↔ : des noms à choisir, plus de virgules à taper", async
   assert.doesNotMatch(field, /Noms séparés par des virgules/);
 });
 
+test("Remplissage automatique d'une colonne liée ↔ : chaque valeur se choisit dans la liste, pas en texte", async () => {
+  const { AutoFillSettingsEditor } = await vite.ssrLoadModule("/components/eraser/index-autofill-editor.tsx");
+  const props = {
+    header: "Recyclage",
+    columns: [{ header: "Type", spec: { kind: "choice", options: [{ value: "Arme à distance" }, { value: "Arme Batarde" }] } }],
+    disabled: false,
+    onChange() {},
+    saved: true,
+    fillOnSave: true,
+    onFillOnSave() {},
+  };
+  const spec = { kind: "linked", link: { index: "objects", tab: "*", column: "Recyclage de" }, autoFill: { from: "Type", rules: [{ when: "Arme Batarde", value: "Fer, Bois" }] } };
+  // Les onglets d'en face donnés par la page : une liste par valeur, la valeur réglée en pastilles.
+  const html = renderToStaticMarkup(React.createElement(AutoFillSettingsEditor, { ...props, spec, linkedFrom: [{ index: "objects", tab: "*" }] }));
+  assert.match(html, /Ne pas toucher la case/);
+  assert.match(html, />Fer</);
+  assert.match(html, />Bois</);
+  assert.doesNotMatch(html, /contenteditable/);
+});
+
 test("Calendriers et présentations de vue : dates du monde, sections, tableau de bord, réglages propres", async () => {
   const calendars = await vite.ssrLoadModule("/lib/calendars.ts");
   const layouts = await vite.ssrLoadModule("/lib/index-presentations.ts");
