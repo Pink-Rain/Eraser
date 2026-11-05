@@ -85,7 +85,10 @@ const trysteroPoolPatches: Array<{ file: RegExp; find: string; replace: string }
       "\t\t\tif (typeof requestIdleCallback === \"function\") requestIdleCallback(next, { timeout: 3000 });",
       "\t\t\telse setTimeout(next, 60);",
       "\t\t};",
-      "\t\teraserFill(6);",
+      // La première connexion aussi attend un temps mort : c'est elle qui initialise WebRTC
+      // (0,5 à 0,7 s de calcul), qui sinon s'ajoutait à la tâche qui rejoint le salon.
+      "\t\tif (typeof requestIdleCallback === \"function\") requestIdleCallback(() => eraserFill(6), { timeout: 3000 });",
+      "\t\telse setTimeout(() => eraserFill(6), 60);",
     ].join("\n"),
   },
 ]

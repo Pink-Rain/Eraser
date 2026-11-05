@@ -83,15 +83,29 @@ export function readSchema(spreadsheetId: string, options: { refresh?: boolean }
 }
 
 async function loadSchema(spreadsheetId: string, fresh = false) {
-  // Avant d'écrire, la liste des onglets est relue ; pour afficher, la copie en mémoire suffit
-  // quand l'onglet du schéma y est (absent de la copie, il est cherché dans Google).
-  const tabs = await (fresh ? spreadsheetTabs(spreadsheetId) : cachedSpreadsheetTabs(spreadsheetId, [SCHEMA_TAB]))
-  if (!tabs.some((tab) => tab.title === SCHEMA_TAB)) return []
-  // Lu directement dans Sheets, sans vider le cache des autres onglets du classeur.
-  const { rows } = await readRangeFreshWithOffset(spreadsheetId, sheetTabRange(SCHEMA_TAB, "A2:F"))
-  return rows.flatMap((row): SchemaEntry[] => row[0]?.trim()
+  return (await readSchemaSheet(spreadsheetId, fresh)).entries
+}
+
+/** Une ligne du schéma telle qu'écrite dans la feuille. */
+function entryOf(row: string[]): SchemaEntry[] {
+  return row[0]?.trim()
     ? [{ tab: row[0].trim(), column: (row[1] ?? "").trim(), origin: (row[2] ?? "").trim(), spec: parseSpec(row[3] ?? ""), state: parseState(row[4] ?? ""), deletedAt: (row[5] ?? "").trim() }]
-    : [])
+    : []
+}
+
+/**
+ * Le schéma lu dans Sheets, avec ce qu'il faut pour le réécrire sans relire : l'onglet
+ * existe-t-il, et combien de lignes y sont occupées (lignes vides comprises).
+ * `fresh` : la liste des onglets est relue (avant d'écrire) ; sinon la copie en mémoire
+ * suffit quand l'onglet du schéma y est (absent de la copie, il est cherché dans Google).
+ */
+async function readSchemaSheet(spreadsheetId: string, fresh = false) {
+  const tabs = await (fresh ? spreadsheetTabs(spreadsheetId) : cachedSpreadsheetTabs(spreadsheetId, [SCHEMA_TAB]))
+  if (!tabs.some((tab) => tab.title === SCHEMA_TAB)) return { exists: false, used: 0, entries: [] as SchemaEntry[] }
+  // Lu directement dans Sheets, sans vider le cache des autres onglets du classeur.
+  const read = await readRangeFreshWithOffset(spreadsheetId, sheetTabRange(SCHEMA_TAB, "A2:F"))
+  const used = read.rows.length ? read.startRow - 2 + read.rows.length : 0
+  return { exists: true, used, entries: read.rows.flatMap(entryOf) }
 }
 
 /** Crée l'onglet de schéma, caché, s'il n'existe pas. */
@@ -109,29 +123,36 @@ async function ensureSchemaTab(spreadsheetId: string) {
  * Réécrit tout le schéma d'un classeur (il ne compte que quelques dizaines de lignes).
  * `entries` doit venir d'une lecture du moment : voir `rewriteSchema`.
  */
-export async function writeSchema(spreadsheetId: string, entries: SchemaEntry[]) {
-  await ensureSchemaTab(spreadsheetId)
+export async function writeSchema(spreadsheetId: string, entries: SchemaEntry[], known?: { used: number }) {
   const rows = entries.map((entry) => [entry.tab, entry.column, entry.origin, entry.spec ? JSON.stringify(entry.spec) : "", entry.state, entry.deletedAt])
   // Les anciennes lignes en trop sont vidées : le schéma écrit est le schéma complet. Leur
   // nombre est relu (lignes vides comprises) ; une lecture ratée arrête l'écriture plutôt que
-  // de laisser des lignes d'avant à la suite.
-  const previous = await readRangeFreshWithOffset(spreadsheetId, sheetTabRange(SCHEMA_TAB, "A2:F"))
-  const used = previous.rows.length ? previous.startRow - 2 + previous.rows.length : 0
+  // de laisser des lignes d'avant à la suite. `known` : la lecture vient d'être faite (rewriteSchema).
+  let used = known?.used
+  if (used === undefined) {
+    await ensureSchemaTab(spreadsheetId)
+    const previous = await readRangeFreshWithOffset(spreadsheetId, sheetTabRange(SCHEMA_TAB, "A2:F"))
+    used = previous.rows.length ? previous.startRow - 2 + previous.rows.length : 0
+  }
   const blanks = Array.from({ length: Math.max(0, used - rows.length) }, () => HEADERS.map(() => ""))
   const all = [...rows, ...blanks]
   if (all.length) await updateRange(spreadsheetId, sheetTabRange(SCHEMA_TAB, `A2:F${all.length + 1}`), all, { valueInputOption: "RAW" })
-  cache.delete(spreadsheetId)
+  // Ce qui vient d'être écrit est le schéma : gardé tel que la feuille le relirait, sans la relire.
+  const written = rows.flatMap(entryOf)
+  cache.set(spreadsheetId, { expiresAt: Date.now() + CACHE_MS, promise: Promise.resolve(written), loadedAt: Date.now() })
 }
 
 /**
  * Modifie le schéma d'un classeur à partir de sa version relue à l'instant dans Sheets :
  * jamais d'une copie gardée en mémoire (une autre installation a pu le changer, ou l'autre
  * index du même classeur), ni d'une lecture ratée (tous les réglages seraient effacés).
- * `change` y applique les modifications d'Eraser, puis le schéma est réécrit.
+ * `change` y applique les modifications d'Eraser, puis le schéma est réécrit. La liste des
+ * onglets, elle, peut venir de la mémoire : l'onglet du schéma ne disparaît pas en route.
  */
 export async function rewriteSchema(spreadsheetId: string, change: (entries: SchemaEntry[]) => SchemaEntry[] | void) {
-  const entries = (await readSchema(spreadsheetId, { refresh: true })).map((entry) => ({ ...entry }))
-  await writeSchema(spreadsheetId, change(entries) ?? entries)
+  const read = await readSchemaSheet(spreadsheetId)
+  const entries = read.entries.map((entry) => ({ ...entry }))
+  await writeSchema(spreadsheetId, change(entries) ?? entries, read.exists ? { used: read.used } : undefined)
 }
 
 /** Les lignes du schéma telles qu'écrites dans la feuille (types inconnus compris). */

@@ -807,3 +807,32 @@ test("Remplissage automatique : la source renommée est suivie, une boucle est s
   ];
   assert.deepEqual([...autofill.plannedAutoFills(looped, ["B"], (header) => header === "B" ? "x" : "").values()].map((fill) => [fill.column.header, fill.value]), [["A", "y"]]);
 });
+
+test("« Modifier » : un simple réglage ne relit ni l'onglet ni l'index, et rend les colonnes à jour", async () => {
+  const headers = definitions.worldIndexDefinitions.peoples.tabs[0].headers;
+  const id = fresh("peoples");
+  google.addSpreadsheet(id, [{ title: "Peuples", grid: [headers, ...Array.from({ length: 50 }, (_, index) => line(headers, { "Nom": `Peuple ${index}`, "ID": `PEU-${index}` }))] }]);
+  await link("peoples", id, "Peuples");
+  await engine.applyWorldSchemaOperations("peoples", [{ op: "add-column", tab: "Peuples", header: "Genre", spec: { kind: "rich" } }]);
+  await engine.getWorldIndex("peoples");
+  google.world.calls.length = 0;
+  const data = await engine.applyWorldSchemaOperations("peoples", [
+    { op: "spec", tab: "Peuples", header: "Genre", spec: { kind: "rich", description: "Le genre du peuple" } },
+    { op: "spec", tab: "Peuples", header: "Description", spec: { kind: "rich", autoFill: { from: "Genre", rules: [{ when: "Sylvain", value: "Des bois" }] } } },
+  ]);
+  // Le schéma (relu avant d'écrire, puis écrit) et la ligne 1, une seule fois pour deux colonnes ;
+  // jamais tout l'onglet, ni l'index entier après coup.
+  const reads = google.world.calls.filter((call) => call.method !== "PUT" && (/Peuples/.test(call.url) || /includeGridData/.test(call.url) || JSON.stringify(call.body ?? "").includes("Peuples")));
+  assert.equal(reads.length, 1);
+  assert.match(JSON.stringify(reads[0].body), /Peuples'?!1:1/);
+  assert.ok(google.world.calls.length <= 6, `${google.world.calls.length} requêtes`);
+  assert.equal(data.columns.Peuples.find((column) => column.header === "Genre").spec.description, "Le genre du peuple");
+  assert.equal(data.columns.Peuples.find((column) => column.header === "Description").spec.autoFill.from, "Genre");
+  assert.equal(data.tables[0].rows.length, 50);
+  // Le schéma écrit est gardé : la relecture suivante n'attend pas Google.
+  google.world.calls.length = 0;
+  await engine.getWorldIndex("peoples");
+  assert.equal(google.world.calls.length, 0);
+  // Et il est bien dans la feuille.
+  assert.match(google.grid(id, SCHEMA_TAB).map((row) => row.join("|")).join("\n"), /Le genre du peuple/);
+});

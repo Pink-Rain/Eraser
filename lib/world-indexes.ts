@@ -269,7 +269,8 @@ async function loadEffectiveIndex(key: WorldIndexKey, options: { strict?: boolea
     if (files.length > 1) throw new Error("OBJECT_INDEX_NOT_REGROUPED")
     const file = files[0]
     const { all: schema, degraded } = await schemaFor(key, file.id, strict)
-    const tabs = (await spreadsheetTabs(file.id)).filter((tab) => isObjectItemsTab(tab.title))
+    // Avant d'écrire (`strict`), la liste vient d'être relue avec le schéma : la copie suffit.
+    const tabs = (await (strict ? cachedSpreadsheetTabs(file.id) : spreadsheetTabs(file.id))).filter((tab) => isObjectItemsTab(tab.title))
     const firstRows = tabs.length ? await readRanges(file.id, tabs.map((tab) => sheetTabRange(tab.title, "1:1"))) : []
     const base = tabs.map((tab, index): WorldIndexTabDefinition => {
       const firstRow = (firstRows[index]?.[0] ?? []).map((value) => String(value ?? "").trim())
@@ -904,6 +905,13 @@ export function getWorldIndexQuick(key: WorldIndexKey): Promise<WorldIndexData> 
   if (!previous) return loading
   loading.catch(() => undefined)
   return Promise.resolve(previous)
+}
+
+/** L'index tel qu'il est en mémoire, sans rien lire (absent, en cours de lecture ou raté : `null`). */
+async function currentWorldIndex(key: WorldIndexKey) {
+  const entry = worldIndexCache.get(key)
+  if (!entry?.loadedAt) return null
+  return entry.promise.catch(() => null)
 }
 
 function invalidateWorldIndexes(keys: Iterable<WorldIndexKey>) {
@@ -2239,8 +2247,9 @@ async function writeHeader(spreadsheetId: string, tabName: string, column: numbe
 }
 
 /** Ajoute une colonne à droite de la dernière colonne remplie de l'en-tête, relu à l'instant. */
-async function appendHeader(spreadsheetId: string, tabName: string, header: string) {
-  const [firstRow = []] = (await readRangeFreshWithOffset(spreadsheetId, sheetTabRange(tabName, "1:1"))).rows
+async function appendHeader(spreadsheetId: string, tabName: string, header: string, known?: string[]) {
+  // `known` : la ligne 1 relue à l'instant par l'appelant, avant d'écrire.
+  const [firstRow = []] = known ? [known] : (await readRangeFreshWithOffset(spreadsheetId, sheetTabRange(tabName, "1:1"))).rows
   let used = firstRow.length
   while (used > 0 && !firstRow[used - 1]?.trim()) used -= 1
   if (firstRow.slice(0, used).some((existing) => foldName(existing) === foldName(header))) return
@@ -2372,9 +2381,24 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
     const slot = (tabName: string, header: string) => `${foldName(tabName)}\u0001${foldName(header)}`
     const reciprocal = async (tabName: string, header: string, link: NonNullable<IndexColumnSpec["link"]>) => {
       for (const end of await ensureReciprocal(key, tabName, header, link)) if (end.index === key) answered.set(slot(end.tab, end.column), { tab: tabName, header })
+      // La colonne d'en face a pu être ajoutée dans cet index : ses en-têtes seront relus.
+      headerRows.clear()
+    }
+    // La ligne d'en-têtes de chaque onglet, relue une fois pour toutes les opérations (pas tout
+    // l'onglet) et tenue à jour des en-têtes écrits en route.
+    const headerRows = new Map<string, { headers: string[]; raw?: string[] }>()
+    const headersOfTab = async (tabName: string) => {
+      const known = headerRows.get(tabName)
+      if (known) return known
+      const read = await freshHeaders(key, tabName)
+      headerRows.set(tabName, read)
+      return read
     }
     const [linkProblem] = linkedColumnProblems(key, operations)
     if (linkProblem) throw new Error(`INDEX_SCHEMA_INVALID:${linkProblem}`)
+    // L'index en mémoire, s'il est là : de simples réglages le reprennent au lieu de le relire.
+    const settingsOnly = isSettingsOnly(key, schema, operations)
+    const kept = settingsOnly ? await currentWorldIndex(key) : null
     try {
       for (const operation of operations) {
         // Un index d'entités garde son seul onglet, celui que lit Eraser.
@@ -2458,6 +2482,7 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
             const sheetId = await sheetIdOf(sheet.spreadsheetId, tab.name)
             await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: moves.map((move) => ({ moveDimension: { source: { sheetId, dimension: "COLUMNS", startIndex: move.from, endIndex: move.from + 1 }, destinationIndex: move.to } })) }) })
             clearSpreadsheetReadCache(sheet.spreadsheetId)
+            headerRows.delete(tab.name)
           }
           continue
         }
@@ -2468,7 +2493,8 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
           edit((entries) => upsertEntry(entries, tab.name, "", { deletedAt: now }))
           continue
         }
-        const table = await plainTable(key, tab.name, [])
+        const read = await headersOfTab(tab.name)
+        const table = { headers: read.headers }
         if (operation.op === "add-column") {
           const header = operation.header.replace(/\s+/g, " ").trim()
           // Les deux côtés d'un lien vers cet index ajoutés ensemble : le premier a déjà créé le second.
@@ -2479,7 +2505,8 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
             const problem = headerProblem(operation.header, table.headers)
             if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
             if (link) await reciprocalOf(key, tab.name, header, link)
-            await appendHeader(sheet.spreadsheetId, tab.name, header)
+            await appendHeader(sheet.spreadsheetId, tab.name, header, read.raw)
+            headerRows.delete(tab.name)
           }
           edit((entries) => upsertEntry(entries, tab.name, header, { spec: withCleanAutoFill(operation.spec), state: "ajouté", deletedAt: "" }))
           // Même déjà créée en face, la réponse est complétée : elle peut viser plus d'onglets.
@@ -2498,6 +2525,7 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
           const to = operation.to.replace(/\s+/g, " ").trim()
           const from = operation.header
           await writeHeader(sheet.spreadsheetId, tab.name, column, to)
+          headerRows.set(tab.name, { headers: table.headers.map((header, index) => index === column ? to : header), raw: read.raw?.map((header, index) => index === column ? to : header) })
           const planned = tab.headers.some((header) => foldName(header) === foldName(from))
           edit((entries) => {
             const entry = findEntry(entries, tab.name, from)
@@ -2540,8 +2568,64 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
       forgetWorkbook(sheet.spreadsheetId)
       readyWorkbooks.clear()
     }
-    return getWorldIndex(key, { refresh: true })
+    // De simples réglages (type, remplissage, description…) ne changent rien dans la feuille :
+    // les lignes gardées en mémoire reçoivent les nouvelles colonnes, sans relire tout l'index.
+    const rebuilt = settingsOnly && kept ? await rebuildWithSchema(key, kept) : null
+    return rebuilt ?? getWorldIndex(key, { refresh: true })
   })
+}
+
+/**
+ * Des opérations qui ne touchent que le schéma : rien n'est écrit dans les onglets, et les
+ * lignes se lisent de la même façon (une case HTML-en-texte ou un lien changent la lecture ou
+ * écrivent en face : relus).
+ */
+function isSettingsOnly(key: WorldIndexKey, schema: SchemaEntry[], operations: SchemaOperation[]) {
+  return operations.every((operation) => {
+    if (operation.op === "tab-label" || operation.op === "tab-column" || operation.op === "remove-column") return true
+    if (operation.op !== "spec") return false
+    const current = effectiveColumnSpec(key, operation.tab, operation.header, schema)
+    return Boolean(current.htmlText) === Boolean(operation.spec.htmlText) && current.kind !== "linked" && operation.spec.kind !== "linked"
+  })
+}
+
+/**
+ * L'index gardé en mémoire, ses colonnes recalculées d'après le schéma qui vient d'être écrit
+ * (gardé lui aussi en mémoire) : aucune lecture de Google. `null` si les onglets ont changé
+ * entre-temps : il est alors relu.
+ */
+async function rebuildWithSchema(key: WorldIndexKey, previous: WorldIndexData): Promise<WorldIndexData | null> {
+  const sheet = await workbook(key)
+  if (sheet.degraded) return null
+  const names = (tabs: Array<{ name: string }>) => tabs.map((tab) => tab.name).join("\u0001")
+  if (names(sheet.definition.tabs) !== names(previous.definition.tabs)) return null
+  const data: WorldIndexData = {
+    ...previous,
+    definition: sheet.definition,
+    columns: Object.fromEntries(previous.tables.map((table) => [table.tabName, columnsOf(key, table, sheet.schema)])),
+    links: linksOf(key),
+  }
+  if (key === OBJECTS_INDEX_KEY) {
+    const catalog = objectCatalogs.get(previous)
+    if (!catalog) return null
+    objectCatalogs.set(data, catalog.map((table) => ({ ...table, columnSpecs: storedColumnSpecs(sheet.schema, table.tabName) })))
+  }
+  const loadedAt = Date.now()
+  worldIndexCache.set(key, { expiresAt: loadedAt + cacheLifetime(key), promise: Promise.resolve(data), loadedAt, patchedAt: loadedAt })
+  lastLoaded.set(key, data)
+  return data
+}
+
+/**
+ * La ligne d'en-têtes d'un onglet, relue à l'instant avant d'y écrire un en-tête : une seule
+ * ligne, pas tout l'onglet. Un index d'entités garde sa lecture par colonnes nommées.
+ */
+async function freshHeaders(key: WorldIndexKey, tabName: string): Promise<{ headers: string[]; raw?: string[] }> {
+  if (entityOf(key)?.readHeaders) return { headers: (await plainTable(key, tabName, [])).headers }
+  const sheet = await workbook(key)
+  const read = await readRangeFreshWithOffset(sheet.spreadsheetId, sheetTabRange(tabName, "1:1"))
+  const first = read.startRow === 1 ? read.rows[0] ?? [] : []
+  return { headers: headersOf(first, tabDefinition(key, tabName), first.length, Boolean(sheet.definition.entity)), raw: first }
 }
 
 // ---------------------------------------------------------------------------

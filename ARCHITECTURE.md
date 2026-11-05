@@ -413,8 +413,15 @@ n'est pas compilé et garde son comportement.
   l'attend.
 - Salon en direct (chat, tabletop) : trystero préparait vingt connexions pair à pair d'un coup
   (1,5 à 2 s de gel au lancement et à chaque changement de salon). `vite.config.ts`
-  (`eraserTrysteroPool`) les fait préparer une à une, au repos, six au plus. À vérifier à toute
-  montée de version de trystero (la compilation prévient).
+  (`eraserTrysteroPool`) les fait préparer une à une, au repos, six au plus, la première
+  comprise (elle initialise WebRTC : 0,5 à 0,7 s, à part de la tâche qui rejoint le salon). À
+  vérifier à toute montée de version de trystero (la compilation prévient).
+- « Modifier » d'un index (`applyWorldSchemaOperations`) : la ligne 1 de chaque onglet touché
+  est relue une fois (jamais tout l'onglet) ; le schéma est relu juste avant d'être réécrit
+  (`rewriteSchema`, sans relire la liste des onglets), puis gardé en mémoire tel qu'écrit. De
+  simples réglages (type, remplissage, description, corbeille, nom d'une ligne) recalculent les
+  colonnes sur les lignes en mémoire (`rebuildWithSchema`) au lieu de relire l'index : 7 requêtes
+  au lieu de 14 pour l'Index des items. Une case HTML-en-texte ou une colonne liée relisent tout.
 - `components/eraser/fold-section.tsx` : une partie de page repliable. Avec `serverOpen`, ses
   parties dépliées sont dans l'adresse (`?ouvert=…`, `lib/open-sections.ts`) et le serveur ne
   calcule que celles-là (page Google Drive et Sheets).

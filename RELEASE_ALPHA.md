@@ -1,20 +1,14 @@
-# Eraser 0.1.1-alpha.267 — Des colonnes qui se remplissent seules
+# Eraser 0.1.1-alpha.268 — Modifier sans attendre
 
-Cette version arrive **sans réinstallation** (enveloppe 10, comme l'alpha 266) : Eraser la
-télécharge, redémarre son serveur et recharge la page tout seul. Rien n'est réécrit dans Google
-Sheets tant qu'on ne règle pas une colonne.
+Cette version arrive **sans réinstallation** (enveloppe 10, comme l'alpha 267) : Eraser la
+télécharge, redémarre son serveur et recharge la page tout seul. Rien ne change dans Google Sheets.
 
-- **Remplissage automatique, dans tous les index** : « Modifier » › une colonne › « Remplissage
-  automatique ». Choisis la colonne d'après laquelle elle se remplit (par exemple « Rangement »
-  d'après « Genre ») : toutes les valeurs de cette colonne s'affichent, et pour chacune tu saisis
-  ce que la case reçoit, avec le champ de son type : un nombre, du texte, une jauge (des charges),
-  une liste, des noms liés, des sections, une couleur, une icône…
-- La case se remplit dès que la valeur change, dans le tableau, la fiche ou une nouvelle ligne,
-  et s'affiche aussitôt. Elle reste modifiable à la main jusqu'au changement suivant. Une valeur
-  sans réglage ne touche pas la case ; « Toute autre valeur » règle tout le reste.
-- **Les lignes déjà là** : à l'enregistrement, elles reçoivent aussi leur valeur (case à décocher
-  si tu ne le veux pas) ; ensuite, « Remplir les lignes existantes » recommence d'un clic. Tout
-  part en un ou deux envois à Google, pour ménager le quota partagé.
-- Une colonne liée ↔ remplie ainsi se met à jour en face, comme une saisie. Une colonne remplie
-  peut en remplir une autre (jamais en boucle), et le réglage suit la colonne source si elle est
-  renommée.
+- **« Modifier » enregistre deux fois plus vite** : changer le réglage d'une colonne (type,
+  remplissage automatique, description…) demandait 14 allers-retours à Google, dont deux
+  relectures complètes de l'onglet ; il en faut maintenant 7, et aucune relecture de tout l'onglet.
+  Sur l'Index des items, l'enregistrement mesuré à 29 s tombe bien en dessous.
+- Après un simple réglage, l'index n'est plus relu en entier : ses lignes, déjà là, reçoivent les
+  nouvelles colonnes aussitôt. Ajouter, renommer ou déplacer une colonne relit l'index comme avant.
+- Plusieurs colonnes modifiées dans le même onglet ne relisent sa ligne d'en-têtes qu'une fois.
+- Au lancement, la préparation du salon en direct est découpée en deux temps morts au lieu d'un
+  seul gel d'environ une seconde.

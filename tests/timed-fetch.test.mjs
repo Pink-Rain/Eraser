@@ -22,6 +22,9 @@ const server = http.createServer((request, response) => {
 after(async () => { server.close(); await vite.close(); });
 const base = `http://127.0.0.1:${server.address().port}`;
 const { timedFetch, discardResponse } = await vite.ssrLoadModule("/lib/timed-fetch.ts");
+// La toute première requête du processus ouvre la connexion (et charge le client HTTP) : sur une
+// machine chargée, elle dépassait seule les 150 ms du premier test, qui échouait au hasard.
+await (await fetch(`${base}/ok`)).text();
 
 const unexpected = [];
 process.on("uncaughtException", (error) => unexpected.push(error));
