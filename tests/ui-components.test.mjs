@@ -242,6 +242,31 @@ test("Emplacements des items : liste liée à Environnement et Magasin, « - » 
   assert.match(html, /Introuvable : Forêt ordinaire/);
 });
 
+test("Colonne liée ↔ : des noms à choisir, plus de virgules à taper", async () => {
+  const { indexGridColumn, IndexField } = await vite.ssrLoadModule("/components/eraser/index-cells.tsx");
+  const linkedFrom = [{ index: "places", tab: "*" }];
+  const value = "<b>Fer</b>, Épée ; Fer";
+  const context = { valueOf: () => value, commit() {} };
+  // La page connaît les onglets d'en face : la case devient une liste, chaque nom une pastille (jamais en erreur).
+  const column = indexGridColumn("Se recycle en", "Se recycle en", { kind: "linked", linkedFrom }, 200, context);
+  assert.equal(typeof column.control, "function");
+  assert.notEqual(column.commitDelay, Infinity);
+  const cell = renderToStaticMarkup(column.control("row-1"));
+  assert.match(cell, /aria-label="Se recycle en"/);
+  assert.match(cell, />Fer</);
+  assert.match(cell, />Épée</);
+  assert.equal(cell.match(/>Fer</g).length, 1);
+  assert.doesNotMatch(cell, /italic|Valeur hors de la liste/);
+  // Sans les onglets d'en face (autres pages), la case reste du texte, enregistré en quittant la case.
+  const plain = indexGridColumn("Se recycle en", "Se recycle en", { kind: "linked" }, 200, context);
+  assert.equal(plain.control, undefined);
+  assert.equal(plain.commitDelay, Infinity);
+  // Même chose dans la fiche.
+  const field = renderToStaticMarkup(React.createElement(IndexField, { label: "Lieux", spec: { kind: "linked", linkedFrom }, value: "Valhelm", onChange() {} }));
+  assert.match(field, /aria-label="Lieux"/);
+  assert.doesNotMatch(field, /Noms séparés par des virgules/);
+});
+
 test("Calendriers et présentations de vue : dates du monde, sections, tableau de bord, réglages propres", async () => {
   const calendars = await vite.ssrLoadModule("/lib/calendars.ts");
   const layouts = await vite.ssrLoadModule("/lib/index-presentations.ts");

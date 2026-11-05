@@ -1,14 +1,26 @@
-# Eraser 0.1.1-alpha.268 — Modifier sans attendre
+# Eraser 0.1.1-alpha.269 — Le bon nom, du bout des doigts
 
-Cette version arrive **sans réinstallation** (enveloppe 10, comme l'alpha 267) : Eraser la
+Cette version arrive **sans réinstallation** (enveloppe 10, comme l'alpha 268) : Eraser la
 télécharge, redémarre son serveur et recharge la page tout seul. Rien ne change dans Google Sheets.
 
-- **« Modifier » enregistre deux fois plus vite** : changer le réglage d'une colonne (type,
-  remplissage automatique, description…) demandait 14 allers-retours à Google, dont deux
-  relectures complètes de l'onglet ; il en faut maintenant 7, et aucune relecture de tout l'onglet.
-  Sur l'Index des items, l'enregistrement mesuré à 29 s tombe bien en dessous.
-- Après un simple réglage, l'index n'est plus relu en entier : ses lignes, déjà là, reçoivent les
-  nouvelles colonnes aussitôt. Ajouter, renommer ou déplacer une colonne relit l'index comme avant.
-- Plusieurs colonnes modifiées dans le même onglet ne relisent sa ligne d'en-têtes qu'une fois.
-- Au lancement, la préparation du salon en direct est découpée en deux temps morts au lieu d'un
-  seul gel d'environ une seconde.
+- **Colonnes liées ↔ : fini les virgules** : dans un index, la case d'une colonne liée (et son
+  champ dans la fiche ou le formulaire d'ajout) est maintenant une liste. On commence à taper,
+  Eraser propose les noms des onglets d'en face ; un clic ou Entrée les ajoute en pastilles, une
+  croix les retire. Un nom qui n'existe pas encore : « Créer « … » dans l'index … », et la ligne
+  naît à l'enregistrement, avec sa réponse en face, comme avant.
+- **Les fautes de frappe trouvent quand même** (listes, listes liées et colonnes liées) : « Epe »
+  propose « Épée », « Fortresse » propose « Forteresse du Nord » (marquée « proche »), « dragon
+  rou » trouve « Rouge dragon ». Les noms qui commencent par ce qu'on tape passent devant. Un nom
+  déjà là écrit autrement (accents, majuscules, pluriel, lettre doublée) est repris, jamais recréé
+  en double.
+- **Au clavier** : Entrée prend la meilleure proposition (« Ép » → « Épée », « Fortresse » →
+  « Forteresse du Nord ») ; quand rien n'y ressemble, Entrée crée le nom tapé. Pour créer malgré
+  une proposition, ↑ jusqu'à « Créer », ou un clic. Une ligne sous la recherche dit toujours ce
+  qu'Entrée va faire. Une virgule ajoute le nom et laisse la liste ouverte pour le suivant,
+  Effacer retire le dernier, Entrée sur un nom déjà choisi le garde. Taper une lettre sur une case
+  fermée l'ouvre, la lettre déjà dans la recherche. Plusieurs noms collés d'un coup (« Fer, Épée,
+  Bois ») sont reconnus un à un.
+- **Léger pour le quota** : une colonne liée ne charge ses noms qu'à l'ouverture, ceux de l'index
+  affiché viennent de la page sans rien relire, et plusieurs noms ajoutés d'un coup s'enregistrent
+  en une seule écriture, en refermant la liste.
+- Le copier-coller de lignes entières dans le tableau marche comme avant.

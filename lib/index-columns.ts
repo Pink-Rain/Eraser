@@ -67,9 +67,9 @@ export const indexColumnKinds: Record<IndexColumnKind, KindInfo> = {
   "name": { label: "Nom formulaire", group: "Saisie", creatable: false, description: "Ancien type « Nom » : tous les noms sont maintenant des Noms formulaires." },
   "name-form": { label: "Nom formulaire", group: "Saisie", creatable: false, description: "Le nom de la ligne, qui ouvre sa fiche (le formulaire complet de la ligne) d'un clic. On le modifie dans la fiche.", example: "Les créatures, les PNJ ; les campagnes et personnages ouvrent leur page." },
   "id": { label: "Identifiant", group: "Système", creatable: false, description: "Identifiant unique, généré par Eraser. Il relie la ligne au reste de l'application ; il ne se modifie pas." },
-  "linked": { label: "Colonne liée ↔", short: "Des noms d’un autre index, et l’autre index se remplit en retour (double sens).", group: "Listes et relations", creatable: true, description: "Des noms d'un autre index (ou du même), séparés par des virgules. La colonne d'en face se remplit toute seule, et un nom absent crée sa ligne.", settings: ["Index lié et onglet.", "Colonne qui répond en face (créée si elle n'existe pas)."], example: "Lieux ↔ Peuples : ajouter « Elfes » à une ville ajoute la ville aux Elfes." },
+  "linked": { label: "Colonne liée ↔", short: "Des noms d’un autre index, et l’autre index se remplit en retour (double sens).", group: "Listes et relations", creatable: true, description: "Des noms d'un autre index (ou du même) : on commence à taper, Eraser propose les noms de l'index, même mal orthographiés. La colonne d'en face se remplit toute seule, et un nom absent crée sa ligne.", settings: ["Index lié et onglet.", "Colonne qui répond en face (créée si elle n'existe pas)."], example: "Lieux ↔ Peuples : ajouter « Elfes » à une ville ajoute la ville aux Elfes." },
   "choice": { label: "Liste", short: "Des choix que tu définis ici, avec leurs couleurs.", group: "Listes et relations", creatable: true, description: "Un ou plusieurs choix dans une liste, chacun avec sa couleur. Remplace les étiquettes et les statuts.", settings: ["Options : valeur, couleur, groupe.", "Choix multiple.", "Ajout libre : une valeur hors liste est acceptée.", "Groupes (statut) : « À faire », « En cours », « Fini »…"], example: "Rareté, Comportement, Statut d'une quête." },
-  "linked-choice": { label: "Liste liée", short: "Des noms pris dans un autre index (sens unique).", group: "Listes et relations", creatable: true, description: "Un ou plusieurs noms pris dans un autre index. Un nom absent y crée sa ligne, même collé.", settings: ["Index et onglet d'où viennent les noms.", "Choix multiple."], example: "Le Peuple d'un PNJ." },
+  "linked-choice": { label: "Liste liée", short: "Des noms pris dans un autre index (sens unique).", group: "Listes et relations", creatable: true, description: "Un ou plusieurs noms pris dans un autre index, proposés dès qu'on tape (même mal orthographiés). Un nom absent y crée sa ligne, même collé.", settings: ["Index et onglet d'où viennent les noms.", "Choix multiple."], example: "Le Peuple d'un PNJ." },
   "checkbox": { label: "Case à cocher", short: "Oui ou non.", group: "Saisie", creatable: true, description: "Oui ou non. Écrit « Oui » ou « Non » dans Sheets.", example: "Dressable, Important, Découvert." },
   "auto-links": { label: "Liens automatiques", group: "Système", creatable: false, description: "Calculée par Eraser : chaque élément trouvé ailleurs devient un lien (campagnes d'un PNJ…). Rien à saisir." },
   "ranked-links": { label: "Liens classés", group: "Système", creatable: false, description: "Des pastilles reliées à d'autres éléments, chacune avec son rang (« Classes et rangs » des sorts)." },
@@ -436,6 +436,11 @@ export type IndexColumnSpec = {
    * (`tab: "*"` : n'importe quel onglet). Les liens prévus par Eraser n'en ont pas besoin.
    */
   link?: { index: WorldIndexKey; tab: string; column: string }
+  /**
+   * Colonne liée ↔ affichée par le moteur : les onglets d'où viennent les noms proposés à la
+   * saisie. Posé par la page au moment d'afficher, jamais enregistré.
+   */
+  linkedFrom?: ChoiceSource[]
   gauge?: GaugeSettings
   /** Icône : sa couleur et son dessin (plein ou contour). */
   glyph?: { color?: string; filled?: boolean }

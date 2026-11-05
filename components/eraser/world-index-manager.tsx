@@ -10,7 +10,7 @@ import { FullscreenButton, SheetsLinkButton, ToolbarIconButton, useFullscreenPan
 import { chooseCampaign, copyToClipboard, DrawRowButton, rowCard, sendToCampaignChat, useChoiceDialog, useIndexNotices } from "@/components/eraser/index-action-ui"
 import { announceWorldIndexChange, onWorldIndexChange } from "@/lib/world-index-events"
 import { builtinWindowsFor, windowAddDefaults } from "@/lib/index-window-defaults"
-import { forgetWorldIndexData, indexGridColumn, IndexEntryForm, loadWorldIndexData, RankedLinksCell, type IndexFieldProps, type IndexFormField, type LoadedWorldIndex } from "@/components/eraser/index-cells"
+import { forgetWorldIndexData, indexGridColumn, IndexEntryForm, loadWorldIndexData, provideWorldIndexData, RankedLinksCell, type IndexFieldProps, type IndexFormField, type LoadedWorldIndex } from "@/components/eraser/index-cells"
 import { createRowEngine } from "@/components/eraser/index-row-engine"
 import { IndexRowForm, IndexRowSheet } from "@/components/eraser/index-row-sheet"
 import { RowPageLink, rowPageFor } from "@/components/eraser/row-page-link"
@@ -45,7 +45,7 @@ import { usePersistentState } from "@/hooks/use-persistent-state"
 import { IN_PLACE_ATTRIBUTE, replaceAppUrl, URL_CHANGE_EVENT } from "@/components/eraser/app-tabs"
 import { IndexTabPicker, useIndexTabParam } from "@/components/eraser/index-tab-picker"
 import { buttonPresets, runActionButton, type ActionRuntime } from "@/lib/index-actions"
-import { choiceCorrection, computeRollup, isCheckedValue, isIdHeader, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
+import { choiceCorrection, computeRollup, isCheckedValue, isIdHeader, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type ChoiceSource, type IndexColumnSpec } from "@/lib/index-columns"
 import { numberCorrection } from "@/lib/index-numbers"
 import { positionalObjectId } from "@/lib/object-item-id"
 import { ObjectIcon } from "@/components/eraser/object-icon"
@@ -948,6 +948,29 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     const other = linkEndCovers(pair[0], indexKey, tab) && foldName(pair[0].column) === foldName(via) ? pair[1] : pair[0]
     return { index: other.index, tabs: other.tab === "*" ? null : [other.tab] }
   }, [indexKey, links, specOf])
+  /**
+   * Colonne liée ↔ : les onglets d'en face d'où viennent les noms proposés à la saisie (tous ceux
+   * qui portent la colonne qui répond, où le serveur cherche et crée un nom cité).
+   */
+  const linkedSourcesOf = useCallback((tab: string, header: string): ChoiceSource[] => {
+    const sources = new Map<string, ChoiceSource>()
+    for (const pair of links) for (const [end, other] of [[pair[0], pair[1]], [pair[1], pair[0]]] as const) {
+      if (!linkEndCovers(end, indexKey, tab) || foldName(end.column) !== foldName(header)) continue
+      const source: ChoiceSource = other.tab === "*" ? { index: other.index, tab: other.tab } : { index: other.index, tab: other.tab, onlyTab: true }
+      sources.set(`${other.index}:${other.tab}`, source)
+    }
+    // Un côté « tous les onglets » couvre déjà les onglets nommés du même index.
+    const all = [...sources.values()]
+    return all.filter((source) => !source.onlyTab || !all.some((other) => !other.onlyTab && other.index === source.index))
+  }, [indexKey, links])
+  /** Le réglage d'une colonne tel que le tableau et les fiches le dessinent : une colonne liée y reçoit ses onglets d'en face. */
+  const shownSpec = useCallback((tab: string, header: string, spec: IndexColumnSpec): IndexColumnSpec => {
+    if (spec.kind !== "linked") return spec
+    const linkedFrom = linkedSourcesOf(tab, header)
+    return linkedFrom.length ? { ...spec, linkedFrom } : spec
+  }, [linkedSourcesOf])
+  // L'index affiché prête ses lignes à jour aux listes qui le lisent (colonne liée vers lui-même) : rien n'est relu.
+  useEffect(() => data ? provideWorldIndexData(indexKey, { tables, columns: data.columns }) : undefined, [data, indexKey, tables])
   const relatedKeys = useMemo(() => {
     const keys = new Set<WorldIndexKey>()
     for (const [tab, list] of Object.entries(data?.columns ?? {})) for (const column of list) {
@@ -1236,7 +1259,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     const list: SheetGridColumn[] = visible.map((header) => indexGridColumn(
       header,
       header,
-      specOf(table.tabName, header),
+      shownSpec(table.tabName, header, specOf(table.tabName, header)),
       isObjects && isIconHeader(header) ? 96 : columnWidthFor(header, tabDefinition.widths[tabDefinition.headers.findIndex((candidate) => foldName(candidate) === foldName(header))]),
       {
         valueOf,
@@ -1299,7 +1322,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       list.splice(at, 0, owner, links)
     }
     return list
-  }, [ask, busy, commitCell, computed, drawCell, engine, entity, entityImage, extras, extrasOf, iconPreview, isObjects, notify, openRow, pageColumns, rawOf, rowHref, runButton, sortTabs, specOf, tabDefinition, table, tables.length, uploadIcon, valueOf, visible])
+  }, [ask, busy, commitCell, computed, drawCell, engine, entity, entityImage, extras, extrasOf, iconPreview, isObjects, notify, openRow, pageColumns, rawOf, rowHref, runButton, shownSpec, sortTabs, specOf, tabDefinition, table, tables.length, uploadIcon, valueOf, visible])
   /* eslint-enable react-hooks/refs */
 
   const corrections = useMemo(() => countCorrections(tables, baseSpecOf), [baseSpecOf, tables])
@@ -1528,7 +1551,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       if (!(isSheetSpec(spec) || layoutPlaces(tabLayoutOrBuiltin(settings.layouts, indexKey, formTable.tabName, "form"), header)) || ["id", "lookup", "rollup", "formula", "actions", "random", "auto-links", "ranked-links", "tab"].includes(spec.kind)) return []
       // Les colonnes de rang des classes ne se remplissent que par « Classes et rangs ».
       if (rankHeaders.has(foldName(header))) return []
-      return [{ key: header, label: header, spec, long: isLongColumn(header) }]
+      return [{ key: header, label: header, spec: shownSpec(formTable.tabName, header, spec), long: isLongColumn(header) }]
     }) : []
 
   // « Ajouter » au bas du tableau : la ligne naît dans le tableau, son nom tapé dans sa case.
@@ -1577,7 +1600,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   /* eslint-disable react-hooks/refs -- la fiche lit les cases comme le tableau les montre, saisies enregistrées comprises */
   const sheetFields = detailsFound ? (data?.columns[detailsFound.table.tabName] ?? [])
     .filter((column) => (isSheetSpec(column.spec) || layoutPlaces(sheetLayout, column.header)) && !["auto-links", "ranked-links", "tab"].includes(column.spec.kind) && !rankHeaders.has(foldName(column.header)))
-    .map((column) => ({ key: column.header, label: column.header, spec: column.spec, value: details === null ? savedCell(detailsFound, column.header) : rawOf(details, column.header), long: isLongColumn(column.header) }))
+    .map((column) => ({ key: column.header, label: column.header, spec: shownSpec(detailsFound.table.tabName, column.header, column.spec), value: details === null ? savedCell(detailsFound, column.header) : rawOf(details, column.header), long: isLongColumn(column.header) }))
     // Les colonnes propres à la page qui accueille la vue, dessinées par elle.
     .concat(pageColumns.map((extra) => ({ key: `__embed:${extra.key}`, label: extra.label, spec: { kind: "ranked-links" } as IndexColumnSpec, value: "", long: true }))) : []
   /* eslint-enable react-hooks/refs */
@@ -1637,7 +1660,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     const layout = (formId && formId !== DEFAULT_FORM_ID ? tabFormOrBuiltin(settings.layouts, indexKey, tab, formId) : null) ?? tabLayoutOrBuiltin(settings.layouts, indexKey, tab, "form")
     const fields = (data?.columns[tab] ?? [])
       .filter((column) => (isSheetSpec(column.spec) || layoutPlaces(layout, column.header)) && !["auto-links", "ranked-links", "tab"].includes(column.spec.kind) && !rankHeaders.has(foldName(column.header)))
-      .map((column) => ({ key: column.header, label: column.header, spec: column.spec, value: rawOf(rowKey, column.header), long: isLongColumn(column.header) }))
+      .map((column) => ({ key: column.header, label: column.header, spec: shownSpec(tab, column.header, column.spec), value: rawOf(rowKey, column.header), long: isLongColumn(column.header) }))
     const rowFor = (header: string): IndexFieldProps["row"] => ({
       ...(entityImage && foldName(header) === entityImage.header ? { upload: (file: File) => entityImage.upload(file, rowKey, header) } : {}),
       formula: (spec) => engine.formula(rowKey, header, spec),

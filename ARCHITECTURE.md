@@ -205,6 +205,26 @@ sont les mêmes réglages.
   colonne, et, dans un même index, une réponse ajoutée en même temps sous un autre type (son
   réglage, écrit après, effacerait le lien). Ajoutées ensemble et se visant l’une l’autre, les
   deux colonnes sont acceptées : la seconde, déjà créée par la première, est seulement réglée.
+- **Saisie** : le moteur pose sur la colonne, pour l’affichage seulement, les onglets d’en face
+  (`linkedFrom`, `shownSpec` dans `world-index-manager.tsx`, d’après `links`) ; la case et la
+  fiche deviennent alors un `LinkedNamesPicker` (`index-cells.tsx`) au lieu d’un texte à
+  virgules. Ses noms ne se chargent qu’à l’ouverture, ceux de l’index affiché viennent de la
+  page (`provideWorldIndexData`, aucune relecture) ; les choix sont enregistrés en refermant, en
+  une écriture. Un nom absent est créé par le serveur à l’enregistrement, comme avant. Sans
+  `linkedFrom` (autres pages, remplissage automatique), la case reste du texte.
+
+## Saisie des listes
+
+Liste, liste liée et colonne liée ↔ partagent `ChoicePicker` (`index-cells.tsx`). Ce qu’on tape
+est cherché par `searchChoices` (`lib/choice-search.ts`, pur et testé) : nom exact, début, début
+d’un mot, mots dans le désordre, contenu, autres écritures, puis fautes de frappe (une dès 4
+lettres, deux dès 7), marquées « proche ». « Créer « … » » vient en tête quand le nom n’existe
+pas, mais Entrée prend d’abord la meilleure proposition (rang ≤ 4 ou « proche ») : une ligne créée
+par erreur dans Sheets coûte plus qu’un choix retiré d’un clic. Rien d’approchant : Entrée crée ;
+↑↓ change l’entrée, que l’aide sous la recherche nomme. Le nom déjà présent écrit
+autrement (accents, pluriel, lettre doublée : `matchChoice`) est repris au lieu d’être recréé.
+À choix multiple, une virgule valide le nom et garde la liste ouverte, plusieurs noms collés
+sont reconnus un à un, Effacer retire le dernier ; une lettre tapée sur la case fermée l’ouvre.
 
 ## Remplissage automatique
 

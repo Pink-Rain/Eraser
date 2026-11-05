@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useEffect, useMemo, useState, type ReactNode } from "react"
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { Check, ChevronDown, File as FileIcon, FileText, Film, ImagePlus, Music, Paperclip, Upload, Link2, LoaderCircle, Plus, Search, Sparkles, Trash2, X, Zap } from "lucide-react"
 
@@ -20,6 +20,7 @@ import { DEFAULT_LAYOUT_ACCENT, FieldLabel, fieldAlignClass, IndexLayoutView, la
 import { LayoutBlockView } from "@/components/eraser/index-layout-blocks"
 import { columnStyleCss, pillStyle } from "@/components/eraser/index-style"
 import { cn } from "@/lib/utils"
+import { searchChoices, splitTypedNames, type ChoiceHit } from "@/lib/choice-search"
 import {
   checkboxValue,
   columnTypeLabel,
@@ -101,6 +102,10 @@ type PickerProps = {
   separator?: string
   /** Une valeur hors liste s'affiche en erreur, pour la corriger (jamais effacée). */
   strict?: boolean
+  /** Les valeurs de la case sont toutes bonnes, même hors des options chargées (colonne liée ↔ : le serveur crée les noms absents). */
+  trusted?: boolean
+  /** Le menu s'ouvre ou se ferme (une colonne liée ne charge ses noms qu'ouverte, et enregistre en refermant). */
+  onOpenChange?: (open: boolean) => void
 }
 
 /** Une valeur de liste en pastille, à la couleur de son option (ou de son groupe). */
@@ -122,10 +127,12 @@ function ChoicePill({ value, option, group, outside, renderValue, boxed = false,
  * hors liste reste affichée en italique, pour ne jamais être effacée par mégarde.
  * À choix multiple, un clic coche ou décoche une option et le menu reste ouvert.
  */
-export function ChoicePicker({ label, value, options, onChange, disabled = false, loading = false, allowCustom = false, multiple = false, groups = [], onCreate, createLabel, compact = true, renderValue, separator, strict = false }: PickerProps) {
+export function ChoicePicker({ label, value, options, onChange, disabled = false, loading = false, allowCustom = false, multiple = false, groups = [], onCreate, createLabel, compact = true, renderValue, separator, strict = false, trusted = false, onOpenChange }: PickerProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [creating, setCreating] = useState(false)
+  // L'entrée surlignée au clavier (↑↓) ; `null` : celle qu'Entrée prendrait d'elle-même.
+  const [active, setActive] = useState<number | null>(null)
   const trimmed = value.trim()
   // Une case à un seul choix peut tenir une valeur par mode d'une arme, séparées par « | ».
   const modes = !multiple && trimmed.includes("|")
@@ -133,25 +140,47 @@ export function ChoicePicker({ label, value, options, onChange, disabled = false
   const current = values.map((item) => ({ raw: item, option: matchChoice(item, options) }))
   const selected = new Set(current.map((item) => item.option?.value ?? item.raw).map(foldName))
   const outsideValues = current.filter((item) => !item.option).map((item) => item.raw)
-  const folded = foldName(query)
-  const shown = options.filter((option) => !folded || foldName(`${option.value} ${option.hint ?? ""} ${option.group ?? ""}`).includes(folded)).slice(0, 300)
-  const exact = query.trim() && options.some((option) => foldName(option.value) === folded)
-  const canCreate = Boolean(query.trim()) && !exact && (allowCustom || onCreate)
+  const typed = query.replace(/\s+/g, " ").trim()
+  const folded = foldName(typed)
+  // Le nom tapé existe déjà, écrit autrement (accents, casse, pluriel, lettre doublée) : c'est lui.
+  const exact = typed ? options.find((option) => foldName(option.value) === folded) ?? matchChoice(typed, options) : undefined
+  const canCreate = Boolean(typed) && !exact && (allowCustom || Boolean(onCreate))
+  const hits = open ? searchChoices(options, typed) : []
+  if (exact && !hits.some((hit) => hit.option === exact)) hits.unshift({ option: exact, rank: 0, close: false })
   const groupOf = (option?: ChoiceOption) => groups.find((group) => option?.group && foldName(group.name) === foldName(option.group))
-  // Les options rangées par groupe, dans l'ordre des groupes ; les autres à la fin.
-  const sections = groups.length
-    ? [...groups.map((group) => ({ group: group as { name: string; color?: string } | null, items: shown.filter((option) => option.group && foldName(option.group) === foldName(group.name)) })), { group: null, items: shown.filter((option) => !groupOf(option)) }].filter((section) => section.items.length)
-    : [{ group: null, items: shown }]
+  // Sans rien de tapé, les options rangées par groupe (dans l'ordre des groupes, les autres à la fin) ;
+  // en tapant, les plus proches d'abord, fautes de frappe comprises.
+  const sections = groups.length && !typed
+    ? [...groups.map((group) => ({ group: group as { name: string; color?: string } | null, items: hits.filter((hit) => hit.option.group && foldName(hit.option.group) === foldName(group.name)) })), { group: null, items: hits.filter((hit) => !groupOf(hit.option)) }].filter((section) => section.items.length)
+    : [{ group: null, items: hits }]
+  // Les entrées dans l'ordre affiché : « Créer » en tête quand le nom tapé n'existe pas.
+  const entries: Array<{ create: true } | { create: false; value: string }> = [...(canCreate ? [{ create: true as const }] : []), ...sections.flatMap((section) => section.items.map((hit) => ({ create: false as const, value: hit.option.value })))]
+  // Entrée prend d'elle-même le nom déjà là, sinon la meilleure proposition (un début de nom, une
+  // faute de frappe) : une ligne créée par erreur coûte plus qu'un choix qu'on retire d'un clic.
+  // Rien d'approchant : Entrée crée le nom tapé. « Créer » reste en tête (↑, ou un clic).
+  const best = typed ? hits[0] : undefined
+  const fallback = exact
+    ? entries.findIndex((entry) => !entry.create && entry.value === exact.value)
+    : best && (best.rank <= 4 || best.close) ? entries.findIndex((entry) => !entry.create && entry.value === best.option.value) : canCreate || typed ? 0 : -1
+  const activeIndex = active === null ? fallback : Math.min(active, entries.length - 1)
+
+  function setOpenState(next: boolean) {
+    setOpen(next)
+    if (!next) { setQuery(""); setActive(null) }
+    onOpenChange?.(next)
+  }
 
   function commit(next: string[]) {
     onChange(multiple ? joinListValue(next, separator) : next[0] ?? "")
   }
 
+  /** Coche ou décoche (choix multiple) ; un seul choix : le prend et ferme. */
   function choose(next: string) {
+    setQuery("")
+    setActive(null)
     if (!multiple) {
       commit(next ? [next] : [])
-      setOpen(false)
-      setQuery("")
+      setOpenState(false)
       return
     }
     if (!next) { commit([]); return }
@@ -160,60 +189,147 @@ export function ChoicePicker({ label, value, options, onChange, disabled = false
     // seul celui qu'on coche ou décoche change.
     const isKey = (item: (typeof current)[number]) => foldName(item.option?.value ?? item.raw) === key || foldName(item.raw) === key
     commit(current.some(isKey) ? current.filter((item) => !isKey(item)).map((item) => item.raw) : [...current.map((item) => item.raw), next])
+  }
+
+  /** Ajoute des noms sans jamais en retirer (un nom créé, des noms collés). */
+  function add(names: string[]) {
     setQuery("")
+    setActive(null)
+    if (!multiple) { if (names[0]) { commit([names[0]]); setOpenState(false) } return }
+    const kept = current.map((item) => item.raw)
+    const known = new Set(current.flatMap((item) => [foldName(item.raw), foldName(item.option?.value ?? item.raw)]))
+    const added = names.filter((name) => !known.has(foldName(name)) && Boolean(known.add(foldName(name))))
+    if (added.length) commit([...kept, ...added])
   }
 
   async function create(name: string) {
-    if (!onCreate) return choose(name)
+    if (!onCreate) return add([name])
     setCreating(true)
-    try { await onCreate(name); choose(name) } finally { setCreating(false) }
+    try { await onCreate(name); add([name]) } finally { setCreating(false) }
+  }
+
+  /** Ce qu'Entrée (ou une virgule) valide : l'entrée surlignée. */
+  function validate(index: number) {
+    const entry = entries[index]
+    if (!entry) return
+    if (entry.create) void create(typed)
+    // Déjà choisi : Entrée le garde (seul un clic décoche).
+    else if (multiple && selected.has(foldName(entry.value))) { setQuery(""); setActive(null) }
+    else choose(entry.value)
+  }
+
+  /** Plusieurs noms collés d'un coup : chacun est reconnu, sinon créé (jamais d'un nom à moitié juste). */
+  async function paste(text: string) {
+    const names: string[] = []
+    setCreating(true)
+    try {
+      for (const name of splitTypedNames(text)) {
+        const known = options.find((option) => foldName(option.value) === foldName(name)) ?? matchChoice(name, options)
+        if (known) names.push(known.value)
+        else if (onCreate) { await onCreate(name); names.push(name) }
+        else if (allowCustom) names.push(name)
+      }
+    } finally { setCreating(false) }
+    add(names)
   }
 
   const closed = values.length
-    ? <span className={`flex min-w-0 ${multiple || modes ? "flex-wrap gap-1 py-1" : ""} items-center`}>{current.map((item, index) => <span key={`${item.raw}:${index}`} className="contents">{modes && index > 0 && <span className="text-muted-foreground">|</span>}<ChoicePill value={item.option?.value ?? item.raw} option={item.option} group={groupOf(item.option)} outside={!item.option} renderValue={renderValue} boxed={multiple && current.length > 1} strict={strict} /></span>)}</span>
+    ? <span className={`flex min-w-0 ${multiple || modes ? "flex-wrap gap-1 py-1" : ""} items-center`}>{current.map((item, index) => <span key={`${item.raw}:${index}`} className="contents">{modes && index > 0 && <span className="text-muted-foreground">|</span>}<ChoicePill value={item.option?.value ?? item.raw} option={item.option} group={groupOf(item.option)} outside={!item.option && !trusted} renderValue={renderValue} boxed={multiple && current.length > 1} strict={strict} /></span>)}</span>
     : <span className="text-muted-foreground">—</span>
 
-  return <Popover open={open} onOpenChange={(next) => { setOpen(next); if (!next) setQuery("") }}>
+  const optionButton = (hit: ChoiceHit<ChoiceOption>, index: number) => <button
+    key={hit.option.value}
+    type="button"
+    ref={index === activeIndex ? (node) => node?.scrollIntoView({ block: "nearest" }) : undefined}
+    onClick={() => choose(hit.option.value)}
+    className={`group flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent ${index === activeIndex ? "bg-accent" : ""}`}
+  >
+    <span className="flex w-full items-center justify-between gap-2"><ChoicePill value={hit.option.value} option={hit.option} group={groupOf(hit.option)} renderValue={renderValue} /><span className="flex shrink-0 items-center gap-1">{hit.close && <span className="rounded-full bg-amber-500/15 px-1.5 text-[10px] font-medium text-amber-700 dark:text-amber-300" title="Écrit presque comme ce que tu tapes">proche</span>}{selected.has(foldName(hit.option.value)) && <Check className="size-3.5" />}</span></span>
+    {hit.option.hint && <span className="hidden text-xs text-muted-foreground group-hover:block">{hit.option.hint}</span>}
+  </button>
+  // La place de chaque option parmi les entrées (« Créer » compte pour la première).
+  const offsets = sections.map((_, at) => (canCreate ? 1 : 0) + sections.slice(0, at).reduce((sum, section) => sum + section.items.length, 0))
+
+  return <Popover open={open} onOpenChange={setOpenState}>
     <PopoverTrigger asChild>
-      <button type="button" aria-label={label} disabled={disabled} title={current[0]?.option?.hint ?? (outsideValues.length ? (strict ? `Introuvable : ${outsideValues.join(", ")}` : "Valeur hors de la liste") : undefined)} className={compact ? `${cellButton} ${multiple ? "h-auto" : ""}` : `${cellButton} min-h-9 border-input bg-background/50`}>
+      <button type="button" aria-label={label} disabled={disabled} onKeyDown={(event) => {
+        // Taper une lettre sur la case fermée ouvre la liste, la lettre déjà dans la recherche : comme écrire dans la case.
+        if (event.key.length !== 1 || event.key === " " || event.ctrlKey || event.metaKey || event.altKey) return
+        event.preventDefault()
+        setQuery(event.key)
+        setActive(null)
+        setOpenState(true)
+      }} title={current[0]?.option?.hint ?? (outsideValues.length && !trusted ? (strict ? `Introuvable : ${outsideValues.join(", ")}` : "Valeur hors de la liste") : undefined)} className={compact ? `${cellButton} ${multiple ? "h-auto" : ""}` : `${cellButton} min-h-9 border-input bg-background/50`}>
         {closed}
         <ChevronDown className="size-4 shrink-0 opacity-50" />
       </button>
     </PopoverTrigger>
-    {open && <PopoverContent align="start" className="w-72 p-0">
-      <div className="border-b p-2"><div className="relative"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input
-        autoFocus
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key !== "Enter") return
-          event.preventDefault()
-          if (shown.length === 1 && !canCreate) choose(shown[0].value)
-          else if (exact) choose(options.find((option) => foldName(option.value) === folded)!.value)
-          else if (canCreate) void create(query.trim())
-        }}
-        placeholder={onCreate || allowCustom ? "Chercher ou saisir…" : "Chercher…"}
-        className="h-8 border-0 bg-muted/45 pl-8 text-sm shadow-none"
-      /></div>{multiple && <p className="mt-1.5 px-1 text-[10px] text-muted-foreground">Plusieurs choix : clique pour cocher ou décocher.</p>}</div>
-      <div className="max-h-72 overflow-y-auto p-1">
-        <button type="button" onClick={() => { commit([]); if (!multiple) setOpen(false) }} className="flex w-full rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-accent">{multiple ? "Tout décocher" : "—"}</button>
-        {!folded && outsideValues.map((outside) => <div key={outside} className="flex items-center gap-1">
+    {open && <PopoverContent align="start" className="w-80 p-0">
+      <div className="border-b p-2">
+        {multiple && current.length > 0 && <div className="mb-2 flex max-h-24 flex-wrap gap-1 overflow-y-auto">
+          {current.map((item, index) => <span key={`${item.raw}:${index}`} className={`inline-flex max-w-full items-center gap-0.5 rounded-full border py-0.5 pl-2 pr-0.5 text-xs ${!item.option && !trusted ? (strict ? "border-dashed border-destructive/60 text-destructive" : "italic text-muted-foreground") : "bg-muted/40"}`}>
+            <span className="min-w-0 truncate">{item.option?.value ?? item.raw}</span>
+            <button type="button" onClick={() => commit(current.filter((_, other) => other !== index).map((kept) => kept.raw))} className="rounded-full p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label={`Retirer ${item.option?.value ?? item.raw}`} title="Retirer"><X className="size-3" /></button>
+          </span>)}
+        </div>}
+        <div className="relative"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input
+          autoFocus
+          value={query}
+          disabled={creating}
+          role="combobox"
+          aria-expanded
+          aria-label={`Chercher dans ${label}`}
+          onChange={(event) => { setQuery(event.target.value); setActive(null) }}
+          onPaste={(event) => {
+            const text = event.clipboardData.getData("text")
+            if (!multiple || !/[,;\n]/.test(text)) return
+            event.preventDefault()
+            void paste(`${query},${text}`)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault()
+              if (!entries.length) return
+              const from = activeIndex < 0 ? (event.key === "ArrowDown" ? -1 : entries.length) : activeIndex
+              setActive(Math.max(0, Math.min(entries.length - 1, from + (event.key === "ArrowDown" ? 1 : -1))))
+              return
+            }
+            // Choix multiple : une virgule valide le nom tapé et laisse la liste ouverte pour le suivant.
+            if ((event.key === "Enter" || (multiple && (event.key === "," || event.key === ";"))) && !event.nativeEvent.isComposing) {
+              if (event.key !== "Enter" && !typed) { event.preventDefault(); return }
+              event.preventDefault()
+              validate(activeIndex)
+              return
+            }
+            // Effacer sans rien de tapé retire le dernier nom choisi.
+            if (event.key === "Backspace" && multiple && !query && current.length) {
+              event.preventDefault()
+              commit(current.slice(0, -1).map((item) => item.raw))
+            }
+          }}
+          placeholder={onCreate || allowCustom ? "Commence à taper un nom…" : "Chercher…"}
+          className="h-8 border-0 bg-muted/45 pl-8 text-sm shadow-none"
+        /></div>
+        <p className="mt-1.5 truncate px-1 text-[10px] text-muted-foreground">{typed && entries[activeIndex]
+          ? <>{multiple ? "Entrée ou virgule" : "Entrée"} : {entries[activeIndex].create ? <>créer « <b className="font-semibold text-primary">{typed}</b> »</> : <>{multiple && selected.has(foldName((entries[activeIndex] as { value: string }).value)) ? "garder" : "prendre"} « <b className="font-semibold text-foreground">{(entries[activeIndex] as { value: string }).value}</b> »</>} · ↑↓ : changer</>
+          : multiple ? "Tape un nom : Entrée ou virgule l’ajoute · ↑↓ : choisir · un clic coche ou décoche" : "Tape un nom : Entrée valide · ↑↓ : choisir"}</p>
+      </div>
+      <div className="max-h-72 overflow-y-auto p-1" role="listbox" aria-label={label}>
+        {canCreate && <button type="button" disabled={creating} ref={activeIndex === 0 ? (node) => node?.scrollIntoView({ block: "nearest" }) : undefined} onClick={() => void create(typed)} className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm font-medium text-primary hover:bg-primary/10 ${activeIndex === 0 ? "bg-primary/10" : ""}`}>
+          {creating ? <LoaderCircle className="size-3.5 shrink-0 animate-spin" /> : <Plus className="size-3.5 shrink-0" />}
+          <span className="min-w-0 truncate">{onCreate ? `Créer « ${typed} »${createLabel ? ` dans ${createLabel}` : ""}` : `Utiliser « ${typed} »`}</span>
+        </button>}
+        {!typed && <button type="button" onClick={() => { commit([]); if (!multiple) setOpenState(false) }} className="flex w-full rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-accent">{multiple ? "Tout décocher" : "—"}</button>}
+        {!typed && !trusted && outsideValues.map((outside) => <div key={outside} className="flex items-center gap-1">
           <button type="button" onClick={() => choose(outside)} className={`flex min-w-0 flex-1 items-center justify-between gap-2 truncate rounded-md px-2 py-1.5 text-left text-sm italic hover:bg-accent ${strict ? "text-destructive" : "text-muted-foreground"}`} title={strict ? "Introuvable dans la liste : décoche-le et choisis le bon nom" : "Valeur de la feuille, hors de la liste"}><span className="truncate">{outside}</span>{multiple && <Check className="size-3.5 shrink-0" />}</button>
           {onCreate && <button type="button" disabled={creating} onClick={() => void create(outside)} className="shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold text-primary hover:bg-primary/10">Créer</button>}
         </div>)}
         {loading && <p className="flex items-center gap-2 px-2 py-2 text-xs text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />Chargement…</p>}
-        {sections.map((section) => <div key={section.group?.name ?? "*"}>
+        {sections.map((section, at) => <div key={section.group?.name ?? "*"}>
           {section.group && <p className="flex items-center gap-1.5 px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{section.group.color && <span className="size-2 rounded-full" style={{ backgroundColor: section.group.color }} />}{section.group.name}</p>}
-          {section.items.map((option) => <button key={option.value} type="button" onClick={() => choose(option.value)} className="group flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent">
-            <span className="flex w-full items-center justify-between gap-2"><ChoicePill value={option.value} option={option} group={groupOf(option)} renderValue={renderValue} />{selected.has(foldName(option.value)) && <Check className="size-3.5 shrink-0" />}</span>
-            {option.hint && <span className="hidden text-xs text-muted-foreground group-hover:block">{option.hint}</span>}
-          </button>)}
+          {section.items.map((hit, place) => optionButton(hit, offsets[at] + place))}
         </div>)}
-        {canCreate && <button type="button" disabled={creating} onClick={() => void create(query.trim())} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm font-medium text-primary hover:bg-primary/10">
-          {creating ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
-          <span className="truncate">{onCreate ? `Créer « ${query.trim()} »${createLabel ? ` dans ${createLabel}` : ""}` : `Utiliser « ${query.trim()} »`}</span>
-        </button>}
-        {!loading && !shown.length && !canCreate && <p className="px-2 py-3 text-center text-xs text-muted-foreground">Aucun choix ne correspond.</p>}
+        {!loading && !hits.length && !canCreate && <p className="px-2 py-3 text-center text-xs text-muted-foreground">Aucun choix ne correspond.</p>}
       </div>
     </PopoverContent>}
   </Popover>
@@ -248,6 +364,21 @@ export function primeWorldIndexData(index: WorldIndexKey, data: LoadedWorldIndex
   if (!dataCache.has(index)) dataCache.set(index, Promise.resolve(data))
 }
 
+// Les index qu'une page a déjà sous la main (l'index affiché) : leurs listes liées et colonnes
+// liées vers eux-mêmes lisent ses lignes au lieu de redemander l'index au serveur.
+const localData = new Map<string, LoadedWorldIndex>()
+
+/**
+ * La page affiche cet index et prête ses lignes à jour aux listes qui le lisent ; à rappeler à
+ * chaque changement. Renvoie de quoi les reprendre quand la page se ferme.
+ */
+export function provideWorldIndexData(index: WorldIndexKey, data: LoadedWorldIndex) {
+  localData.set(index, data)
+  for (const key of [...namesCache.keys()]) if (key.startsWith(`${index}:`)) namesCache.delete(key)
+  for (const listener of [...reloadListeners]) listener(index)
+  return () => { if (localData.get(index) === data) localData.delete(index) }
+}
+
 export function loadWorldIndexData(index: WorldIndexKey) {
   let promise = dataCache.get(index)
   if (!promise) {
@@ -277,7 +408,8 @@ export function loadWorldIndexOptions(source: ChoiceSource) {
   const key = sourceKey(source)
   let promise = namesCache.get(key)
   if (!promise) {
-    promise = loadWorldIndexData(source.index).then((data) => {
+    const local = localData.get(source.index)
+    promise = (local ? Promise.resolve(local) : loadWorldIndexData(source.index)).then((data) => {
       // Une liste liée propose les noms de tous les onglets de l'index (un lieu peut être une
       // ville comme un pays), sauf si elle se limite à son onglet ou écarte certaines lignes.
       const tables = (data?.tables ?? []).filter((table) => !source.onlyTab || table.tabName === source.tab)
@@ -344,24 +476,83 @@ export function useWorldIndexVersion(index: string) {
   return version
 }
 
-/** Les choix d'une liste liée : ceux de chaque source, réunis (un même nom une seule fois). */
+/**
+ * Les choix d'une liste liée : ceux de chaque source, réunis (un même nom une seule fois).
+ * `null` tant qu'ils se chargent. Sans source (colonne liée fermée), rien n'est lu.
+ */
 export function useWorldIndexOptions(sources: ChoiceSource[]) {
-  const [options, setOptions] = useState<ChoiceOption[] | null>(null)
+  const [loaded, setLoaded] = useState<{ key: string; options: ChoiceOption[] } | null>(null)
   const versions = sources.map((source) => source.index)
   const version = useWorldIndexVersion(versions[0] ?? "")
   const key = sources.map(sourceKey).join("|")
   useEffect(() => {
+    if (!sources.length) return
     let alive = true
     void Promise.all(sources.map(loadWorldIndexOptions)).then((lists) => {
       if (!alive) return
       const byName = new Map<string, ChoiceOption>()
       for (const option of lists.flat()) if (!byName.has(foldName(option.value))) byName.set(foldName(option.value), option)
-      setOptions([...byName.values()].sort((left, right) => left.value.localeCompare(right.value, "fr")))
+      setLoaded({ key, options: [...byName.values()].sort((left, right) => left.value.localeCompare(right.value, "fr")) })
     })
     return () => { alive = false }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` résume les sources
   }, [key, version])
-  return options
+  if (!sources.length) return NO_OPTIONS
+  // D'autres sources que celles déjà chargées : on attend les nouvelles (rien de périmé affiché).
+  return loaded?.key === key ? loaded.options : null
+}
+
+const NO_OPTIONS: ChoiceOption[] = []
+const NO_SOURCES: ChoiceSource[] = []
+
+/** Les noms d'une colonne liée ↔ : sans balises, un nom par entrée. */
+function linkedNamesOf(value: string) {
+  return joinListValue(splitNames(value.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&")))
+}
+
+/**
+ * Colonne liée ↔ : on commence à taper, les noms des onglets liés sont proposés (fautes de
+ * frappe comprises) ; un nom absent est créé dans l'index lié à l'enregistrement, comme avant,
+ * avec sa réponse en face. Les noms ne sont chargés qu'à l'ouverture (des centaines de cases
+ * dans un tableau), et les choix ne sont enregistrés qu'en refermant : une seule écriture,
+ * et une seule mise à jour des colonnes d'en face, pour plusieurs noms ajoutés.
+ */
+export function LinkedNamesPicker({ sources, value, onChange, label, compact = true, disabled = false }: { sources: ChoiceSource[]; value: string; onChange: (value: string) => void; label: string; compact?: boolean; disabled?: boolean }) {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState<string | null>(null)
+  const [shown, setShown] = useOptimistic(linkedNamesOf(value))
+  const loaded = useWorldIndexOptions(open ? sources : NO_SOURCES)
+  // Le choix en cours n'est jamais perdu : la case qui disparaît (défilement, autre onglet) l'enregistre.
+  const pending = useRef<{ next: string; save: (value: string) => void } | null>(null)
+  useEffect(() => () => { const left = pending.current; pending.current = null; if (left) left.save(left.next) }, [])
+  const first = sources[0]
+  const target = first ? (isBuiltinWorldIndexKey(first.index) ? `l’index ${worldIndexDefinitions[first.index].title}` : "l’index lié") : undefined
+  function flush() {
+    const left = pending.current
+    pending.current = null
+    setDraft(null)
+    if (!left) return
+    setShown(left.next)
+    left.save(left.next)
+  }
+  return <ChoicePicker
+    label={label}
+    value={draft ?? shown}
+    options={open ? loaded ?? [] : NO_OPTIONS}
+    loading={open && loaded === null}
+    multiple
+    trusted
+    compact={compact}
+    disabled={disabled}
+    createLabel={target}
+    // Le nom est créé par le serveur en enregistrant la case (avec la colonne qui répond en face).
+    onCreate={async () => undefined}
+    onOpenChange={(next) => { setOpen(next); if (!next) flush() }}
+    onChange={(next) => {
+      setDraft(next)
+      pending.current = next === shown ? null : { next, save: onChange }
+    }}
+  />
 }
 
 /**
@@ -1027,10 +1218,19 @@ export function indexGridColumn(key: string, label: string, input: IndexColumnSp
   const { valueOf, commit } = context
   const off = (rowKey: string) => Boolean(context.disabled || spec.readOnly || context.lockedRow?.(rowKey))
   switch (spec.kind) {
-    case "name":
     case "linked":
+      // La page sait d'où viennent les noms : on les choisit dans une liste, au lieu de les
+      // taper séparés par des virgules (le copier-coller de la grille reste du texte).
+      if (spec.linkedFrom?.length) {
+        const sources = spec.linkedFrom
+        column.control = (rowKey) => <LinkedNamesPicker label={label} sources={sources} value={valueOf(rowKey, key)} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
+        break
+      }
       // Les noms et les colonnes liées déclenchent des liens : on attend la sortie de la
       // cellule, sinon un nom à moitié tapé (« Yfl ») créerait une entité.
+      column.commitDelay = Infinity
+      break
+    case "name":
       column.commitDelay = Infinity
       break
     case "name-form":
@@ -1220,6 +1420,8 @@ function IndexFieldOfType({ label, spec: input, value, onChange, long = false, a
   const title = hideLabel
     ? <span className="sr-only">{label}</span>
     : <span className={cn("flex items-center gap-1", labelLook?.className)} style={labelLook?.color ? { color: labelLook.color } : undefined}>{labelLook?.icon && <IndexIconGlyph icon={labelLook.icon} className="size-3.5" filled={false} />}{label}{spec.kind === "linked" && <Link2 className="size-3 text-primary" aria-label="Colonne liée" />}{spec.readOnly && <span className="font-normal text-muted-foreground" title="Lecture seule : se modifie ailleurs">· lecture seule</span>}{spec.description && <span className="font-normal text-muted-foreground" title={spec.description}>ⓘ</span>}</span>
+  // Colonne liée ↔ dont la page connaît les onglets liés : les noms se choisissent dans une liste.
+  if (spec.kind === "linked" && spec.linkedFrom?.length) return <div className={`${fieldLabel} ${long ? "md:col-span-2" : ""}`}>{title}{styled(<LinkedNamesPicker compact={false} label={label} sources={spec.linkedFrom} value={value} disabled={disabled} onChange={onChange} />)}</div>
   switch (spec.kind) {
     case "choice":
       return <div className={fieldLabel}>{title}{styled(<ChoicePicker compact={false} label={label} value={value} options={spec.options ?? []} allowCustom={spec.allowCustom} multiple={spec.multiple} groups={spec.groups} disabled={disabled} onChange={onChange} />)}</div>
