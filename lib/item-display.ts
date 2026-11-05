@@ -38,7 +38,7 @@ export const itemZoneHints: Record<ItemPlace, Record<ItemZone, string>> = {
     name: "Après le nom et ses charges.",
     under: "La ligne fine sous le nom, reliée par « · ».",
     description: "Repliée sous son chevron, dépliée d’un clic.",
-    effect: "Toujours visible, sous la description.",
+    effect: "Sous la description ; caché sous un œil (un clic le montre) dans les fiches des joueurs, l’inventaire de la campagne et les compagnons.",
   },
   shop: {
     name: "Après la rareté du tirage et les exemplaires.",

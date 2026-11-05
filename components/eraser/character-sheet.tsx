@@ -1670,7 +1670,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     if (tab.type === "competences") return renderSkillsContent()
     if (tab.type === "inventaire") return inventoryLoading
       ? <div className="grid min-h-32 place-items-center rounded-2xl border border-dashed"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>
-      : <CharacterInventory characterId={character.id} inventory={inventory} onInventoryChange={setInventory} />
+      : <CharacterInventory characterId={character.id} inventory={inventory} onInventoryChange={setInventory} effectBehindEye />
     if (tab.type === "classe") {
       const progression = <ClassProgression classes={assignedClasses} spells={availableClassSpells} level={currentLevel} characterLevel={characterLevel} value={classChoicesValue} onCommit={(value) => commit(characterClassChoicesIndex, value)} loading={classCatalogLoading} error={classCatalogError} ownerId={character.id} onOpenChoice={() => setSpellChoiceOpen(true)} onSpellRemoved={() => setSpellChoiceWanted(true)} />
       const spellGauges = gaugesAt("sorts")

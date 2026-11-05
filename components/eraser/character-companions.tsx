@@ -276,7 +276,7 @@ function CompanionSheet({ characterId, companionId, color, kindLabel, name, subt
         </button>
         {/* Une fois ouvert, le sac reste monté (caché quand il est replié) : le rouvrir ne le recharge pas. */}
         {backpackMounted && <div className={`border-t p-3 ${backpackOpen ? "" : "hidden"}`}>
-          <CharacterInventory characterId={companionId} endpoint={`/api/characters/${encodeURIComponent(characterId)}/companions/${encodeURIComponent(companionId)}/inventory`} mode="npc" />
+          <CharacterInventory characterId={companionId} endpoint={`/api/characters/${encodeURIComponent(characterId)}/companions/${encodeURIComponent(companionId)}/inventory`} mode="npc" effectBehindEye />
         </div>}
       </div>
     </div>

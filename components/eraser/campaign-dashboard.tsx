@@ -43,7 +43,7 @@ function DeferredCampaignInventory({ campaignId, readOnly }: { campaignId: strin
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
-  return <div ref={anchorRef} className="min-h-32">{visible && <CharacterInventory characterId={campaignId} endpoint={`/api/campaigns/${encodeURIComponent(campaignId)}/inventory`} flat readOnly={readOnly} />}</div>
+  return <div ref={anchorRef} className="min-h-32">{visible && <CharacterInventory characterId={campaignId} endpoint={`/api/campaigns/${encodeURIComponent(campaignId)}/inventory`} flat readOnly={readOnly} effectBehindEye />}</div>
 }
 
 export function CampaignDashboard({

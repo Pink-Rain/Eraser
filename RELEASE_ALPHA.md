@@ -1,22 +1,16 @@
-# Eraser 0.1.1-alpha.264 — Gravé et lisible
+# Eraser 0.1.1-alpha.265 — L'œil sur l'effet
 
-Cette version arrive **sans réinstallation** (enveloppe 10, comme l'alpha 263) : Eraser la
+Cette version arrive **sans réinstallation** (enveloppe 10, comme l'alpha 264) : Eraser la
 télécharge, redémarre son serveur et recharge la page tout seul. Rien ne change dans Google Sheets.
 
-L'alpha 263 a habillé Eraser en IM Fell. Celle-ci ajoute deux polices qui tranchent avec elle,
-chacune à une seule place, pour que l'œil sache où il est :
-
-- **Cinzel pour les grands titres** : les titres de page et le titre de la session dans la
-  bannière du journal passent en capitales gravées, façon inscription romaine, avec leur vrai
-  gras. Les autres titres (sections, cartes, notes) restent en IM Fell Double Pica SC : la
-  hiérarchie se lit d'un coup d'œil. La taille est réglée pour que les titres longs tiennent,
-  y compris sur un petit écran.
-- **Alegreya Sans pour les petites étiquettes** : tout ce qui est écrit très petit (compteurs,
-  libellés en capitales comme « ÉVÉNEMENTS » ou « GROUPE », moments de la frise, « n°1 », touches
-  du clavier) passe dans une sans-serif aux racines calligraphiques, nette à 10 px, là où IM Fell
-  devenait pâteuse. Ses chiffres sont modernes : « 1 », « 11 », « 21 » sans hésitation.
-- Le texte courant reste en IM Fell Double Pica, avec les chiffres d'EB Garamond. Une police
-  choisie exprès (« Avec empattement », « Titre » dans les index…) reste la sienne. Les documents
-  de campagne gardent exactement leurs polices et leurs retours à la ligne.
-- Bannière du journal : l'en-tête « Journal de… » est un peu plus petit sur téléphone, pour ne
-  plus toucher le bord.
+- **L'effet des items se cache sous un œil** : dans l'inventaire de la fiche d'un personnage,
+  l'inventaire commun de la campagne et le sac à dos des PNJ et créatures de l'onglet Compagnons,
+  tout ce que « Affichage des items » place « avec l'effet » (l'effet lui-même, mais aussi
+  attributs, matériaux, runes, compétence, distance, actions, rechargement et les colonnes
+  ajoutées) n'est plus étalé sous chaque item. À sa place, une ligne discrète « Effet » précédée
+  d'un œil : un clic montre l'effet, un second le recache. L'inventaire devient bien plus court
+  à parcourir, et on n'ouvre que ce qu'on veut lire.
+- L'effet reste modifiable comme avant une fois montré.
+- Ailleurs, rien ne bouge : l'inventaire d'un PNJ vu par le MJ (page PNJ, tabletop), les blocs
+  Inventaire des index, les magasins et les fouilles affichent l'effet comme d'habitude.
+- « Index des items › Modifier › Affichage des items » le rappelle sous la zone « Avec l'effet ».

@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent, type ReactNode, type SetStateAction } from "react"
-import { Anvil, ArrowDownToLine, ArrowLeft, Backpack, BookOpen, Check, ChevronDown, ChevronRight, Coins, Gem, LoaderCircle, Minus, MoveRight, PackageOpen, Pencil, Plus, Search, Shield, Sword, Trash2, UserRound, Users, X } from "lucide-react"
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent, type ReactNode, type SetStateAction } from "react"
+import { Anvil, ArrowDownToLine, ArrowLeft, Backpack, BookOpen, Check, ChevronDown, ChevronRight, Coins, Eye, EyeOff, Gem, LoaderCircle, Minus, MoveRight, PackageOpen, Pencil, Plus, Search, Shield, Sword, Trash2, UserRound, Users, X } from "lucide-react"
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { useInventoryReceived } from "@/components/eraser/item-notifications"
@@ -201,7 +201,7 @@ function ItemCharges({ item, raw, readOnly, onChange }: { item: Partial<Record<"
 /**
  * La description d'un item, et ce que « Affichage des items » place avec elle : repliée par
  * défaut (une ligne grisée, en entier au survol), dépliée d'un clic sur son chevron. L'effet,
- * lui, reste toujours affiché.
+ * lui, reste affiché, sauf dans les inventaires des joueurs où il attend sous son œil.
  */
 function ItemDescription({ item, template, readOnly, withDescription, extras, onCommit, onRichCommit }: { item: NonNullable<InventorySlotRecord["item"]>; template: ObjectCombatFields & { id?: string }; readOnly: boolean; /** La description est placée ici (sinon : seulement ce qui l'accompagne). */ withDescription: boolean; extras: ReactNode[]; onCommit: (value: string) => Promise<void>; onRichCommit: (html: string) => void }) {
   const [open, setOpen] = useState(false)
@@ -219,6 +219,25 @@ function ItemDescription({ item, template, readOnly, withDescription, extras, on
   </div>
 }
 
+/**
+ * L'effet caché derrière un œil : tout ce que « Affichage des items » place « avec l'effet »
+ * (l'effet, les traits de combat, les colonnes ajoutées). Seulement dans les inventaires que les
+ * joueurs ont sous les yeux : la fiche de personnage, l'inventaire commun de la campagne et le sac
+ * des compagnons (onglet Compagnons de la fiche). Ailleurs (PNJ du MJ, index), l'effet reste affiché.
+ */
+const EffectBehindEyeContext = createContext(false)
+
+function ItemEffectReveal({ itemName, parts }: { itemName: string; parts: ReactNode[] }) {
+  const [shown, setShown] = useState(false)
+  const label = shown ? `Cacher l’effet de ${itemName}` : `Voir l’effet de ${itemName}`
+  return <div className="flex min-w-0 items-start gap-1">
+    <button type="button" onClick={() => setShown((current) => !current)} className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded hover:bg-muted hover:text-foreground ${shown ? "text-primary" : "text-muted-foreground/70"}`} aria-expanded={shown} aria-label={label} title={shown ? "Cacher l’effet" : "Voir l’effet"}>{shown ? <EyeOff className="size-3" /> : <Eye className="size-3" />}</button>
+    {shown
+      ? <div className="grid min-w-0 flex-1 gap-1">{parts}</div>
+      : <button type="button" onClick={() => setShown(true)} className="min-w-0 flex-1 truncate text-left text-muted-foreground/45" title="Voir l’effet">Effet</button>}
+  </div>
+}
+
 function InventoryItemLine({ slot, container, compatibleContainers, transferTargets, targetsLoading, pending, readOnly, flat, ensureTargets, mutate }: { slot: InventorySlotRecord; container: InventoryContainerRecord; compatibleContainers: InventoryContainerRecord[]; transferTargets: InventoryTransferTarget[]; targetsLoading: boolean; pending: boolean; readOnly: boolean; flat: boolean; ensureTargets: () => Promise<void>; mutate: Mutate }) {
   const item = slot.item
   const fresh = useNewSlot(slot.id)
@@ -226,6 +245,7 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
   const [linking, setLinking] = useState(false)
   const [reading, setReading] = useState(false)
   const itemDisplay = useItemDisplay()
+  const effectBehindEye = useContext(EffectBehindEyeContext)
   const modifiers = parseItemModifiers(slot.modifiers)
   // Un document donné par le MJ (page Document) : il s'ouvre d'un clic.
   const documentRef = documentOfItem(slot.modifiers)
@@ -299,7 +319,7 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
           {!readOnly && <Popover open={moving} onOpenChange={(open) => { setMoving(open); if (open) void ensureTargets() }}><PopoverTrigger asChild><button type="button" disabled={pending} className={`flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted ${moving ? "bg-muted text-foreground" : ""}`} aria-label={`Transférer ${item.name}`} title="Transférer"><MoveRight className="size-3.5" /></button></PopoverTrigger><PopoverContent align="end" side="bottom" className="w-80 p-3"><InventoryTransferPicker itemName={item.name} slotId={slot.id} expected={expected} internalTargets={internalTargets} transferTargets={transferTargets} loading={targetsLoading} pending={pending} mutate={mutate} onDone={() => setMoving(false)} /></PopoverContent></Popover>}
           {!readOnly && <AlertDialog><AlertDialogTrigger asChild><button type="button" disabled={pending} className="flex size-7 shrink-0 items-center justify-center rounded-md text-destructive/75 hover:bg-destructive/10" aria-label={`Retirer complètement ${item.name}`}><Trash2 className="size-3.5" /></button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Retirer « {item.name} » ?</AlertDialogTitle><AlertDialogDescription>Cet item sera retiré de cet inventaire.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: 0, ...expected }, `slot:${slot.id}`)}>Retirer</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>}
         </div>
-        <div className="mt-2 grid gap-1 text-xs leading-5 text-muted-foreground empty:hidden"><ItemDescription readOnly={readOnly} item={item} template={shown} withDescription={withDescription} extras={descriptionParts} onCommit={(description) => update({ description }).then(() => undefined)} onRichCommit={(descriptionHtml) => void update({ description: richTextPlainText(descriptionHtml), descriptionHtml })} />{effectParts}</div>
+        <div className="mt-2 grid gap-1 text-xs leading-5 text-muted-foreground empty:hidden"><ItemDescription readOnly={readOnly} item={item} template={shown} withDescription={withDescription} extras={descriptionParts} onCommit={(description) => update({ description }).then(() => undefined)} onRichCommit={(descriptionHtml) => void update({ description: richTextPlainText(descriptionHtml), descriptionHtml })} />{effectBehindEye && effectParts.length > 0 ? <ItemEffectReveal itemName={item.name} parts={effectParts} /> : effectParts}</div>
       </div>
     </div>
     {documentRef && <DocumentViewerDialog document={reading ? { campaignId: documentRef.campaignId, documentId: documentRef.documentId, title: item.name } : null} onClose={() => setReading(false)} />}
@@ -409,7 +429,7 @@ function withOverrides(inventory: CharacterInventoryRecord, equipped: Record<str
   return { ...inventory, containers: inventory.containers.map((container) => container.slots.some((slot) => touched(slot.id)) ? { ...container, slots: container.slots.map((slot) => touched(slot.id) ? { ...slot, ...(slot.id in equipped ? { equipped: equipped[slot.id] } : {}), ...(slot.id in quantities ? { quantity: quantities[slot.id] } : {}) } : slot) } : container) }
 }
 
-export function CharacterInventory({ characterId, initialInventory, endpoint, flat = false, readOnly = false, mode = "character", inventory: controlledInventory, onInventoryChange, categories }: { characterId: string; initialInventory?: CharacterInventoryRecord; endpoint?: string; flat?: boolean; readOnly?: boolean; mode?: "character" | "npc"; inventory?: CharacterInventoryRecord | null; onInventoryChange?: (inventory: CharacterInventoryRecord) => void; /** Seulement ces familles (un bloc Inventaire « Armes seulement » d'une fiche d'index). */ categories?: InventoryCategory[] }) {
+export function CharacterInventory({ characterId, initialInventory, endpoint, flat = false, readOnly = false, mode = "character", inventory: controlledInventory, onInventoryChange, categories, effectBehindEye = false }: { characterId: string; initialInventory?: CharacterInventoryRecord; endpoint?: string; flat?: boolean; readOnly?: boolean; mode?: "character" | "npc"; inventory?: CharacterInventoryRecord | null; onInventoryChange?: (inventory: CharacterInventoryRecord) => void; /** Seulement ces familles (un bloc Inventaire « Armes seulement » d'une fiche d'index). */ categories?: InventoryCategory[]; /** L'effet des items caché derrière un œil (inventaires des joueurs). */ effectBehindEye?: boolean }) {
   // Mode contrôlé : la fiche de personnage détient l’inventaire pour que l’onglet
   // Compétences voie les mêmes items équipés. Sinon le composant gère son état.
   const controlled = Boolean(onInventoryChange)
@@ -588,7 +608,7 @@ export function CharacterInventory({ characterId, initialInventory, endpoint, fl
   }
   const sectionProps = { inventory, pendingKey, openSearch, catalogLoading, searches, flat: effectiveFlat, readOnly, transferTargets, targetsLoading, setSearches, openItemSearch: (containerId: string) => void openItemSearch(containerId), closeItemSearch: () => setOpenSearch(null), openContainerCreation, openContainerEdition, openItemCreation, ensureTargets, mutate, isFolded: folds.isFolded, toggleFold: folds.toggle }
   if (initialLoading) return <div className="grid min-h-32 place-items-center rounded-2xl border border-dashed"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>
-  return <NewSlotsContext.Provider value={newSlots}><section>
+  return <NewSlotsContext.Provider value={newSlots}><EffectBehindEyeContext.Provider value={effectBehindEye}><section>
     {pendingKey && <div className="mb-3 flex justify-end"><LoaderCircle className="size-4 animate-spin text-muted-foreground" /></div>}
     {error && <p className="mb-3 rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive">{error}</p>}
     {notice && <p className="mb-3 flex items-center gap-2 rounded-xl border px-4 py-3 text-sm" style={{ borderColor: `${categoryPresentation[GROUND_CATEGORY].color}55`, color: categoryPresentation[GROUND_CATEGORY].color }}><ArrowDownToLine className="size-4 shrink-0" /><span className="flex-1">{notice}</span><button type="button" onClick={() => setNotice("")} className="rounded-md p-1 hover:bg-muted" aria-label="Fermer"><X className="size-3.5" /></button></p>}
@@ -597,5 +617,5 @@ export function CharacterInventory({ characterId, initialInventory, endpoint, fl
     <Dialog open={addingCategory !== null} onOpenChange={(open) => { if (!open) setAddingCategory(null) }}><DialogContent><DialogHeader><DialogTitle>Ajouter {addingCategory ? categoryPresentation[addingCategory].singular : "un contenant"}</DialogTitle></DialogHeader><div className="mt-2 grid gap-4">{addingCategory && inventory.containerTypes.some((type) => type.category === addingCategory) && <Label className="grid gap-1.5 text-sm font-medium">Modèle<NativeSelect value="" onChange={(event) => { const preset = inventory.containerTypes.find((type) => type.id === event.target.value); if (preset) setNewContainer({ name: preset.name, capacity: String(preset.capacity) }) }}><NativeSelectOption value="">Choisir…</NativeSelectOption>{inventory.containerTypes.filter((type) => type.category === addingCategory).map((type) => <NativeSelectOption key={type.id} value={type.id}>{type.name} · {type.capacity}</NativeSelectOption>)}</NativeSelect></Label>}<Label className="grid gap-1.5 text-sm font-medium">Nom<Input value={newContainer.name} onChange={(event) => setNewContainer((current) => ({ ...current, name: event.target.value }))} maxLength={120} /></Label><Label className="grid gap-1.5 text-sm font-medium">{addingCategory === "Bourse" ? "Capacité" : "Emplacements"}<Input type="number" min={1} max={10000} value={newContainer.capacity} onChange={(event) => setNewContainer((current) => ({ ...current, capacity: event.target.value }))} /></Label><Button type="button" disabled={!addingCategory || !newContainer.name.trim() || !Number(newContainer.capacity) || Boolean(pendingKey)} onClick={async () => { if (!addingCategory) return; const saved = await mutate({ action: "create-container", name: newContainer.name, category: addingCategory, capacity: Number(newContainer.capacity) }, `create:${addingCategory}`); if (saved) setAddingCategory(null) }}><Plus />Ajouter</Button></div></DialogContent></Dialog>
     <Dialog open={editingContainer !== null} onOpenChange={(open) => { if (!open) setEditingContainer(null) }}><DialogContent><DialogHeader><DialogTitle>Modifier le contenant</DialogTitle></DialogHeader><div className="mt-2 grid gap-4"><Label className="grid gap-1.5 text-sm font-medium">Nom<Input value={editedContainer.name} onChange={(event) => setEditedContainer((current) => ({ ...current, name: event.target.value }))} maxLength={120} /></Label><Label className="grid gap-1.5 text-sm font-medium">{editingContainer?.category === "Bourse" ? "Capacité" : "Emplacements"}<Input type="number" min={1} max={10000} value={editedContainer.capacity} onChange={(event) => setEditedContainer((current) => ({ ...current, capacity: event.target.value }))} /></Label><Button type="button" disabled={!editingContainer || !editedContainer.name.trim() || !Number(editedContainer.capacity) || Boolean(pendingKey)} onClick={async () => { if (!editingContainer) return; const saved = await mutate({ action: "update-container", containerId: editingContainer.id, name: editedContainer.name, capacity: Number(editedContainer.capacity) }, `container:${editingContainer.id}:edit`); if (saved) setEditingContainer(null) }}><Check />Enregistrer</Button></div></DialogContent></Dialog>
     <Dialog open={creatingItemFor !== null} onOpenChange={(open) => { if (!open) setCreatingItemFor(null) }}><DialogContent className="sm:max-w-2xl"><DialogHeader><DialogTitle>Créer un item</DialogTitle></DialogHeader><div className="grid gap-4 sm:grid-cols-2"><Label className="grid gap-1.5 text-sm font-medium">Nom<Input value={newItem.name} onChange={(event) => setNewItem((current) => ({ ...current, name: event.target.value }))} maxLength={160} autoFocus /></Label><Label className="grid gap-1.5 text-sm font-medium">Type<Input value={newItem.type} onChange={(event) => setNewItem((current) => ({ ...current, type: event.target.value }))} placeholder="Arme, équipement, ressource…" /></Label><Label className="grid gap-1.5 text-sm font-medium sm:col-span-2">Sous-type<Input value={newItem.subtype} onChange={(event) => setNewItem((current) => ({ ...current, subtype: event.target.value }))} /></Label><div className="grid gap-1.5 text-sm font-medium sm:col-span-2 leading-none">Description<RichTextField ariaLabel="Description" value={newItem.description} onCommit={(html) => setNewItem((current) => ({ ...current, description: html }))} minHeight="min-h-24" /></div><div className="grid gap-1.5 text-sm font-medium sm:col-span-2 leading-none">Effet<RichTextField ariaLabel="Effet" value={newItem.effect} onCommit={(html) => setNewItem((current) => ({ ...current, effect: html }))} minHeight="min-h-24" /></div><div className="flex justify-end gap-2 sm:col-span-2"><Button type="button" variant="ghost" onClick={() => setCreatingItemFor(null)}>Annuler</Button><Button type="button" disabled={!creatingItemFor || !newItem.name.trim() || Boolean(pendingKey)} onClick={async () => { if (!creatingItemFor) return; const saved = await mutate({ action: "create-item", containerId: creatingItemFor.id, ...newItem }, `container:${creatingItemFor.id}:item`); if (saved) { setCreatingItemFor(null); setOpenSearch(null) } }}><Plus />Créer et ajouter</Button></div></div></DialogContent></Dialog>
-  </section></NewSlotsContext.Provider>
+  </section></EffectBehindEyeContext.Provider></NewSlotsContext.Provider>
 }
