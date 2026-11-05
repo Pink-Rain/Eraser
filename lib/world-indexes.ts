@@ -48,6 +48,7 @@ import { mustReread } from "@/lib/request-freshness"
 import type { JdrSheetKey } from "@/lib/jdr-sheets"
 import { customIndexEntry, idPrefixOf, isCustomIndexKey, listCustomIndexes } from "@/lib/custom-indexes"
 import { choiceCorrection, newIndexId, type IndexColumnSpec, type SpellSource, type TabColumnSettings } from "@/lib/index-columns"
+import { autoFillTargetsOf, autoFillValue, cleanAutoFill, plainCellText, plannedAutoFills } from "@/lib/index-autofill"
 import { applyLockOverride, lockOverrideOf } from "@/lib/index-locks"
 import { listIndexLocks, tabLocksOf } from "@/lib/index-locks-store"
 import { findEntry, readSchema, rewriteSchema, upsertEntry } from "@/lib/index-schema"
@@ -1501,7 +1502,7 @@ async function renameSpellReferences(key: WorldIndexKey, oldName: string, newNam
 export function updateWorldIndexCell(key: WorldIndexKey, tabName: string, row: WorldIndexRowRef, header: string, html: string, options: { previous?: string; guard?: WorldIndexRowGuard; onWarning?: (message: string) => void } = {}) {
   return serialized(async () => {
     const sheet = await writableWorkbook(key)
-    const before = await plainTable(key, tabName, [header])
+    const before = await plainTable(key, tabName, [header, ...autoFillWanted(key, tabName, [header])])
     const rowIndex = resolveRow(before, row)
     const column = columnOf(before.headers, header)
     if (column < 0) throw new Error("WORLD_INDEX_COLUMN_NOT_FOUND")
@@ -1520,15 +1521,199 @@ export function updateWorldIndexCell(key: WorldIndexKey, tabName: string, row: W
     // l'écriture soit annoncée comme refusée : la page croirait la case non enregistrée, et
     // la modification suivante serait refusée comme « changée entre-temps ».
     const changed = new Set<WorldIndexKey>()
+    let linked: WorldIndexKey[]
     try {
-      return await propagateCellLinks(key, tabName, before, rowIndex, column, target, current, html, changed)
+      linked = await propagateCellLinks(key, tabName, before, rowIndex, column, target, current, html, changed)
     } catch (error) {
       console.error("WORLD_INDEX_LINKS_FAILED", key, error instanceof Error ? error.message : "UNKNOWN_ERROR")
       invalidateWorldIndexes(changed)
       options.onWarning?.("La case est enregistrée, mais les index liés n’ont pas tous pu être mis à jour. Actualise-les, puis réécris la case si un lien manque.")
-      return [...changed]
+      linked = [...changed]
     }
+    // Les colonnes qui se remplissent d'après celle-ci (« Rangement » d'après « Genre ») : la
+    // case est enregistrée, un échec ici ne l'annule pas. L'index est alors renvoyé à la page.
+    const isName = column === labelColumnIndex(before.headers)
+    const written = refOf(before, rowIndex)
+    try {
+      const filled = new Set<WorldIndexKey>()
+      if (await autoFillRow(key, tabName, isName ? { ...written, name: htmlToRichText(html).text.replace(/\s+/g, " ").trim() } : written, [target], [], options.guard, filled)) linked = [...new Set([...linked, key, ...filled])]
+    } catch (error) {
+      console.error("WORLD_INDEX_AUTOFILL_FAILED", key, error instanceof Error ? error.message : "UNKNOWN_ERROR")
+      invalidateWorldIndexes([key])
+      options.onWarning?.("La case est enregistrée, mais les colonnes qui se remplissent d’après elle n’ont pas pu l’être. Actualise, puis réécris la case.")
+    }
+    return linked
   })
+}
+
+/**
+ * Les colonnes d'un onglet réglées pour se remplir d'après une autre (« Remplissage
+ * automatique » de « Modifier ») : seul le schéma les règle.
+ */
+function autoFillColumnsOf(key: WorldIndexKey, tabName: string) {
+  const schema = effectiveIndexes.get(key)?.schema ?? []
+  return schema.flatMap((entry) => entry.tab === tabName && entry.column && !trashed(entry) && entry.spec?.autoFill?.from
+    ? [{ header: entry.column, spec: effectiveColumnSpec(key, tabName, entry.column, schema) }]
+    : [])
+}
+
+/** Ce qu'il faut lire en plus d'une feuille immense (les personnages) pour remplir d'après `sources`. */
+function autoFillWanted(key: WorldIndexKey, tabName: string, sources: string[]) {
+  const columns = autoFillColumnsOf(key, tabName)
+  if (!sources.some((source) => autoFillTargetsOf(columns, source).length)) return []
+  return columns.flatMap((column) => [column.header, column.spec.autoFill!.from])
+}
+
+/** Une case telle qu'elle est lue dans la feuille (texte), d'après ce qu'on y écrit (texte ou HTML). */
+function writtenText(key: WorldIndexKey, tabName: string, header: string, value: string) {
+  return /<[a-z]/i.test(value) && !isHtmlTextColumn(key, tabName, header) ? htmlToRichText(value).text : value
+}
+
+/**
+ * Écrit des cases d'un onglet en deux envois au plus : les valeurs simples ensemble, les
+ * textes mis en forme ensemble (une case HTML-en-texte garde son HTML tel quel).
+ */
+async function writeTabCells(key: WorldIndexKey, tabName: string, spreadsheetId: string, cells: Array<{ rowNumber: number; column: number; header: string; value: string }>) {
+  const data: Array<{ range: string; values: string[][] }> = []
+  const formatted: typeof cells = []
+  for (const cell of cells) {
+    if (/<[a-z]/i.test(cell.value) && !isHtmlTextColumn(key, tabName, cell.header)) { formatted.push(cell); continue }
+    const at = `${columnName(cell.column + 1)}${cell.rowNumber}`
+    data.push({ range: sheetTabRange(tabName, `${at}:${at}`), values: [[cell.value]] })
+  }
+  if (data.length) {
+    await googleSheetsJson(`spreadsheets/${spreadsheetId}/values:batchUpdate`, { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data }) })
+    clearSpreadsheetReadCache(spreadsheetId)
+  }
+  if (!formatted.length) return
+  const sheetId = await sheetIdOf(spreadsheetId, tabName)
+  await googleSheetsJson(`spreadsheets/${spreadsheetId}:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({ requests: formatted.map((cell) => {
+      const rich = htmlToRichText(cell.value.slice(0, 50_000))
+      return { updateCells: {
+        range: { sheetId, startRowIndex: cell.rowNumber - 1, endRowIndex: cell.rowNumber, startColumnIndex: cell.column, endColumnIndex: cell.column + 1 },
+        rows: [{ values: [{ userEnteredValue: { stringValue: rich.text }, textFormatRuns: rich.runs }] }],
+        fields: "userEnteredValue,textFormatRuns",
+      } }
+    }) }),
+  })
+  clearSpreadsheetReadCache(spreadsheetId)
+}
+
+/**
+ * Remplit les colonnes réglées d'après `changedHeaders` dans une ligne qu'on vient d'écrire
+ * (relue : un lien a pu écrire dans cet onglet entre-temps). `skip` : les colonnes que
+ * l'écriture vient de donner elle-même (la saisie gagne). Les colonnes liées remplies
+ * suivent de l'autre côté. Renvoie `true` si une case a été écrite.
+ */
+async function autoFillRow(key: WorldIndexKey, tabName: string, row: WorldIndexRowRef, changedHeaders: string[], skip: string[], guard: WorldIndexRowGuard | undefined, changed: Set<WorldIndexKey>) {
+  const columns = autoFillColumnsOf(key, tabName)
+  if (!changedHeaders.some((header) => autoFillTargetsOf(columns, header).length)) return false
+  const table = await plainTable(key, tabName, [...changedHeaders, ...autoFillWanted(key, tabName, changedHeaders)])
+  const rowIndex = findRow(table, row)
+  if (rowIndex < 1) return false
+  const cellOf = (header: string) => { const at = columnOf(table.headers, header); return at >= 0 ? table.rows[rowIndex]?.[at] ?? "" : "" }
+  const plan = plannedAutoFills(columns, changedHeaders, cellOf, skip)
+  const cells = [...plan.values()].flatMap(({ column, value }) => {
+    const at = columnOf(table.headers, column.header)
+    return at < 0 ? [] : [{ rowNumber: rowIndex + 1, column: at, header: table.headers[at], value }]
+  })
+  if (!cells.length) return false
+  await guard?.({ id: rowId(table, rowIndex), headers: cells.map((cell) => cell.header) })
+  const previous = new Map(cells.map((cell) => [foldName(cell.header), table.rows[rowIndex]?.[cell.column] ?? ""]))
+  await writeTabCells(key, tabName, table.spreadsheetId, cells)
+  await patchCachedRow(key, tabName, cachedIdentityOf(table, rowIndex), cells.map((cell) => ({ header: cell.header, html: cell.value })))
+  for (const cell of cells) (table.rows[rowIndex] ||= [])[cell.column] = writtenText(key, tabName, cell.header, cell.value)
+  // Une colonne liée remplie : les noms qu'elle ne cite plus sont retirés en face, les nouveaux inscrits.
+  const name = rowName(table, rowIndex)
+  const ends = linkEndsOf(key, tabName).filter(([end]) => previous.has(foldName(end.column)))
+  if (name && ends.length) {
+    for (const [end, other] of ends) {
+      const kept = new Set(splitNames(cellOf(end.column)).map(foldName))
+      for (const removed of splitNames(previous.get(foldName(end.column)) ?? "")) {
+        if (!kept.has(foldName(removed)) && await removeLink(other, removed, name)) changed.add(other.index)
+      }
+    }
+    await syncRowLinks(key, tabName, refOf(table, rowIndex), changed)
+    invalidateWorldIndexes(changed)
+  }
+  return true
+}
+
+/**
+ * « Remplir les lignes existantes » : la colonne `header` reçoit, dans chaque ligne de
+ * l'onglet, la valeur réglée pour sa source (et les colonnes remplies d'après elle suivent).
+ * Une ligne dont la source n'a pas de réglage garde sa case. Tout part en deux envois ; les
+ * colonnes liées sont mises à jour en face une fois par ligne citée. Renvoie le nombre de
+ * lignes changées.
+ */
+export function fillWorldIndexAutoColumn(key: WorldIndexKey, tabName: string, header: string) {
+  return serialized(async () => {
+    await writableWorkbook(key)
+    const columns = autoFillColumnsOf(key, tabName)
+    const own = columns.find((column) => foldName(column.header) === foldName(header))
+    if (!own?.spec.autoFill) throw new Error("WORLD_INDEX_AUTOFILL_NOT_SET")
+    const source = own.spec.autoFill.from
+    const table = await plainTable(key, tabName, [own.header, source, ...columns.flatMap((column) => [column.header, column.spec.autoFill!.from])])
+    if (columnOf(table.headers, own.header) < 0 || columnOf(table.headers, source) < 0) throw new Error("WORLD_INDEX_COLUMN_NOT_FOUND")
+    const cells: Array<{ rowNumber: number; column: number; header: string; value: string }> = []
+    const previous = new Map<string, string>()
+    table.rows.forEach((values, rowIndex) => {
+      if (rowIndex === 0 || !values?.some((value) => String(value ?? "").trim())) return
+      const cellOf = (name: string) => { const at = columnOf(table.headers, name); return at >= 0 ? values[at] ?? "" : "" }
+      const value = autoFillValue(own.spec.autoFill, cellOf(source))
+      if (value === undefined || plainCellText(value) === plainCellText(cellOf(own.header))) return
+      const downstream = plannedAutoFills(columns, [own.header], (name) => foldName(name) === foldName(own.header) ? value : cellOf(name), [source])
+      for (const { column, value: filled } of [{ column: own, value }, ...downstream.values()]) {
+        const at = columnOf(table.headers, column.header)
+        if (at < 0) continue
+        previous.set(`${rowIndex}:${at}`, values[at] ?? "")
+        cells.push({ rowNumber: rowIndex + 1, column: at, header: table.headers[at], value: filled })
+      }
+    })
+    if (!cells.length) return 0
+    await writeTabCells(key, tabName, table.spreadsheetId, cells)
+    const changed = new Set<WorldIndexKey>([key])
+    // Colonnes liées : pour chaque ligne citée en face, les noms à ajouter et à retirer, écrits d'un coup.
+    for (const [end, other] of linkEndsOf(key, tabName)) {
+      const column = columnOf(table.headers, end.column)
+      const moves = new Map<string, { target: string; add: string[]; remove: string[] }>()
+      const move = (target: string) => { const known = moves.get(foldName(target)); if (known) return known; const fresh = { target, add: [], remove: [] }; moves.set(foldName(target), fresh); return fresh }
+      for (const cell of cells) {
+        if (cell.column !== column) continue
+        const name = rowName(table, cell.rowNumber - 1)
+        if (!name) continue
+        const before = splitNames(previous.get(`${cell.rowNumber - 1}:${cell.column}`) ?? "")
+        const after = splitNames(writtenText(key, tabName, cell.header, cell.value))
+        for (const target of before) if (!after.some((item) => foldName(item) === foldName(target))) move(target).remove.push(name)
+        for (const target of after) if (!before.some((item) => foldName(item) === foldName(target)) && !isSelfLink(key, tabName, other, target, name)) move(target).add.push(name)
+      }
+      for (const { target, add, remove } of moves.values()) if (await relinkMany(other, target, add, remove)) changed.add(other.index)
+    }
+    invalidateWorldIndexes(changed)
+    return new Set(cells.map((cell) => cell.rowNumber)).size
+  })
+}
+
+/** Ajoute et retire d'un coup des noms dans la colonne `end` de la ligne `targetName` (créée au besoin pour un ajout). */
+async function relinkMany(end: LinkAnswer, targetName: string, add: string[], remove: string[]) {
+  const { tab, table, rowIndex } = await locateLinked(end, targetName)
+  const nameColumn = nameColumnIndex(table.headers)
+  const linkColumn = columnOf(table.headers, end.column)
+  if (nameColumn < 0 || linkColumn < 0) return false
+  if (rowIndex <= 0) {
+    if (!add.length || !bornFromNames(end.index)) return false
+    await writeNewRow(end.index, table, tab, table.headers.map((_, index) => index === nameColumn ? targetName : index === linkColumn ? splitNames(add.join(", ")).join(", ") : ""))
+    return true
+  }
+  const current = splitNames(table.rows[rowIndex][linkColumn] || "")
+  const removed = new Set(remove.map(foldName))
+  const kept = current.filter((name) => !removed.has(foldName(name)))
+  const next = splitNames([...kept, ...add].join(", "))
+  if (next.join(", ") === current.join(", ")) return false
+  await writeCell(table, tab, rowIndex, linkColumn, next.join(", "))
+  return true
 }
 
 /** Les effets d'une case écrite sur les index liés : renommages, liens retirés ou ajoutés. */
@@ -1592,6 +1777,15 @@ export function addWorldIndexRow(key: WorldIndexKey, tabName: string, provided: 
     // Une case HTML-en-texte (le vocabulaire) est écrite avec son HTML, comme sa page l'écrit.
     const htmlText = current.headers.map((header) => isHtmlTextColumn(key, tabName, header))
     const plain = html.map((value, column) => htmlText[column] ? value : htmlToRichText(value).text)
+    // Remplissage automatique : une case laissée vide reçoit la valeur réglée pour sa source.
+    const typed = current.headers.filter((_, column) => plain[column]?.trim())
+    const fills = plannedAutoFills(autoFillColumnsOf(key, tabName), typed, (header) => { const at = columnOf(current.headers, header); return at >= 0 ? plain[at] ?? "" : "" }, typed)
+    for (const { column, value } of fills.values()) {
+      const at = columnOf(current.headers, column.header)
+      if (at < 0 || plain[at]?.trim()) continue
+      html[at] = value
+      plain[at] = htmlText[at] ? value : writtenText(key, tabName, column.header, value)
+    }
     const nameColumn = nameColumnIndex(current.headers)
     if (nameColumn >= 0 && !plain[nameColumn].trim()) throw new Error("WORLD_INDEX_NAME_REQUIRED")
     // Une entité du même nom existe déjà (créée par un lien, par exemple) : on la
@@ -1767,7 +1961,7 @@ export function deleteWorldIndexRows(key: WorldIndexKey, tabName: string, rows: 
 export function updateWorldIndexFields(key: WorldIndexKey, tabName: string, row: WorldIndexRowRef, fields: Record<string, string>, options: { previous?: Record<string, string>; guard?: WorldIndexRowGuard } = {}) {
   return serialized(async () => {
     const sheet = await writableWorkbook(key)
-    const table = await plainTable(key, tabName, Object.keys(fields))
+    const table = await plainTable(key, tabName, [...Object.keys(fields), ...autoFillWanted(key, tabName, Object.keys(fields))])
     const rowIndex = resolveRow(table, row)
     const current = table.rows[rowIndex] ?? []
     const nameColumn = nameColumnIndex(table.headers)
@@ -1816,6 +2010,14 @@ export function updateWorldIndexFields(key: WorldIndexKey, tabName: string, row:
       // Les cases sont écrites : un renommage des sorts cités qui échoue ne les annule pas.
       await renameSpellReferences(key, oldName, newName).catch((error) => {
         console.error("WORLD_INDEX_SPELL_RENAME_FAILED", key, error instanceof Error ? error.message : "UNKNOWN_ERROR")
+      })
+    }
+    // Les colonnes qui se remplissent d'après les champs changés ; un champ donné ici gagne.
+    if (written.length) {
+      const filled = new Set<WorldIndexKey>()
+      await autoFillRow(key, tabName, newName ? { ...refOf(table, rowIndex), name: newName } : refOf(table, rowIndex), written.map((cell) => cell.header), Object.keys(fields), options.guard, filled).catch((error) => {
+        console.error("WORLD_INDEX_AUTOFILL_FAILED", key, error instanceof Error ? error.message : "UNKNOWN_ERROR")
+        invalidateWorldIndexes([key])
       })
     }
     return written.length
@@ -2103,6 +2305,14 @@ async function ensureReciprocal(key: WorldIndexKey, tab: string, header: string,
   return tabs.map((targetTab) => ({ index: link.index, tab: targetTab, column }))
 }
 
+/** Un réglage de colonne venu de la page, son remplissage automatique vérifié (rien de réglé : retiré). */
+function withCleanAutoFill(spec: IndexColumnSpec): IndexColumnSpec {
+  if (!("autoFill" in spec)) return spec
+  const { autoFill, ...rest } = spec
+  const clean = cleanAutoFill(autoFill)
+  return clean ? { ...rest, autoFill: clean } : rest
+}
+
 /** Les valeurs d'une nouvelle ligne réglées sur les colonnes d'un onglet (« Valeur d'une nouvelle ligne »). */
 function defaultValuesOf(key: WorldIndexKey, tabName: string, headers: string[]): Array<[string, string]> {
   const schema = effectiveIndexes.get(key)?.schema ?? []
@@ -2271,7 +2481,7 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
             if (link) await reciprocalOf(key, tab.name, header, link)
             await appendHeader(sheet.spreadsheetId, tab.name, header)
           }
-          edit((entries) => upsertEntry(entries, tab.name, header, { spec: operation.spec, state: "ajouté", deletedAt: "" }))
+          edit((entries) => upsertEntry(entries, tab.name, header, { spec: withCleanAutoFill(operation.spec), state: "ajouté", deletedAt: "" }))
           // Même déjà créée en face, la réponse est complétée : elle peut viser plus d'onglets.
           if (link) await reciprocal(tab.name, header, link)
           continue
@@ -2299,6 +2509,8 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
               if (other.tab !== tab.name || !other.spec) continue
               if (other.spec.lookup?.via && foldName(other.spec.lookup.via) === foldName(from)) other.spec = { ...other.spec, lookup: { ...other.spec.lookup, via: to } }
               if (other.spec.rollup?.via && foldName(other.spec.rollup.via) === foldName(from)) other.spec = { ...other.spec, rollup: { ...other.spec.rollup, via: to } }
+              // Le remplissage automatique suit aussi sa colonne source.
+              if (other.spec.autoFill?.from && foldName(other.spec.autoFill.from) === foldName(from)) other.spec = { ...other.spec, autoFill: { ...other.spec.autoFill, from: to } }
             }
             // La colonne « Onglet » placée après elle la suit aussi.
             const tabColumn = findEntry(entries, TAB_COLUMN_ENTRY.tab, TAB_COLUMN_ENTRY.column)
@@ -2312,7 +2524,7 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
         if (operation.op === "spec") {
           const current = effectiveColumnSpec(key, tab.name, operation.header, schema)
           if (!isDisplayOnlyChange(current, operation.spec)) assertPolicy(policy.type || Boolean(operation.force), policy.reasons)
-          edit((entries) => upsertEntry(entries, tab.name, operation.header, { spec: operation.spec }))
+          edit((entries) => upsertEntry(entries, tab.name, operation.header, { spec: withCleanAutoFill(operation.spec) }))
           if (operation.spec.kind === "linked" && operation.spec.link && !current.link) await reciprocal(tab.name, operation.header, operation.spec.link)
           continue
         }

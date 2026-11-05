@@ -57,6 +57,7 @@ import { cryptoRandom, drawRandom, drawText, type RandomCandidateRow } from "@/l
 import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
 import { shownReferenceText } from "@/components/eraser/reference-store"
 import type { IndexEditorModel, SchemaOperation } from "@/lib/index-schema-shared"
+import { plannedAutoFills } from "@/lib/index-autofill"
 import {
   foldName,
   isBuiltinWorldIndexKey,
@@ -521,6 +522,16 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     const editKey = `${rowKey}:${columnKey}`
     localEdits.current[editKey] = value
     editsInFlight.current[editKey] = (editsInFlight.current[editKey] ?? 0) + 1
+    // Remplissage automatique : les colonnes réglées d'après celle-ci affichent tout de suite leur
+    // nouvelle valeur ; le serveur fait la même chose dans la feuille (`lib/index-autofill.ts`).
+    const sourceHeader = found.table.headers[column]
+    const autoColumns = found.table.headers.flatMap((header) => { const spec = specOf(found.table.tabName, header); return spec.autoFill ? [{ header, spec }] : [] })
+    const planned = autoColumns.length ? [...plannedAutoFills(autoColumns, [sourceHeader], (header) => foldName(header) === foldName(sourceHeader) ? value : rawOf(rowKey, header)).values()] : []
+    const fillKeys = planned.map((fill) => ({ key: `${rowKey}:${fill.column.header}`, fill: fill.value }))
+    for (const { key, fill } of fillKeys) {
+      localEdits.current[key] = fill
+      editsInFlight.current[key] = (editsInFlight.current[key] ?? 0) + 1
+    }
     engineRef.current?.invalidate()
     setSaving((current) => current + 1)
     let saved = false
@@ -530,6 +541,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       saved = true
       editsInFlight.current[editKey] -= 1
       editsSettledAt.current[editKey] = requestSeq.current
+      for (const { key } of fillKeys) { editsInFlight.current[key] -= 1; editsSettledAt.current[key] = requestSeq.current }
       if (payload.data) applyData(payload.data, payload.seq)
       // Une valeur de rangement fait naître (ou disparaître) son onglet : l'index gardé ici
       // reçoit la valeur tout de suite, sans attendre une relecture.
@@ -555,6 +567,11 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         // la vraie valeur, et ne sera pas refusée à son tour comme « changée entre-temps ».
         // (Le texte tapé reste dans la case, ou dans la fiche, pour être repris.)
         if (localEdits.current[editKey] === value) delete localEdits.current[editKey]
+        // Les cases remplies d'après elle reviennent à leur valeur.
+        for (const { key, fill } of fillKeys) {
+          editsInFlight.current[key] -= 1
+          if (localEdits.current[key] === fill) delete localEdits.current[key]
+        }
         engineRef.current?.invalidate()
       }
       // Un bouton (ou la fiche) s'arrête à la première écriture refusée et affiche lui-même pourquoi.
@@ -1592,7 +1609,11 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     try {
       // Champ par champ, comme dans le tableau : un nom renommé ou une colonne liée gardent leurs
       // effets. Le premier champ refusé (changé ailleurs entre-temps) arrête la suite.
-      for (const [header, value] of Object.entries(changes)) {
+      // Une colonne au remplissage automatique est écrite après sa source : ce que la fiche y a
+      // saisi l'emporte sur la valeur réglée.
+      const tabOfRow = found?.table.tabName ?? ""
+      const ordered = Object.entries(changes).sort(([left], [right]) => Number(Boolean(specOf(tabOfRow, left).autoFill)) - Number(Boolean(specOf(tabOfRow, right).autoFill)))
+      for (const [header, value] of ordered) {
         await commitCell(rowKey, header, value, { row: target ?? undefined, rethrow: true })
         if (target && foldName(header) === foldName(label)) target.name = value
       }
@@ -1690,7 +1711,14 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     router.push("/ressources")
   }
 
-  async function applyEditor(operations: SchemaOperation[]) {
+  /** « Remplir les lignes existantes » d'une colonne au remplissage automatique ; renvoie le nombre de lignes changées. */
+  async function fillAutoColumn(tabName: string, header: string) {
+    const payload = await post({ action: "fill-auto-column", tabName, header }) as Awaited<ReturnType<typeof post>> & { filled?: number }
+    if (payload.data) applyData(payload.data, payload.seq)
+    return payload.filled ?? 0
+  }
+
+  async function applyEditor(operations: SchemaOperation[], extras?: { fillAutoColumns: Array<{ tab: string; header: string }> }) {
     setPending("schema"); setEditorError("")
     const seq = ++requestSeq.current
     try {
@@ -1699,6 +1727,11 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       if (!response.ok || !payload.data) throw new Error(payload.error || "Les changements n’ont pas pu être écrits.")
       applyData(payload.data, seq)
       announceWorldIndexChange([indexKey], origin)
+      // Un remplissage automatique nouveau ou changé : les lignes déjà là le reçoivent aussi.
+      // Les réglages sont enregistrés : un échec ici le dit, sans les annuler.
+      for (const fill of extras?.fillAutoColumns ?? []) await fillAutoColumn(fill.tab, fill.header).catch((reason: unknown) => {
+        setError(`Réglages enregistrés, mais « ${fill.header} » n’a pas pu être remplie dans les lignes existantes : ${reason instanceof Error ? reason.message : "erreur inconnue"} (« Remplir les lignes existantes », dans Modifier, recommence).`)
+      })
       if (isObjects) {
         // « Affichage des items » suit une colonne renommée, quand plus aucun onglet n'a l'ancien nom.
         const remaining = new Set(Object.values(payload.data.columns).flat().map((column) => foldName(column.header)))
@@ -1732,7 +1765,8 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         pending={pending === "schema"}
         error={editorError}
         onClose={() => { if (pending !== "schema") closeEditor() }}
-        onApply={(operations) => void applyEditor(operations)}
+        onApply={(operations, extras) => void applyEditor(operations, extras)}
+        onFillAutoColumn={fillAutoColumn}
         onDeleteIndex={() => void deleteIndex()}
         layouts={settings.layouts}
         onSaveLayouts={settings.saveLayouts}

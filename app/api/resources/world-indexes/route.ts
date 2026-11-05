@@ -18,6 +18,7 @@ import {
   normalizeWorldIndexChoices,
   trashWorldIndexRows,
   updateWorldIndexCell,
+  fillWorldIndexAutoColumn,
   updateWorldIndexFields,
   worldIndexRowGuard,
   type WorldIndexRowRef,
@@ -33,6 +34,7 @@ const conflicts: Record<string, string> = {
   WORLD_INDEX_ROW_DUPLICATE: "Plusieurs lignes portent cet identifiant dans Google Sheets : actualise (ou corrige le doublon dans Sheets) puis recommence.",
   WORLD_INDEX_CELL_CHANGED: "Cette case a été modifiée entre-temps (dans Sheets ou par quelqu’un d’autre) : actualise pour voir sa valeur actuelle, puis recommence.",
   WORLD_INDEX_COLUMN_NOT_FOUND: "Cette colonne n’existe plus dans Google Sheets : actualise puis recommence.",
+  WORLD_INDEX_AUTOFILL_NOT_SET: "Le remplissage automatique de cette colonne n’est pas encore enregistré : enregistre « Modifier », puis recommence.",
   // « Classes et rangs » : la feuille des sorts a changé depuis que la page l'a lue.
   CLASS_SPELL_CHANGED: "La feuille a changé entre-temps : actualise puis recommence.",
   CLASS_SPELL_MOVED: "La feuille a changé entre-temps : actualise puis recommence.",
@@ -162,6 +164,12 @@ export async function POST(request: Request) {
       if (guard) throw new Error("WORLD_INDEX_WRITE_DENIED")
       const corrected = await normalizeWorldIndexChoices(key)
       return NextResponse.json({ ok: true, corrected, data: await withExtras(await getWorldIndex(key)) })
+    }
+    if (body.action === "fill-auto-column" && typeof body.header === "string" && body.header.trim()) {
+      // « Remplir les lignes existantes » réécrit des cases de toutes les lignes : pas pour un MJ dans les personnages ou les campagnes.
+      if (guard) throw new Error("WORLD_INDEX_WRITE_DENIED")
+      const filled = await fillWorldIndexAutoColumn(key, body.tabName, body.header)
+      return NextResponse.json({ ok: true, filled, data: await withExtras(await getWorldIndex(key)) })
     }
     if (body.action === "add" && Array.isArray(body.values)) {
       const headers = Array.isArray(body.headers) ? body.headers.map((header) => String(header ?? "")) : undefined

@@ -206,6 +206,28 @@ sont les mêmes réglages.
   réglage, écrit après, effacerait le lien). Ajoutées ensemble et se visant l’une l’autre, les
   deux colonnes sont acceptées : la seconde, déjà créée par la première, est seulement réglée.
 
+## Remplissage automatique
+
+Toute colonne qu’on saisit peut se remplir d’après une autre colonne de la même ligne
+(« Modifier » › une colonne › « Remplissage automatique ») : `autoFill: { from, rules, otherwise }`
+dans son réglage (schéma « Eraser · colonnes »), modèle pur `lib/index-autofill.ts`, éditeur
+`components/eraser/index-autofill-editor.tsx`. Chaque règle donne, pour une valeur de la source,
+la valeur de la case telle que l’écrit le champ de son type (`IndexField`).
+- La valeur est **écrite dans la feuille**, comme une saisie : tout lecteur de la colonne la voit.
+  Le moteur l’écrit quand la source change dans une case (`updateWorldIndexCell`), une fiche
+  (`updateWorldIndexFields` : un champ donné gagne) ou une nouvelle ligne (`addWorldIndexRow` :
+  seulement une case laissée vide). La page l’affiche aussitôt (`plannedAutoFills` dans `commitCell`).
+- La valeur entière de la source d’abord, puis chacun de ses morceaux (« Potion, Arme »), sans
+  accents ni casse ; sans règle ni « Toute autre valeur », la case n’est pas touchée.
+- En chaîne (une colonne remplie en remplit une autre), chaque colonne une fois au plus ;
+  l’éditeur refuse une boucle ou une source calculée (`autoFillProblem`).
+- « Remplir les lignes existantes » (action `fill-auto-column`, `fillWorldIndexAutoColumn`) : deux
+  envois à Google au plus, plus une écriture par ligne citée en face pour une colonne liée ;
+  refusé à un MJ dans les personnages et les campagnes.
+- Une colonne liée remplie suit en face (noms retirés et ajoutés). La source renommée est suivie.
+- Réglable même quand la colonne est verrouillée (`isDisplayOnlyChange`) : il n’écrit que des
+  valeurs de son type.
+
 ## L’Index des items, un index du moteur
 
 L’Index des items est l’index `objects` du moteur (`OBJECTS_INDEX_KEY`,

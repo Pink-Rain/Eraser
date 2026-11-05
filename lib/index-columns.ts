@@ -10,6 +10,7 @@
 import { formatIndexNumber, parseIndexNumber, type NumberFormat } from "@/lib/index-numbers"
 import type { WorldIndexKey } from "@/lib/world-index-definitions"
 import { classSpellCategory, classSpellCategoryTones, classSpellTypeSuggestions } from "@/lib/class-spell-utils"
+import type { AutoFillSettings } from "@/lib/index-autofill"
 
 export type IndexColumnKind =
   | "rich"
@@ -470,6 +471,11 @@ export type IndexColumnSpec = {
    * dans Sheets et reçue avec son identifiant) : « Non », « index-des-pnjs »…
    */
   defaultValue?: string
+  /**
+   * Remplissage automatique (`lib/index-autofill.ts`) : la case reçoit une valeur choisie
+   * d'après une autre colonne de la ligne (« Rangement » d'après « Genre »).
+   */
+  autoFill?: AutoFillSettings
   /** Rareté et emplacements : d'où viennent les lieux (d'office : Lieux › Environnement et Lieux › Magasin). Les raretés sont les `options`. */
   rarityPlaces?: { sources?: ChoiceSource[] }
   /** Liste d'index : le type de colonne qui fait entrer un index dans la liste (« rarity-places »). */

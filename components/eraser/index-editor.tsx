@@ -10,6 +10,8 @@ import { LayoutViewsPanel, PresetBar, useColumnPresets } from "@/components/eras
 import { IndexLayoutEditor, type LayoutColumn } from "@/components/eraser/index-layout-editor"
 import { CardsPanel, IndexCardEditor, duplicateCard } from "@/components/eraser/index-card-editor"
 import { ColumnDescriptionButton, ColumnLockButton, ColumnTypeMenu } from "@/components/eraser/index-column-toolbar"
+import { AutoFillSettingsEditor } from "@/components/eraser/index-autofill-editor"
+import { autoFillProblem, cleanAutoFill } from "@/lib/index-autofill"
 import { IndexPresentationsEditor, LIST_FAMILY, MAIN_PRESENTATION_ID, PresentationsPanel } from "@/components/eraser/index-presentations-editor"
 import { columnStyleCss, pillStyle, stylePalette } from "@/components/eraser/index-style"
 import { creatableKinds } from "@/lib/index-schema-shared"
@@ -197,6 +199,11 @@ export function operationsOf(tabs: DraftTab[], originalTabOrder: string[] = []):
  * La colonne « Onglet » des vues qui couvrent plusieurs onglets (« Tout ») : son libellé, sa
  * place, masquée ou non, et les onglets vers lesquels une ligne peut être déplacée.
  */
+/** Le remplissage automatique de deux réglages est-il le même (tel qu'il s'enregistre) ? */
+function sameAutoFill(spec: IndexColumnSpec, original: IndexColumnSpec | undefined) {
+  return JSON.stringify(cleanAutoFill(spec.autoFill) ?? null) === JSON.stringify(cleanAutoFill(original?.autoFill) ?? null)
+}
+
 /** Les types dont une case peut recevoir une valeur d'office à l'ajout d'une ligne. */
 const DEFAULT_VALUE_KINDS = new Set<IndexColumnKind>(["rich", "number", "checkbox", "choice", "color", "fixed", "tab-sort", "linked-choice"])
 
@@ -212,7 +219,7 @@ function describeOperation(operation: SchemaOperation) {
     case "add-column": return `Nouvelle colonne « ${operation.header} » : ${columnTypeLabel(operation.spec)} (${operation.tab})`
     case "remove-column": return `Colonne « ${operation.header} » mise à la corbeille (${operation.tab})`
     case "rename": return `« ${operation.header} » renommée « ${operation.to} » (${operation.tab})`
-    case "spec": return `« ${operation.header} » : ${columnTypeLabel(operation.spec)} (${operation.tab})`
+    case "spec": return `« ${operation.header} » : ${columnTypeLabel(operation.spec)}${operation.spec.autoFill ? `, remplie d’après « ${operation.spec.autoFill.from} »` : ""} (${operation.tab})`
     case "order-columns": return `Nouvel ordre des colonnes de « ${operation.tab} »`
     case "rename-tab": return `Onglet « ${operation.tab} » renommé « ${operation.to} »`
     case "order-tabs": return `Nouvel ordre des onglets : ${operation.tabs.join(", ")}`
@@ -805,7 +812,7 @@ function useDragList<T extends { id: string }>(items: T[], onMove: (next: T[]) =
  * milieu, les réglages de la colonne choisie à droite, tous visibles. Rien n'est écrit
  * tant qu'on n'a pas enregistré ; le résumé dit exactement ce qui va changer.
  */
-export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {}, layouts = {}, onSaveLayouts, cardsIndex, cards = {}, onSaveCards, initialMode = "columns", initialTab, locks = {}, onSaveLocks, presentations = {}, onSavePresentations, viewPresets = [], onSaveViewPreset, onDeleteViewPreset, previewRows = {}, valuesOf, optionsOf, statsPanel, itemsPanel, stats = [] }: {
+export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {}, layouts = {}, onSaveLayouts, cardsIndex, cards = {}, onSaveCards, initialMode = "columns", initialTab, locks = {}, onSaveLocks, presentations = {}, onSavePresentations, viewPresets = [], onSaveViewPreset, onDeleteViewPreset, previewRows = {}, valuesOf, optionsOf, statsPanel, itemsPanel, stats = [], onFillAutoColumn }: {
   model: IndexEditorModel
   open: boolean
   pending?: boolean
@@ -821,7 +828,10 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   /** Les premières lignes de chaque onglet (en-tête → texte), pour l'aperçu des formules. */
   sampleRows?: Record<string, Array<Record<string, string>>>
   onClose: () => void
-  onApply: (operations: SchemaOperation[]) => void
+  /** `fillAutoColumns` : les colonnes au remplissage automatique (nouveau ou changé) à remplir dans les lignes déjà là, une fois enregistrées. */
+  onApply: (operations: SchemaOperation[], extras?: { fillAutoColumns: Array<{ tab: string; header: string }> }) => void
+  /** « Remplir les lignes existantes » d'une colonne au remplissage automatique enregistré ; renvoie le nombre de lignes changées. */
+  onFillAutoColumn?: (tab: string, header: string) => Promise<number>
   /** Supprimer tout l'index (à la corbeille). Absent : pas de bouton. */
   onDeleteIndex?: () => void
   /** Les mises en page enregistrées (fiche et survol), par onglet. */
@@ -881,6 +891,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   const [confirmClose, setConfirmClose] = useState(false)
   // La carte modifiée, par onglet (le panneau des cartes et l'éditeur la partagent).
   const [selectedCard, setSelectedCard] = useState<Record<string, string | null>>({})
+  // Remplissage automatique réglé ici : remplir aussi les lignes déjà là à l'enregistrement (oui, sauf décoché).
+  const [fillOnSave, setFillOnSave] = useState<Record<string, boolean>>({})
   const readOnly = Boolean(model.readOnly)
   const tab = tabs.find((candidate) => candidate.id === selectedTab) ?? tabs[0]
   const column = tab?.columns.find((candidate) => candidate.id === selectedColumn) ?? tab?.columns[0]
@@ -901,6 +913,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
     }),
     ...candidate.columns.filter((item) => !item.removed && item.spec.kind === "formula" && item.spec.formula?.expression.trim() && formulaProblem(item.spec.formula.expression)).map((item) => `« ${item.header} » : ${formulaProblem(item.spec.formula!.expression)}`),
     ...candidate.columns.filter((item) => !item.removed && item.spec.kind === "gauge" && gaugeScaleOf(item.spec.gauge) === "from-column" && !item.spec.gauge?.maxColumn).map((item) => `« ${item.header} » : choisis la colonne qui donne le maximum de la jauge.`),
+    // Remplissage automatique : seulement ce qui change ici (une source retirée, un réglage nouveau).
+    ...candidate.columns.filter((item) => !item.removed && item.spec.autoFill && (!sameAutoFill(item.spec, item.originalSpec) || candidate.columns.some((other) => other.removed && foldName(other.header) === foldName(item.spec.autoFill!.from)))).map((item) => autoFillProblem(candidate.columns.filter((other) => !other.removed), item.header)),
   ].filter(Boolean).map((problem) => `${candidate.name} : ${problem}`)).concat(linkedColumnProblems(model.key, operations)), [model.key, operations, tabs])
 
   // « Colonnes », ou la mise en page de la fiche ou du survol de l'onglet choisi.
@@ -1107,9 +1121,19 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
       }
       setLayoutSaving(false)
     }
-    if (operations.length) onApply(operations)
+    if (operations.length) onApply(operations, { fillAutoColumns: autoFillsOnSave() })
     else onClose()
   }
+
+  /** Les colonnes dont le remplissage automatique est nouveau ou changé, à remplir dans les lignes déjà là. */
+  function autoFillsOnSave() {
+    return tabs.flatMap((draft) => draft.removed || !draft.original ? [] : draft.columns.flatMap((item) => {
+      const settings = cleanAutoFill(item.spec.autoFill)
+      const changed = !item.original || !sameAutoFill(item.spec, item.originalSpec)
+      return !item.removed && settings && (settings.rules.length || settings.otherwise) && changed && fillOnSave[item.id] !== false ? [{ tab: draft.name.trim(), header: item.header.trim() }] : []
+    }))
+  }
+
 
   const updateTab = (next: DraftTab) => setTabs((current) => current.map((candidate) => candidate.id === next.id ? next : candidate))
   const updateColumn = (next: DraftColumn) => tab && updateTab({ ...tab, columns: tab.columns.map((candidate) => candidate.id === next.id ? next : candidate) })
@@ -1605,6 +1629,19 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               {typeDisabled && !readOnly && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Lock className="size-3.5" />Type verrouillé (cadenas) : la description, l’œil, le style imposé{column.spec.kind === "choice" ? ", les couleurs, les groupes et l’ordre des options" : ""} restent modifiables.</p>}
               <OptionsSettings spec={column.spec} onChange={(spec) => updateColumn({ ...column, spec })} disabled={displayDisabled} />
             </div>
+            <AutoFillSettingsEditor
+              key={column.id}
+              header={column.header.trim()}
+              spec={column.spec}
+              columns={tab.columns.filter((item) => item.id !== column.id && !item.removed).map((item) => ({ header: item.header.trim(), spec: item.spec }))}
+              valuesOf={valuesOf && tab.original ? (header) => valuesOf(tab.original!, tab.columns.find((item) => foldName(item.header) === foldName(header))?.original ?? header) : undefined}
+              disabled={displayDisabled}
+              onChange={(autoFill) => { const next = { ...column.spec, autoFill }; if (!autoFill) delete next.autoFill; updateColumn({ ...column, spec: next }) }}
+              saved={Boolean(column.original && tab.original && column.header.trim() === column.original && tab.name.trim() === tab.original && sameAutoFill(column.spec, column.originalSpec))}
+              fillOnSave={fillOnSave[column.id] !== false}
+              onFillOnSave={(value) => setFillOnSave((current) => ({ ...current, [column.id]: value }))}
+              onFillNow={onFillAutoColumn && tab.original && column.original ? () => onFillAutoColumn(tab.original!, column.original!) : undefined}
+            />
             <StyleSettings spec={column.spec} onChange={(spec) => updateColumn({ ...column, spec })} disabled={displayDisabled} colorColumns={tab.columns.filter((item) => item.id !== column.id && !item.removed && item.header.trim() && isColorSourceSpec(item.spec)).map((item) => item.header.trim())} />
           </> : <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">Choisis une colonne à gauche, ou ajoute-en une.</p>}
         </section>

@@ -150,7 +150,8 @@ export function isDisplayOnlyChange(current: IndexColumnSpec, next: IndexColumnS
   if (!isSameDataKind(a.kind, b.kind)) return false
   const strip = (spec: IndexColumnSpec) => {
     const copy: Record<string, unknown> = { ...spec, kind: spec.kind === "name-form" ? "name" : spec.kind }
-    for (const key of ["hidden", "description", "style", "placement", "form", "display", "groups", "rowLabel"]) delete copy[key]
+    // Le remplissage automatique n'écrit que des valeurs du type de la colonne : réglable même verrouillée.
+    for (const key of ["hidden", "description", "style", "placement", "form", "display", "groups", "rowLabel", "autoFill"]) delete copy[key]
     if (Array.isArray(copy.options)) copy.options = (copy.options as Array<{ value: string }>).map((option) => option.value.trim()).sort()
     return JSON.stringify(stable(copy))
   }

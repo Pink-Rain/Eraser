@@ -681,3 +681,129 @@ test("Lieux › Magasin : complété tout seul à la première ouverture par un 
   assert.equal(google.grid(id, "Magasin").slice(1).filter((row) => row[0]).length, 8);
   assert.equal((await shopTypes.loadShopTypeCatalog({ refresh: true })).missingTypes.length, 0);
 });
+
+test("Remplissage automatique : une colonne reçoit la valeur réglée pour chaque valeur d'une autre, en case, en ligne ajoutée et dans les lignes déjà là", async () => {
+  const headers = definitions.worldIndexDefinitions.peoples.tabs[0].headers;
+  const id = fresh("peoples");
+  google.addSpreadsheet(id, [{ title: "Peuples", grid: [headers,
+    line(headers, { "Nom": "Elfes", "ID": "PEU-1" }),
+    line(headers, { "Nom": "Hauts-Elfes", "ID": "PEU-2" }),
+    line(headers, { "Nom": "Nains", "ID": "PEU-3" }),
+  ] }]);
+  await link("peoples", id, "Peuples");
+  await engine.getWorldIndex("peoples", { refresh: true });
+  await engine.applyWorldSchemaOperations("peoples", [
+    { op: "add-column", tab: "Peuples", header: "Genre", spec: { kind: "choice", options: [{ value: "Sylvain" }, { value: "Souterrain" }] } },
+    // Une règle sans valeur et une source avec espaces sont nettoyées à l'enregistrement.
+    { op: "add-column", tab: "Peuples", header: "Taille", spec: { kind: "number", autoFill: { from: " Genre ", rules: [{ when: "Sylvain", value: "180" }, { when: "Souterrain", value: "130" }, { when: "Céleste", value: "" }] } } },
+    // En chaîne : « Habitat » se remplit d'après « Taille ».
+    { op: "add-column", tab: "Peuples", header: "Habitat", spec: { kind: "rich", autoFill: { from: "Taille", rules: [{ when: "130", value: "<b>Montagnes</b>" }], otherwise: "Plaines" } } },
+  ]);
+  const taille = (await engine.getWorldIndex("peoples", { refresh: true })).columns.Peuples.find((column) => column.header === "Taille");
+  assert.deepEqual(taille.spec.autoFill, { from: "Genre", rules: [{ when: "Sylvain", value: "180" }, { when: "Souterrain", value: "130" }] });
+
+  // Une case : la colonne réglée (et celle d'après elle) suivent, et l'index est renvoyé à la page.
+  const changed = await engine.updateWorldIndexCell("peoples", "Peuples", { rowNumber: 2, id: "PEU-1", name: "Elfes" }, "Genre", "Sylvain");
+  assert.ok(changed.includes("peoples"));
+  let rows = byId(google.grid(id, "Peuples"));
+  assert.equal(rows["PEU-1"]["Taille"], "180");
+  assert.equal(rows["PEU-1"]["Habitat"], "Plaines");
+  // Modifiable à la main, jusqu'au prochain changement de la source.
+  await engine.updateWorldIndexCell("peoples", "Peuples", { rowNumber: 2, id: "PEU-1", name: "Elfes" }, "Taille", "175");
+  assert.equal(byId(google.grid(id, "Peuples"))["PEU-1"]["Taille"], "175");
+  await engine.updateWorldIndexCell("peoples", "Peuples", { rowNumber: 2, id: "PEU-1", name: "Elfes" }, "Genre", "Souterrain");
+  rows = byId(google.grid(id, "Peuples"));
+  assert.equal(rows["PEU-1"]["Taille"], "130");
+  assert.equal(rows["PEU-1"]["Habitat"], "Montagnes");
+  // Une valeur sans règle (ni « toute autre valeur ») ne touche pas la case.
+  await engine.updateWorldIndexCell("peoples", "Peuples", { rowNumber: 2, id: "PEU-1", name: "Elfes" }, "Genre", "Céleste");
+  assert.equal(byId(google.grid(id, "Peuples"))["PEU-1"]["Taille"], "130");
+
+  // Une ligne ajoutée : la case laissée vide se remplit ; une case saisie gagne.
+  const current = (await engine.getWorldIndex("peoples", { refresh: true })).tables[0].headers;
+  await engine.addWorldIndexRow("peoples", "Peuples", current.map((header) => ({ "Nom": "Gnomes", "Genre": "Souterrain" })[header] ?? ""), current);
+  await engine.addWorldIndexRow("peoples", "Peuples", current.map((header) => ({ "Nom": "Géants", "Genre": "Souterrain", "Taille": "400" })[header] ?? ""), current);
+  const named = (name) => Object.values(byId(google.grid(id, "Peuples"))).find((row) => row["Nom"] === name);
+  assert.equal(named("Gnomes")["Taille"], "130");
+  assert.equal(named("Géants")["Taille"], "400");
+
+  // Une fiche : un champ donné gagne, les autres suivent.
+  await engine.updateWorldIndexFields("peoples", "Peuples", { rowNumber: 4, id: "PEU-3", name: "Nains" }, { "Genre": "Sylvain" });
+  assert.equal(byId(google.grid(id, "Peuples"))["PEU-3"]["Taille"], "180");
+
+  // « Remplir les lignes existantes » : seulement les lignes dont la source a une règle, d'un seul
+  // envoi ; le compte est celui des lignes changées (Hauts-Elfes, Géants).
+  const sheet = google.grid(id, "Peuples");
+  const genre = sheet[0].indexOf("Genre");
+  const tailleColumn = sheet[0].indexOf("Taille");
+  sheet[2][genre] = "Sylvain"; sheet[2][tailleColumn] = "";
+  sheets.clearSpreadsheetReadCache(id);
+  assert.equal(await engine.fillWorldIndexAutoColumn("peoples", "Peuples", "Taille"), 2);
+  rows = byId(google.grid(id, "Peuples"));
+  assert.equal(rows["PEU-2"]["Taille"], "180");
+  assert.equal(rows["PEU-2"]["Habitat"], "Plaines");
+  assert.equal(named("Géants")["Taille"], "130");
+  // Déjà à jour : rien à écrire.
+  assert.equal(await engine.fillWorldIndexAutoColumn("peoples", "Peuples", "Taille"), 0);
+});
+
+test("Remplissage automatique d'une colonne liée : la ligne d'en face reçoit le nom, et le perd quand la valeur change", async () => {
+  const headers = definitions.worldIndexDefinitions.peoples.tabs[0].headers;
+  const id = fresh("peoples");
+  google.addSpreadsheet(id, [{ title: "Peuples", grid: [headers,
+    line(headers, { "Nom": "Elfes", "ID": "PEU-1" }),
+    line(headers, { "Nom": "Hauts-Elfes", "ID": "PEU-2" }),
+    line(headers, { "Nom": "Nains", "ID": "PEU-3" }),
+  ] }]);
+  await link("peoples", id, "Peuples");
+  await engine.getWorldIndex("peoples", { refresh: true });
+  await engine.applyWorldSchemaOperations("peoples", [{ op: "add-column", tab: "Peuples", header: "Genre", spec: { kind: "rich" } }]);
+  // « Descendant » (liée à « Ancêtres ») se remplit d'après le genre.
+  await engine.applyWorldSchemaOperations("peoples", [{ op: "spec", tab: "Peuples", header: "Descendant", spec: { kind: "linked", link: { index: "peoples", tab: "Peuples", column: "Ancêtres" }, autoFill: { from: "Genre", rules: [{ when: "Sylvain", value: "Hauts-Elfes" }, { when: "Souterrain", value: "Nains" }] } } }]);
+  await engine.updateWorldIndexCell("peoples", "Peuples", { rowNumber: 2, id: "PEU-1", name: "Elfes" }, "Genre", "Sylvain");
+  let rows = byId(google.grid(id, "Peuples"));
+  assert.equal(rows["PEU-1"]["Descendant"], "Hauts-Elfes");
+  assert.equal(rows["PEU-2"]["Ancêtres"], "Elfes");
+  await engine.updateWorldIndexCell("peoples", "Peuples", { rowNumber: 2, id: "PEU-1", name: "Elfes" }, "Genre", "Souterrain");
+  rows = byId(google.grid(id, "Peuples"));
+  assert.equal(rows["PEU-1"]["Descendant"], "Nains");
+  assert.equal(rows["PEU-2"]["Ancêtres"], "");
+  assert.equal(rows["PEU-3"]["Ancêtres"], "Elfes");
+});
+
+test("Remplissage automatique : la source renommée est suivie, une boucle est signalée", async () => {
+  const autofill = await vite.ssrLoadModule("/lib/index-autofill.ts");
+  const headers = definitions.worldIndexDefinitions.peoples.tabs[0].headers;
+  const id = fresh("peoples");
+  google.addSpreadsheet(id, [{ title: "Peuples", grid: [headers] }]);
+  await link("peoples", id, "Peuples");
+  await engine.getWorldIndex("peoples", { refresh: true });
+  await engine.applyWorldSchemaOperations("peoples", [
+    { op: "add-column", tab: "Peuples", header: "Genre", spec: { kind: "rich" } },
+    { op: "add-column", tab: "Peuples", header: "Rangement", spec: { kind: "rich", autoFill: { from: "Genre", rules: [{ when: "Arme", value: "Armurerie" }] } } },
+  ]);
+  await engine.applyWorldSchemaOperations("peoples", [{ op: "rename", tab: "Peuples", header: "Genre", to: "Famille" }]);
+  const rangement = (await engine.getWorldIndex("peoples", { refresh: true })).columns.Peuples.find((column) => column.header === "Rangement");
+  assert.equal(rangement.spec.autoFill.from, "Famille");
+  // Les valeurs : la valeur entière, puis ses morceaux, sans tenir compte des accents ni de la casse.
+  const settings = { from: "Genre", rules: [{ when: "Arme", value: "Armurerie" }, { when: "Potion", value: "Sacoche" }] };
+  assert.equal(autofill.autoFillValue(settings, "ARME"), "Armurerie");
+  assert.equal(autofill.autoFillValue(settings, "Bouclier, Potion, Arme"), "Sacoche");
+  assert.equal(autofill.autoFillValue(settings, "<p>Arme</p>"), "Armurerie");
+  assert.equal(autofill.autoFillValue(settings, "Bouclier"), undefined);
+  assert.equal(autofill.autoFillValue(settings, ""), undefined);
+  const columns = [
+    { header: "A", spec: { kind: "rich", autoFill: { from: "B", rules: [] } } },
+    { header: "B", spec: { kind: "rich", autoFill: { from: "A", rules: [] } } },
+    { header: "C", spec: { kind: "formula" } },
+    { header: "D", spec: { kind: "rich", autoFill: { from: "C", rules: [] } } },
+  ];
+  assert.match(autofill.autoFillProblem(columns, "A"), /l’une d’après l’autre/);
+  assert.match(autofill.autoFillProblem(columns, "D"), /calculée/);
+  // Même en boucle, chaque colonne n'est remplie qu'une fois.
+  const looped = [
+    { header: "A", spec: { kind: "rich", autoFill: { from: "B", rules: [{ when: "x", value: "y" }] } } },
+    { header: "B", spec: { kind: "rich", autoFill: { from: "A", rules: [{ when: "y", value: "x" }] } } },
+  ];
+  assert.deepEqual([...autofill.plannedAutoFills(looped, ["B"], (header) => header === "B" ? "x" : "").values()].map((fill) => [fill.column.header, fill.value]), [["A", "y"]]);
+});
