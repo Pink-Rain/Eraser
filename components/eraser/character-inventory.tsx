@@ -227,14 +227,44 @@ function ItemDescription({ item, template, readOnly, withDescription, extras, on
  */
 const EffectBehindEyeContext = createContext(false)
 
-function ItemEffectReveal({ itemName, parts }: { itemName: string; parts: ReactNode[] }) {
+/**
+ * Les effets montrés, gardés sur cet ordinateur (comme les plis de l'inventaire) : un effet
+ * montré le reste après une actualisation ou un redémarrage d'Eraser, un effet recaché aussi.
+ * On retient les exemplaires dont l'effet est montré : caché est l'état d'office.
+ */
+const shownEffectsKey = "eraser:inventory-shown-effects"
+const shownEffectsLimit = 1000
+
+function readShownEffects(): string[] {
+  try {
+    const stored: unknown = JSON.parse(window.localStorage.getItem(shownEffectsKey) ?? "[]")
+    return Array.isArray(stored) ? stored.filter((key): key is string => typeof key === "string") : []
+  } catch { return [] }
+}
+
+function rememberShownEffect(slotId: string, shown: boolean) {
+  // Relu au moment du clic : chaque ligne d'item garde la sienne sans effacer celle des autres.
+  const others = readShownEffects().filter((key) => key !== slotId)
+  const next = shown ? [...others, slotId].slice(-shownEffectsLimit) : others
+  try { window.localStorage.setItem(shownEffectsKey, JSON.stringify(next)) } catch { /* l'état vaut pour cette visite */ }
+}
+
+function ItemEffectReveal({ slotId, itemName, parts }: { slotId: string; itemName: string; parts: ReactNode[] }) {
   const [shown, setShown] = useState(false)
+  useEffect(() => {
+    if (readShownEffects().includes(slotId)) queueMicrotask(() => setShown(true))
+  }, [slotId])
+  function toggle(next: boolean) {
+    setShown(next)
+    rememberShownEffect(slotId, next)
+  }
   const label = shown ? `Cacher l’effet de ${itemName}` : `Voir l’effet de ${itemName}`
+  // L'œil dit l'état : barré tant que l'effet est caché, ouvert quand on le voit.
   return <div className="flex min-w-0 items-start gap-1">
-    <button type="button" onClick={() => setShown((current) => !current)} className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded hover:bg-muted hover:text-foreground ${shown ? "text-primary" : "text-muted-foreground/70"}`} aria-expanded={shown} aria-label={label} title={shown ? "Cacher l’effet" : "Voir l’effet"}>{shown ? <EyeOff className="size-3" /> : <Eye className="size-3" />}</button>
+    <button type="button" onClick={() => toggle(!shown)} className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded hover:bg-muted hover:text-foreground ${shown ? "text-primary" : "text-muted-foreground/70"}`} aria-expanded={shown} aria-label={label} title={shown ? "Cacher l’effet" : "Voir l’effet"}>{shown ? <Eye className="size-3" /> : <EyeOff className="size-3" />}</button>
     {shown
       ? <div className="grid min-w-0 flex-1 gap-1">{parts}</div>
-      : <button type="button" onClick={() => setShown(true)} className="min-w-0 flex-1 truncate text-left text-muted-foreground/45" title="Voir l’effet">Effet</button>}
+      : <button type="button" onClick={() => toggle(true)} className="min-w-0 flex-1 truncate text-left text-muted-foreground/45" title="Voir l’effet">Effet</button>}
   </div>
 }
 
@@ -319,7 +349,7 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
           {!readOnly && <Popover open={moving} onOpenChange={(open) => { setMoving(open); if (open) void ensureTargets() }}><PopoverTrigger asChild><button type="button" disabled={pending} className={`flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted ${moving ? "bg-muted text-foreground" : ""}`} aria-label={`Transférer ${item.name}`} title="Transférer"><MoveRight className="size-3.5" /></button></PopoverTrigger><PopoverContent align="end" side="bottom" className="w-80 p-3"><InventoryTransferPicker itemName={item.name} slotId={slot.id} expected={expected} internalTargets={internalTargets} transferTargets={transferTargets} loading={targetsLoading} pending={pending} mutate={mutate} onDone={() => setMoving(false)} /></PopoverContent></Popover>}
           {!readOnly && <AlertDialog><AlertDialogTrigger asChild><button type="button" disabled={pending} className="flex size-7 shrink-0 items-center justify-center rounded-md text-destructive/75 hover:bg-destructive/10" aria-label={`Retirer complètement ${item.name}`}><Trash2 className="size-3.5" /></button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Retirer « {item.name} » ?</AlertDialogTitle><AlertDialogDescription>Cet item sera retiré de cet inventaire.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: 0, ...expected }, `slot:${slot.id}`)}>Retirer</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>}
         </div>
-        <div className="mt-2 grid gap-1 text-xs leading-5 text-muted-foreground empty:hidden"><ItemDescription readOnly={readOnly} item={item} template={shown} withDescription={withDescription} extras={descriptionParts} onCommit={(description) => update({ description }).then(() => undefined)} onRichCommit={(descriptionHtml) => void update({ description: richTextPlainText(descriptionHtml), descriptionHtml })} />{effectBehindEye && effectParts.length > 0 ? <ItemEffectReveal itemName={item.name} parts={effectParts} /> : effectParts}</div>
+        <div className="mt-2 grid gap-1 text-xs leading-5 text-muted-foreground empty:hidden"><ItemDescription readOnly={readOnly} item={item} template={shown} withDescription={withDescription} extras={descriptionParts} onCommit={(description) => update({ description }).then(() => undefined)} onRichCommit={(descriptionHtml) => void update({ description: richTextPlainText(descriptionHtml), descriptionHtml })} />{effectBehindEye && effectParts.length > 0 ? <ItemEffectReveal slotId={slot.id} itemName={item.name} parts={effectParts} /> : effectParts}</div>
       </div>
     </div>
     {documentRef && <DocumentViewerDialog document={reading ? { campaignId: documentRef.campaignId, documentId: documentRef.documentId, title: item.name } : null} onClose={() => setReading(false)} />}

@@ -1,14 +1,12 @@
-# Eraser 0.1.1-alpha.270 — Le remplissage parle aussi en noms
+# Eraser 0.1.1-alpha.271 — Un œil qui se souvient
 
-Cette version arrive **sans réinstallation** (enveloppe 10, comme l'alpha 269) : Eraser la
+Cette version arrive **sans réinstallation** (même enveloppe que l'alpha 270) : Eraser la
 télécharge, redémarre son serveur et recharge la page tout seul. Rien ne change dans Google Sheets.
 
-- **Remplissage automatique d'une colonne liée ↔** : dans « Modifier » › une colonne liée ›
-  « Remplissage automatique », la valeur de chaque ligne (« Arme Batarde → … ») et « Toute autre
-  valeur » se choisissent maintenant dans la même liste que le tableau depuis l'alpha 269 : on
-  commence à taper, Eraser propose les noms de l'index d'en face (fautes de frappe comprises), un
-  nom absent se crée. Avant, ces champs restaient un texte libre à virgules.
-- Les noms viennent des onglets d'en face connus de la page (liens d'Eraser et réponses sur
-  plusieurs onglets compris) ; pour une colonne liée qu'on vient de régler, de l'index et de
-  l'onglet choisis juste au-dessus.
-- Une liste vide affiche « Ne pas toucher la case », comme le champ d'avant.
+- **L'œil dit ce qu'on voit** : sur la ligne « Effet » des inventaires (fiche de personnage,
+  inventaire commun de la campagne, sac des compagnons), l'œil est barré tant que l'effet est
+  caché, et s'ouvre quand on le voit. Avant, c'était l'inverse.
+- **L'effet montré le reste** : chaque item se souvient si son effet est montré ou caché, même
+  après une actualisation (F5) ou en éteignant puis rallumant Eraser. C'est retenu sur cet
+  ordinateur, item par item, comme les catégories repliées de l'inventaire. Un item jamais
+  ouvert reste caché.
