@@ -7,13 +7,14 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { DocumentViewerDialog, GiveDocumentButton, type ViewedDocument } from "@/components/eraser/document-viewer"
-import { documentImageUrl, type CampaignDocumentRecord } from "@/lib/document-model"
+import { documentImageUrl, documentStudioHref, type CampaignDocumentRecord } from "@/lib/document-model"
 import { cn } from "@/lib/utils"
 
 /**
- * Les documents d'une session (Créateur de session) : les lettres et parchemins préparés
- * dans la page Document, à lire, à modifier et à donner aux joueurs pendant la partie. Un
- * document donné arrive dans l'inventaire du joueur, qui l'ouvre d'un clic.
+ * Les documents d'une session (Créateur de session) : les lettres et parchemins écrits dans
+ * l'extension Eraser Doc, à lire et à donner aux joueurs pendant la partie ; « Écrire » et
+ * « Modifier » ouvrent l'extension. Un document donné arrive dans l'inventaire du joueur, qui
+ * l'ouvre d'un clic.
  */
 export function SessionDocuments({ campaignId, sessionId, initialDocuments, players }: {
   campaignId: string
@@ -27,7 +28,6 @@ export function SessionDocuments({ campaignId, sessionId, initialDocuments, play
   const [viewing, setViewing] = useState<ViewedDocument | null>(null)
   const inSession = documents.filter((document) => document.sessionId === sessionId)
   const others = documents.filter((document) => document.sessionId !== sessionId)
-  const base = `/campagne/${encodeURIComponent(campaignId)}/document`
 
   // Ranger ou sortir un document : affiché tout de suite, remis comme avant si le serveur refuse.
   async function move(document: CampaignDocumentRecord, target: string) {
@@ -52,7 +52,7 @@ export function SessionDocuments({ campaignId, sessionId, initialDocuments, play
         <NativeSelectOption value="">+ Ajouter un document…</NativeSelectOption>
         {others.map((document) => <NativeSelectOption key={document.id} value={document.id}>{document.title}</NativeSelectOption>)}
       </NativeSelect>}
-      <Button asChild variant="outline" size="sm"><Link href={`${base}?nouveau=1&session=${encodeURIComponent(sessionId)}`}><Plus />Écrire un document</Link></Button>
+      <Button asChild variant="outline" size="sm"><Link href={documentStudioHref(campaignId, { nouveau: true, session: sessionId })}><Plus />Écrire un document</Link></Button>
     </div>
     {message && <p className={cn("rounded-xl border px-4 py-2 text-sm", message.tone === "ok" ? "border-emerald-600/25 bg-emerald-600/8 text-emerald-800 dark:text-emerald-300" : "border-destructive/25 bg-destructive/5 text-destructive")}>{message.text}</p>}
     {inSession.length
@@ -68,7 +68,7 @@ export function SessionDocuments({ campaignId, sessionId, initialDocuments, play
           <div className="flex flex-wrap items-center gap-1.5">
             <GiveDocumentButton campaignId={campaignId} documentId={document.id} title={document.title} players={players} disabledReason={document.renderVersion ? "" : "Enregistre d’abord le document"} onGiven={(text) => setMessage({ tone: "ok", text })} />
             <Button type="button" variant="ghost" size="sm" disabled={!document.renderVersion} onClick={() => setViewing({ campaignId, documentId: document.id, title: document.title, version: document.renderVersion })}><BookOpen />Lire</Button>
-            <Button asChild variant="ghost" size="sm"><Link href={`${base}?document=${encodeURIComponent(document.id)}`}><PenLine />Modifier</Link></Button>
+            <Button asChild variant="ghost" size="sm"><Link href={documentStudioHref(campaignId, { document: document.id })}><PenLine />Modifier</Link></Button>
             <Button type="button" variant="ghost" size="icon-sm" className="ml-auto text-muted-foreground" title="Retirer de la session (le document reste dans la campagne)" aria-label={`Retirer ${document.title} de la session`} disabled={Boolean(pending)} onClick={() => void move(document, "")}>{pending === document.id ? <LoaderCircle className="animate-spin" /> : <CircleMinus />}</Button>
           </div>
         </div>

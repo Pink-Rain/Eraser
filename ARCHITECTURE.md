@@ -469,25 +469,30 @@ n'est pas compilé et garde son comportement.
 
 ## Documents
 
-La page Document d’une campagne (`/campagne/[id]/document`, menu › Créateur de session)
-écrit des documents : un fond (fourni dans `public/documents/fonds`, envoyé depuis
-l’ordinateur ou une adresse) et des zones de texte posées dessus, chacune avec sa police
-(`public/documents/polices`, licence OFL), sa taille, son encre et son inclinaison. Le modèle
-est pur et partagé (`lib/document-model.ts`) : mesures en unités du document (largeur 1000),
-texte en paragraphes de morceaux stylés (gras, italique, souligné, barré, couleur).
+L'éditeur des documents d'une campagne vit dans l'extension **Eraser Doc** (`Pink-Rain/Eraser_doc`,
+`/extension/doc/campagne/<id>`, menu › Dossier › Document ; l'ancienne `/campagne/[id]/document`
+y renvoie). Il écrit des documents : un fond (fourni avec l'extension, envoyé depuis l'ordinateur
+ou une adresse) et des zones de texte posées dessus, chacune avec sa police (fichiers dans
+l'extension, licence OFL), sa taille, son encre et son inclinaison. Eraser garde :
 
-- Une ligne par document dans la feuille « Documents de campagne » (`lib/campaign-documents.ts`),
-  créée au premier document enregistré ; « ID session » le range dans une session.
-- « Enregistrer » dessine le document dans le navigateur (`components/eraser/document-render.ts`,
-  même coupure des lignes que l’éditeur) : le rendu WebP et l’impression JPEG sur fond blanc
-  vont dans Drive avec le fond envoyé. Le PDF (une page, `lib/document-pdf.ts`) est fait à la
-  demande de l’impression.
+- le modèle pur (`lib/document-model.ts`) : mesures en unités du document (largeur 1000), texte en
+  paragraphes de morceaux stylés, clés des polices et des fonds (`documentFontKeys`,
+  `builtinBackgroundKeys`, vérifiées à l'enregistrement), nettoyage, marque d'inventaire, adresses
+  (`documentImageUrl`, `documentPdfUrl`, `documentStudioHref`) ; prêté à l'extension ;
+- une ligne par document dans la feuille « Documents de campagne » (`lib/campaign-documents.ts`),
+  créée au premier document enregistré ; « ID session » le range dans une session ;
+- les API : `GET /api/campaigns/[id]/documents` (`?atelier=1` : la campagne, ses sessions et ses
+  joueurs en plus, pour l'éditeur), `POST` (enregistrer : le rendu WebP et l'impression JPEG sur
+  fond blanc, dessinés dans le navigateur par l'extension, vont dans Drive avec le fond envoyé),
+  `PATCH`/`DELETE`, `give`, `image`, `pdf` (une page, `lib/document-pdf.ts`, faite à la demande) ;
+- la lecture : `components/eraser/document-viewer.tsx` (prêté), l'inventaire et le Créateur de
+  session (`session-documents.tsx`, dont « Écrire » et « Modifier » ouvrent l'extension).
+
 - Donner un document (`.../documents/[documentId]/give`) pose un item personnalisé dans le sac
   du personnage ; l’entrée `{"target":"document"}` du JSON de l’exemplaire le désigne, et
   l’inventaire l’ouvre d’un clic. `keepItemCharges` et `setCharacterInventoryItemModifiers`
   gardent cette entrée.
-- Le Créateur de session montre les documents de la session ; Roll20 les reçoit en handouts
-  (image) et en PDF du Journal (voir plus bas).
+- Roll20 reçoit les documents en handouts (image) et en PDF du Journal (voir plus bas).
 
 ## Chat (et ancien tabletop)
 
@@ -536,8 +541,8 @@ réversible.
 
 Une extension est un morceau d'Eraser qui vit dans son propre dépôt GitHub public, se publie
 seul et arrive sur chaque installation sans réinstaller Eraser. Liées : `doc` (Pink-Rain/Eraser_doc,
-documents de campagne, encore vide), `map` (Pink-Rain/Eraser_map, tabletop, encore vide), `page`
-(Pink-Rain/Eraser_page, **l'atelier des pages**, depuis l'alpha 275).
+**l'éditeur des documents de campagne**, depuis l'alpha 278), `map` (Pink-Rain/Eraser_map,
+tabletop, encore vide), `page` (Pink-Rain/Eraser_page, **l'atelier des pages**, depuis l'alpha 275).
 
 - **Liaison** : `linkedExtensions` dans `lib/extensions.ts`, dans le code seulement. L'identifiant
   nomme le dossier d'installation, l'adresse `/extension/<id>` et ses données : il ne se renomme
@@ -576,9 +581,12 @@ documents de campagne, encore vide), `map` (Pink-Rain/Eraser_map, tabletop, enco
   ouverture jusqu'à ce qu'il n'y en ait plus (relevé de fluidité, « Extensions »).
 - **Ce qu'Eraser prête** (`components/eraser/extension-modules.ts`, `window.EraserExtensions.require`) :
   React, `react/jsx-runtime`, `react/compiler-runtime`, `next/link`, `next/navigation`, les
-  composants `components/ui/*`, et les pièces dont l'atelier a besoin (affichage des pages,
-  éditeurs des index, modèles). Une extension les importe comme dans Eraser (`@/…`) ; son build les
-  emprunte au lieu de les embarquer. Seulement des modules qui se chargent dans le navigateur
+  composants `components/ui/*`, et les pièces d'Eraser dont les extensions ont besoin (affichage
+  des pages et des index, éditeur de mise en page et des cartes, modèles, lecture des documents).
+  Une extension les importe comme dans Eraser (`@/…`) ; son build les emprunte au lieu de les
+  embarquer, et échoue si elle importe un module qu'Eraser ne prête pas. **On ne prête que ce
+  qu'Eraser utilise lui-même** : ce qui ne sert qu'à une extension vit dans son dépôt (l'éditeur des
+  apparences et des présentations dans Eraser Page, l'éditeur des documents dans Eraser Doc). Seulement des modules qui se chargent dans le navigateur
   (vérifié par `tests/extensions.test.mjs`) : d'un module serveur, une extension n'importe que des
   types. Ne jamais retirer ni renommer une entrée, ni changer ses exports, sans mettre à jour les
   extensions qui s'en servent.
@@ -604,7 +612,9 @@ documents de campagne, encore vide), `map` (Pink-Rain/Eraser_map, tabletop, enco
   leurs API d'enregistrement, « Modifier la page » (montré si l'extension est installée) et les
   données de chaque écran (`GET /api/pages/atelier?ecran=index|page|menu`,
   `lib/page-atelier-data.ts`). Les anciennes adresses (`/pages`, `/pages/atelier/<id>`,
-  `/pages/menu`) y mènent. Un nouveau type de bloc touche les deux dépôts.
+  `/pages/menu`) y mènent. Un nouveau type de bloc touche les deux dépôts. Les colonnes que montre
+  une apparence (`lib/index-appearance.ts`) sont partagées par le moteur et l'atelier.
+- **Les documents** (extension `doc`) : voir « Documents ».
 - **Vérifications** : `tests/extensions.test.mjs` (faux GitHub local : installation, mise à jour,
   refus ; modules prêtés sans code serveur) ; `desktop:verify` ouvre une extension posée sur le
   disque, ses fichiers et sa partie serveur sur le serveur construit (`ERASER_EXTENSIONS_RELEASES_URL`

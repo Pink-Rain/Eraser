@@ -24,15 +24,14 @@
  * titres (`h1.font-display`, `.font-title`), Alegreya Sans pour les petites étiquettes (9 à
  * 11,5 px, libellés en capitales espacées, touches) où IM Fell devient pâteuse. Elles gardent
  * leurs propres chiffres (Cinzel : modernes ; Alegreya Sans : modernes par « lnum »).
- * « Eraser Cinzel » reprend le fichier des documents sous un autre nom, comme English.
- *
- * « Eraser IM Fell English » reprend le fichier des documents sous un autre nom : les
- * documents gardent leur « IM Fell English » sans retouche (le rendu doit couper les lignes
- * comme l'éditeur, voir components/eraser/document-render.ts).
+ * « Eraser Cinzel » et « Eraser IM Fell English » portent un autre nom que les polices des
+ * documents (extension Eraser Doc, qui a ses propres fichiers) : les documents gardent leur
+ * « Cinzel » et leur « IM Fell English » sans retouche (le rendu doit couper les lignes comme
+ * l'éditeur).
  */
 @font-face {
   font-family: "Eraser Cinzel";
-  src: url("/documents/polices/cinzel-latin-400-normal.woff2") format("woff2");
+  src: url("/polices/cinzel-latin-400-normal.woff2") format("woff2");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -41,7 +40,7 @@
 }
 @font-face {
   font-family: "Eraser Cinzel";
-  src: url("/documents/polices/cinzel-latin-700-normal.woff2") format("woff2");
+  src: url("/polices/cinzel-latin-700-normal.woff2") format("woff2");
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -167,7 +166,7 @@
 }
 @font-face {
   font-family: "Eraser IM Fell English";
-  src: url("/documents/polices/im-fell-english-latin-400-normal.woff2") format("woff2");
+  src: url("/polices/im-fell-english-latin-400-normal.woff2") format("woff2");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -176,7 +175,7 @@
 }
 @font-face {
   font-family: "Eraser IM Fell English";
-  src: url("/documents/polices/im-fell-english-latin-400-italic.woff2") format("woff2");
+  src: url("/polices/im-fell-english-latin-400-italic.woff2") format("woff2");
   font-weight: 400;
   font-style: italic;
   font-display: swap;

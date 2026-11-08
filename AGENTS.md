@@ -168,11 +168,15 @@
 
 ## Documents
 
-- Les documents d'une campagne (page Document) : modèle pur dans `lib/document-model.ts`,
-  feuille « Documents de campagne » (`lib/campaign-documents.ts`), rendu dans le navigateur
-  (`components/eraser/document-render.ts`). Le rendu doit couper les lignes comme l'éditeur :
-  toute mise en forme ajoutée à l'éditeur doit l'être aussi au rendu, sinon l'image donnée
-  aux joueurs et envoyée à Roll20 ne ressemble plus à ce que le MJ a écrit.
+- **L'éditeur des documents vit dans `Pink-Rain/Eraser_doc`** (extension `doc`,
+  `/extension/doc/campagne/<id>`) avec son rendu, ses polices et ses fonds : ne pas le recréer
+  dans Eraser. Eraser garde le modèle pur (`lib/document-model.ts` : clés vérifiées, nettoyage,
+  marque d'inventaire, adresses), la feuille « Documents de campagne »
+  (`lib/campaign-documents.ts`), les API (`/api/campaigns/[id]/documents…`), la lecture
+  (`components/eraser/document-viewer.tsx` : inventaire, Créateur de session) et Roll20.
+- Une police ou un fond ajouté à l'éditeur ajoute sa clé dans `documentFontKeys` ou
+  `builtinBackgroundKeys` (sinon Eraser la refuse à l'enregistrement) : Eraser d'abord, puis
+  l'extension.
 - Ne jamais renommer les clés enregistrées (colonnes de la feuille, champs du JSON des
   zones, `{"target":"document"}` dans le JSON d'un exemplaire d'inventaire).
 
@@ -204,14 +208,17 @@
   dans chaque extension**, jamais par extension (le tabletop aura des modules pour les MJ, d'autres
   pour les joueurs…) ; les API d'Eraser les vérifient. Ne jamais renommer l'identifiant d'une
   extension liée (`doc`, `map`, `page`).
-- **L'atelier des pages vit dans `Pink-Rain/Eraser_page`** (extension `page`) : ne pas le recréer
-  dans Eraser. Eraser garde l'affichage, le modèle et les API des pages, et les données de
+- **L'atelier des pages vit dans `Pink-Rain/Eraser_page`** (extension `page`), les documents dans
+  `Pink-Rain/Eraser_doc` (extension `doc`) : ne pas les recréer dans Eraser. Eraser garde l'affichage, le modèle et les API des pages, et les données de
   l'atelier (`lib/page-atelier-data.ts`). Un changement de l'atelier se fait dans ce dépôt ; un
   nouveau type de bloc touche les deux (lire son `AGENTS.md`).
 - Ce qu'Eraser prête aux extensions (`components/eraser/extension-modules.ts`) et
   `EXTENSION_API_VERSION` forment le contrat : ne jamais retirer ni renommer un module prêté, ni
   changer ses exports, sans mettre à jour les extensions ; jamais de module qui tire du code
   serveur. Détail dans `ARCHITECTURE.md` (« Extensions »).
+- **Rien dans Eraser qui ne serve qu'à une extension** : on ne prête que ce qu'Eraser utilise
+  lui-même ; le reste vit dans le dépôt de l'extension. Pour retirer d'Eraser un module prêté,
+  publier d'abord l'extension qui n'en a plus besoin, puis l'alpha qui le retire.
 - Ce qu'une extension charge encore porte `aria-busy="true"` : le relevé de fluidité mesure son
   ouverture (et le changement de page) jusqu'à ce qu'il n'y en ait plus.
 - Une extension n'appelle jamais Google elle-même : elle passe par une API d'Eraser (porte du quota,

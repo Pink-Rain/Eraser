@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { createServer } from "vite";
 
-// Les documents d'une campagne (page Document) : leur nettoyage, leur marque dans un inventaire,
+// Les documents d'une campagne (éditeur : extension Eraser Doc) : leur nettoyage, leur marque dans un inventaire,
 // leur PDF, et le cadrage des tokens par défaut envoyés à Roll20.
 const root = fileURLToPath(new URL("..", import.meta.url));
 const vite = await createServer({ appType: "custom", configFile: false, root, resolve: { alias: { "@": root } }, server: { middlewareMode: true }, logLevel: "error" });
@@ -34,13 +34,10 @@ test("un document illisible ou hors bornes est ramené à un document sûr", () 
   assert.deepEqual(model.cleanDocumentBackground({ kind: "builtin", key: "livre" }), { kind: "builtin", key: "livre" });
 });
 
-test("les fonds fournis arrivent avec leurs zones prêtes à remplir", () => {
-  for (const key of model.builtinBackgroundKeys) {
-    const content = model.documentFromBuiltin(key);
-    assert.equal(content.height, 1000);
-    assert.ok(content.zones.length >= 2, key);
-    assert.ok(content.zones.every((zone) => zone.paragraphs.length && zone.x >= 0 && zone.x + zone.width <= 1000), key);
-  }
+test("l'éditeur des documents est dans l'extension Eraser Doc, paramètres compris", () => {
+  assert.equal(model.documentStudioHref("CAMP 1"), "/extension/doc/campagne/CAMP%201");
+  assert.equal(model.documentStudioHref("c1", { document: "doc-2" }), "/extension/doc/campagne/c1?document=doc-2");
+  assert.equal(model.documentStudioHref("c1", { nouveau: true, session: "s-3" }), "/extension/doc/campagne/c1?nouveau=1&session=s-3");
 });
 
 test("un document donné garde sa marque, même quand l'enclume réécrit l'exemplaire", () => {

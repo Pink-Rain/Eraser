@@ -1,19 +1,15 @@
-# Eraser 0.1.1-alpha.277 — Le chat ne gèle plus l'écran au lancement
+# Eraser 0.1.1-alpha.278 — Les documents deviennent une extension
 
-Cette version arrive **sans réinstallation** (même enveloppe que l'alpha 276) : Eraser la
-télécharge, redémarre son serveur et recharge la page tout seul. Rien ne change dans Google Sheets.
+Cette version arrive **sans réinstallation** (même enveloppe que l'alpha 277) : Eraser la
+télécharge, redémarre son serveur et recharge la page tout seul. Rien ne change dans Google Sheets
+ni dans Drive : les documents déjà écrits restent tels quels.
 
-- **Fini le gel de 1 à 2 secondes peu après le lancement.** Il venait du salon en direct du chat :
-  sa première connexion pair à pair met en route WebRTC, ce qui bloque la fenêtre. Le chat ne le
-  rejoint plus dès que la page est chargée, mais quand on ouvre le chat, quand Eraser passe à
-  l'arrière-plan, ou après un moment sans toucher à la souris ni au clavier (4 secondes sur une
-  page de campagne, dont le journal se met à jour en direct ; 20 secondes ailleurs). L'historique
-  du chat se charge comme avant ; les messages en direct arrivent dès que le salon est rejoint.
-- **Le relevé de fluidité compte les extensions** : une nouvelle case « Extensions » mesure
-  l'ouverture de chacune, de son chargement à son contenu prêt, avec sa version ; « Copier le
-  relevé » donne aussi les versions des extensions installées. Le changement de page vers une
-  extension attend maintenant qu'elle soit prête.
-- **L'ouverture de la fenêtre n'est plus comptée comme un gel** : l'image qui met Eraser à l'écran
-  au lancement est comptée avec les pages (« ouverture de la fenêtre »), avec le temps du serveur
-  et du premier affichage.
-- Va avec Eraser Page 0.2.1, qui s'installe toute seule (ou avec « Chercher les mises à jour »).
+- **L'éditeur des documents part dans l'extension Eraser Doc**, qui s'installe toute seule (ou
+  avec « Chercher les mises à jour »). Le menu (Dossier › Document) et le Créateur de session
+  (« Écrire un document », « Modifier ») l'ouvrent ; l'ancienne adresse y mène. Mêmes fonds,
+  mêmes polices, même rendu.
+- **Ce qui reste dans Eraser** : les documents donnés aux joueurs (ils les lisent depuis leur
+  inventaire), le Créateur de session, l'envoi à Roll20, la feuille « Documents de campagne ».
+- Eraser prête aux extensions les pièces dont l'éditeur des apparences aura besoin dans Eraser
+  Page 0.3.0. Deux polices de l'interface (Cinzel, IM Fell English) ont changé de dossier, sans
+  changement à l'écran.

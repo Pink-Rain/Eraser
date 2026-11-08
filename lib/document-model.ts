@@ -1,8 +1,10 @@
 /**
- * Les documents d'une campagne (page « Document » du Créateur de session) : une image de fond
- * et des zones de texte posées dessus, chacune avec sa police, sa taille, sa couleur et son
- * inclinaison. Règle pure, sans navigateur : la page (éditeur et rendu) et le serveur
- * (enregistrement, PDF, Roll20) s'en servent.
+ * Les documents d'une campagne : une image de fond et des zones de texte posées dessus, chacune
+ * avec sa police, sa taille, sa couleur et son inclinaison. Règle pure, sans navigateur : le
+ * serveur (enregistrement, PDF, Roll20), l'inventaire (un document donné) et l'extension Eraser
+ * Doc (`Pink-Rain/Eraser_doc`, qui l'emprunte) s'en servent. L'éditeur, son rendu, ses polices
+ * et ses fonds sont dans l'extension ; ici, seulement les clés qu'Eraser vérifie à
+ * l'enregistrement (`documentFontKeys`, `builtinBackgroundKeys` : ne jamais en renommer une).
  *
  * Les mesures sont en unités du document : sa largeur vaut toujours `DOCUMENT_WIDTH`, sa
  * hauteur suit les proportions du fond. L'éditeur et le rendu agrandissent le tout d'un même
@@ -17,32 +19,9 @@ export type DocumentRun = { text: string; bold?: boolean; italic?: boolean; unde
 /** Un paragraphe : ses morceaux de texte ; « \n » dans un texte est un retour à la ligne. */
 export type DocumentParagraph = DocumentRun[]
 
+/** Les polices d'un document (leurs fichiers et leurs noms sont dans l'extension Eraser Doc). */
 export const documentFontKeys = ["fell", "cinzel", "dancing", "caveat", "uncial", "medieval", "pirata", "georgia", "manuscrit", "moderne"] as const
 export type DocumentFontKey = (typeof documentFontKeys)[number]
-
-export type DocumentFont = {
-  label: string
-  /** La famille CSS (et le canvas) : la police embarquée d'abord, des remplaçantes ensuite. */
-  family: string
-  /** Les fichiers embarqués (public/documents/polices) ; aucun pour une police de Windows. */
-  files: Array<{ file: string; weight: number; style: "normal" | "italic" }>
-}
-
-const font = (label: string, name: string, fallback: string, files: DocumentFont["files"] = []): DocumentFont => ({ label, family: `"${name}", ${fallback}`, files })
-const embedded = (slug: string, variants: Array<[number, "normal" | "italic"]>) => variants.map(([weight, style]) => ({ file: `/documents/polices/${slug}-latin-${weight}-${style}.woff2`, weight, style }))
-
-export const documentFonts: Record<DocumentFontKey, DocumentFont> = {
-  fell: font("Vieux livre", "IM Fell English", "Georgia, serif", embedded("im-fell-english", [[400, "normal"], [400, "italic"]])),
-  cinzel: font("Inscription", "Cinzel", "Georgia, serif", embedded("cinzel", [[400, "normal"], [700, "normal"]])),
-  dancing: font("Plume élégante", "Dancing Script", "\"Segoe Script\", cursive", embedded("dancing-script", [[400, "normal"], [700, "normal"]])),
-  caveat: font("Écriture pressée", "Caveat", "\"Segoe Print\", cursive", embedded("caveat", [[400, "normal"], [700, "normal"]])),
-  uncial: font("Onciale", "Uncial Antiqua", "Georgia, serif", embedded("uncial-antiqua", [[400, "normal"]])),
-  medieval: font("Médiéval", "MedievalSharp", "Georgia, serif", embedded("medievalsharp", [[400, "normal"]])),
-  pirata: font("Gothique", "Pirata One", "Georgia, serif", embedded("pirata-one", [[400, "normal"]])),
-  georgia: font("Georgia", "Georgia", "\"Times New Roman\", serif"),
-  manuscrit: font("Manuscrit", "Segoe Print", "\"Comic Sans MS\", cursive"),
-  moderne: font("Moderne", "Segoe UI", "Arial, Helvetica, sans-serif"),
-}
 
 export type DocumentAlign = "left" | "center" | "right" | "justify"
 export type DocumentVerticalAlign = "top" | "middle" | "bottom"
@@ -69,6 +48,7 @@ export type DocumentZone = {
   paragraphs: DocumentParagraph[]
 }
 
+/** Les fonds fournis (leurs images et leurs zones prêtes à remplir sont dans l'extension Eraser Doc). */
 export const builtinBackgroundKeys = ["parchemin", "rouleau", "livre"] as const
 export type BuiltinBackgroundKey = (typeof builtinBackgroundKeys)[number]
 
@@ -77,33 +57,6 @@ export type DocumentBackground =
   /** Une image envoyée depuis l'ordinateur, rangée dans Drive avec le document. */
   | { kind: "upload" }
   | { kind: "url"; url: string }
-
-type ZonePreset = Pick<DocumentZone, "x" | "y" | "width" | "height" | "font" | "size" | "align"> & Partial<Pick<DocumentZone, "rotation" | "valign">> & { text: string }
-
-/** Les fonds fournis avec Eraser (2000 × 2000, bords transparents) et des zones prêtes à remplir. */
-export const builtinBackgrounds: Record<BuiltinBackgroundKey, { label: string; src: string; width: number; height: number; zones: ZonePreset[] }> = {
-  parchemin: {
-    label: "Parchemin brûlé", src: "/documents/fonds/parchemin.webp", width: 2000, height: 2000,
-    zones: [
-      { x: 190, y: 110, width: 620, height: 110, font: "cinzel", size: 46, align: "center", valign: "middle", text: "Titre du document" },
-      { x: 190, y: 245, width: 620, height: 640, font: "fell", size: 30, align: "justify", text: "Écris ici le contenu du document…" },
-    ],
-  },
-  rouleau: {
-    label: "Rouleau", src: "/documents/fonds/rouleau.webp", width: 2000, height: 2000,
-    zones: [
-      { x: 185, y: 200, width: 630, height: 95, font: "cinzel", size: 44, align: "center", valign: "middle", text: "Proclamation" },
-      { x: 185, y: 310, width: 630, height: 480, font: "dancing", size: 32, align: "center", text: "Écris ici le contenu du rouleau…" },
-    ],
-  },
-  livre: {
-    label: "Livre ouvert", src: "/documents/fonds/livre.webp", width: 2000, height: 2000,
-    zones: [
-      { x: 175, y: 140, width: 290, height: 660, font: "fell", size: 24, align: "justify", text: "Page de gauche…" },
-      { x: 530, y: 140, width: 290, height: 660, font: "fell", size: 24, align: "justify", text: "Page de droite…" },
-    ],
-  },
-}
 
 export type DocumentContent = { version: 1; height: number; zones: DocumentZone[] }
 
@@ -155,18 +108,6 @@ export function mergeRuns(runs: DocumentRun[]) {
     else merged.push({ ...run })
   }
   return merged
-}
-
-export function plainParagraphs(content: string): DocumentParagraph[] {
-  return content.split("\n").map((line) => line ? [{ text: line }] : [])
-}
-
-export function newDocumentZone(partial: Partial<DocumentZone> = {}): DocumentZone {
-  return cleanDocumentZone({
-    id: crypto.randomUUID(), x: 200, y: 200, width: 600, height: 200, rotation: 0, font: "fell", size: 30, color: DEFAULT_INK,
-    align: "left", valign: "top", lineHeight: 1.35, letterSpacing: 0, opacity: 0.92, ink: true, paragraphs: plainParagraphs("Nouveau texte"),
-    ...partial,
-  }, 2000)!
 }
 
 export function cleanDocumentZone(value: unknown, height: number): DocumentZone | null {
@@ -227,17 +168,6 @@ export function documentPlainText(content: DocumentContent) {
   return content.zones.map((zone) => zone.paragraphs.map((paragraph) => paragraph.map((run) => run.text).join("")).join("\n")).join("\n\n").trim()
 }
 
-/** Un nouveau document sur un fond fourni : ses zones prêtes à remplir. */
-export function documentFromBuiltin(key: BuiltinBackgroundKey): DocumentContent {
-  const background = builtinBackgrounds[key]
-  const height = DOCUMENT_WIDTH * background.height / background.width
-  return {
-    version: 1,
-    height,
-    zones: background.zones.map(({ text: content, ...zone }) => newDocumentZone({ ...zone, paragraphs: plainParagraphs(content) })),
-  }
-}
-
 /* ---------- le document dans un inventaire ---------- */
 
 /**
@@ -278,4 +208,18 @@ export function documentImageUrl(campaignId: string, documentId: string, version
 
 export function documentPdfUrl(campaignId: string, documentId: string, version = "") {
   return `/api/campaigns/${encodeURIComponent(campaignId)}/documents/${encodeURIComponent(documentId)}/pdf${version ? `?v=${encodeURIComponent(version.replace(/[^0-9A-Za-z]/g, ""))}` : ""}`
+}
+
+/**
+ * L'éditeur des documents d'une campagne, dans l'extension Eraser Doc (l'ancienne page
+ * `/campagne/[id]/document` y renvoie) : `document` en ouvre un, `nouveau` en commence un,
+ * `session` le range dans cette session.
+ */
+export function documentStudioHref(campaignId: string, query: { document?: string; nouveau?: boolean; session?: string } = {}) {
+  const params = new URLSearchParams()
+  if (query.document) params.set("document", query.document)
+  if (query.nouveau) params.set("nouveau", "1")
+  if (query.session) params.set("session", query.session)
+  const search = params.toString()
+  return `/extension/doc/campagne/${encodeURIComponent(campaignId)}${search ? `?${search}` : ""}`
 }

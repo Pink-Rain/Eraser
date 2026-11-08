@@ -2,6 +2,7 @@
 
 import { EditorDockProvider } from "@/components/eraser/editor-dock"
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react"
+import { documentStudioHref } from "@/lib/document-model"
 import { installFluidityJournal, notePageShown } from "@/lib/fluidity-journal"
 import { installNavigationCacheGuard, revalidateShownPage } from "@/lib/navigation-cache"
 import { PortraitFramingEffect } from "@/components/eraser/portrait-framing"
@@ -602,7 +603,8 @@ export function AppShell({
         <NavSubLink nested href={`${campaignHref}/magasin-et-fouille`} label="Magasins" active={pathname.startsWith(`${campaignHref}/magasin-et-fouille`)} />
         <NavSubLink nested href={`${campaignHref}/fouilles`} label="Fouilles" active={pathname === `${campaignHref}/fouilles`} />
         <NavSubLink nested href={`${campaignHref}/pnjs`} label="PNJs" active={pathname === `${campaignHref}/pnjs`} />
-        <NavSubLink nested href={`${campaignHref}/document`} label="Document" active={pathname === `${campaignHref}/document`} />
+        {/* L'éditeur des documents est dans l'extension Eraser Doc. */}
+        <NavSubLink nested href={documentStudioHref(selectedCampaign.id)} label="Document" active={pathname === documentStudioHref(selectedCampaign.id)} />
         {(visibleCampaignPages[selectedCampaign.id] ?? []).map((page) => <NavSubLink key={page.href} href={page.href} label={page.title} active={pathname === page.href} />)}
       </NavSection>
     }

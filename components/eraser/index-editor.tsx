@@ -14,6 +14,7 @@ import { AutoFillSettingsEditor } from "@/components/eraser/index-autofill-edito
 import { autoFillProblem, cleanAutoFill } from "@/lib/index-autofill"
 import { IndexPresentationsEditor, PresentationsPanel } from "@/components/eraser/index-presentations-editor"
 import { LIST_FAMILY, MAIN_PRESENTATION_ID } from "@/lib/index-presentations"
+import { cardColumnsFor, layoutColumnsFor, viewColumnsFor } from "@/lib/index-appearance"
 import { appearancesHref } from "@/lib/custom-pages"
 import { columnStyleCss, pillStyle, stylePalette } from "@/components/eraser/index-style"
 import { creatableKinds } from "@/lib/index-schema-shared"
@@ -128,29 +129,14 @@ function takenAnswer(tabs: DraftTab[], indexKey: string, tabName: string, header
   return undefined
 }
 
-/**
- * Les colonnes qu'une mise en page peut placer : celles de la fiche (sauf l'identifiant et
- * ce qu'Eraser calcule hors fiche), ou celles qu'un survol sait montrer (une valeur gardée).
- */
+/** Les colonnes qu'une mise en page peut placer (lib/index-appearance.ts, partagé avec l'atelier). */
 function layoutColumnsOf(tab: DraftTab, kind: LayoutKind): LayoutColumn[] {
-  const formHidden = ["id", "auto-links", "ranked-links", "tab", "archived"]
-  // Le survol a toujours le nom en titre : il n'est pas proposé comme case.
-  const hoverHidden = ["id", "actions", "auto-links", "ranked-links", "tab", "archived", "formula", "lookup", "rollup", "name", "name-form"]
-  return tab.columns.filter((item) => !item.removed && item.header.trim()).flatMap((item) => {
-    const spec = normalizeSpec(item.spec)
-    // Toute colonne peut aller dans la fiche ou le survol, masquée ou non : c'est la mise en page qui décide.
-    if ((kind === "form" ? formHidden : hoverHidden).includes(spec.kind)) return []
-    return [{ header: item.header.trim(), spec }]
-  })
+  return layoutColumnsFor(tab.columns, kind)
 }
 
-/** Les colonnes qu'une carte peut montrer : toutes, sauf ce qui n'a pas de valeur à afficher. */
+/** Les colonnes qu'une carte peut montrer (lib/index-appearance.ts). */
 function cardColumnsOf(tab: DraftTab): CardColumn[] {
-  const hidden = ["id", "archived", "tab", "auto-links", "ranked-links", "actions"]
-  return tab.columns.filter((item) => !item.removed && item.header.trim()).flatMap((item) => {
-    const spec = normalizeSpec(item.spec)
-    return hidden.includes(spec.kind) ? [] : [{ header: item.header.trim(), spec }]
-  })
+  return cardColumnsFor(tab.columns)
 }
 
 function draftOf(model: IndexEditorModel): DraftTab[] {
@@ -1260,7 +1246,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   /** Les autres onglets (pas à la corbeille), pour « Copier vers… ». */
   const otherTabsOf = (draft: DraftTab) => tabs.filter((candidate) => candidate.id !== draft.id && !candidate.removed).map((candidate) => ({ id: candidate.id, name: candidate.name }))
   /** Les colonnes qu'une vue peut lire (sans l'identifiant). */
-  const viewColumnsOf = (draft: DraftTab) => draft.columns.filter((item) => !item.removed && item.header.trim() && !/^id$/i.test(item.header.trim())).map((item) => item.header.trim())
+  const viewColumnsOf = (draft: DraftTab) => viewColumnsFor(draft.columns)
 
   const policy = column?.policy ?? freePolicy
   const columnDisabled = readOnly || Boolean(column?.removed) || Boolean(tab?.removed)

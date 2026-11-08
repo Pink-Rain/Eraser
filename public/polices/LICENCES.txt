@@ -1,5 +1,5 @@
 Polices de l'interface d'Eraser — IM Fell (Igino Marini), sous licence SIL Open Font License 1.1 (fichiers repris de Fontsource 5.3.0, sous-ensemble latin).
-IM Fell English (normal et italique) est partagée avec les documents : public/documents/polices.
+IM Fell English (normal et italique) et Cinzel sont aussi dans l'extension Eraser Doc, pour les documents.
 
 == im-fell-double-pica-5.3.0 ==
 Google Inc.
@@ -22,8 +22,11 @@ Copyright 2017 The EB Garamond Project Authors (https://github.com/octaviopardo/
 == alegreya-sans-5.3.0 (petites étiquettes) ==
 Copyright 2013 The Alegreya Sans Project Authors (https://github.com/huertatipografica/Alegreya-Sans) AlegreyaSans-ThinItalic.ttf: Copyright 2013 The Alegreya Sans Project Authors (https://github.com/huertatipografica/Alegreya-Sans) AlegreyaSans-Light.ttf: Copyright 2013 The Alegreya Sans Project Authors (https://github.com/huertatipografica/Alegreya-Sans) AlegreyaSans-LightItalic.ttf: Copyright 2013 The Alegreya Sans Project Authors (https://github.com/huertatipografica/Alegreya-Sans) AlegreyaSans-Regular.ttf: Copyright 2013 The Alegreya Sans Project Authors (https://github.com/huertatipografica/Alegreya-Sans) AlegreyaSans-Italic.ttf: Copyright 2013 The Alegreya Sans Project Authors (https://github.com/huertatipografica/Alegreya-Sans) AlegreyaSans-Medium.ttf: Copyright 2013 The Alegreya Sans Project Authors (https://github.com/huertatipografica/Alegreya-Sans) AlegreyaSans-MediumItalic.ttf: Copyright 2013 The Alegreya Sans Project Authors (https://github.com/huertatipografica/Alegreya-Sans) AlegreyaSans-Bold.ttf: Copyright 2013 The Alegreya Sans Project Authors (https://github.com/huertatipografica/Alegreya-Sans) AlegreyaSans-BoldItalic.ttf: Copyright 2013 The Alegreya Sans Project Authors (https://github.com/huertatipografica/Alegreya-Sans) AlegreyaSans-ExtraBold.ttf: Copyright 2013 The Alegreya Sans Project Authors (https://github.com/huertatipografica/Alegreya-Sans) AlegreyaSans-ExtraBoldItalic.ttf: Copyright 2013 The Alegreya Sans Project Authors (https://github.com/huertatipografica/Alegreya-Sans) AlegreyaSans-Black.ttf: Copyright 2013 The Alegreya Sans Project Authors (https://github.com/huertatipografica/Alegreya-Sans) AlegreyaSans-BlackItalic.ttf: Copyright 2013 The Alegreya Sans Project Authors (https://github.com/huertatipografica/Alegreya-Sans)
 
-== Cinzel (grands titres) ==
-Fichiers des documents, partagés : public/documents/polices (licence dans leur LICENCES.txt).
+== im-fell-english-5.3.0 ==
+Google Inc.
+
+== cinzel-5.3.0 (grands titres) ==
+Copyright 2020 The Cinzel Project Authors (https://github.com/NDISCOVER/Cinzel)
 
 == Licence ==
 This Font Software is licensed under the SIL Open Font License, Version 1.1.

@@ -1,14 +1,37 @@
 import { NextResponse } from "next/server"
 
 import { listCampaignDocuments, saveCampaignDocument } from "@/lib/campaign-documents"
+import { listCampaignSessionsForDisplay } from "@/lib/campaign-sessions"
+import { listCampaignMembers } from "@/lib/google-sheets"
 import { sessionManager } from "@/lib/session-access"
 
-/** Les documents de la campagne (page Document, Créateur de session) : MJ et administrateurs. */
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+const failed = (code: string) => (error: unknown) => {
+  console.error(code, error instanceof Error ? error.message : "UNKNOWN_ERROR")
+  return null
+}
+
+/**
+ * Les documents de la campagne (éditeur de l'extension Eraser Doc, Créateur de session) : MJ et
+ * administrateurs. `?atelier=1` : ce qu'il faut à l'éditeur en plus (la campagne, ses sessions et
+ * ses joueurs) ; une session ou un joueur illisible laisse son menu vide, pas l'éditeur.
+ */
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  if (!await sessionManager(id)) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
+  const manager = await sessionManager(id)
+  if (!manager) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
-    return NextResponse.json({ documents: await listCampaignDocuments(id) })
+    if (new URL(request.url).searchParams.get("atelier") !== "1") return NextResponse.json({ documents: await listCampaignDocuments(id) })
+    const [documents, sessions, members] = await Promise.all([
+      listCampaignDocuments(id),
+      listCampaignSessionsForDisplay(id).catch(failed("DOCUMENT_STUDIO_SESSIONS_FAILED")),
+      listCampaignMembers(id).catch(failed("DOCUMENT_STUDIO_MEMBERS_FAILED")),
+    ])
+    return NextResponse.json({
+      campaign: { id: manager.campaign.id, name: manager.campaign.name },
+      documents,
+      sessions: (sessions ?? []).map((session) => ({ id: session.id, name: session.name })),
+      players: (members ?? []).map((member) => ({ id: member.id, name: member.name })),
+    })
   } catch {
     return NextResponse.json({ error: "Les documents n’ont pas pu être lus." }, { status: 400 })
   }
