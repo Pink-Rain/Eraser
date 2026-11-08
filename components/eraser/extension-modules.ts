@@ -45,13 +45,13 @@ import * as uiTooltip from "@/components/ui/tooltip"
 import * as eraserAppShell from "@/components/eraser/app-shell"
 import * as eraserCustomPageView from "@/components/eraser/custom-page-view"
 import * as eraserEditorControls from "@/components/eraser/editor-controls"
+import * as eraserIndexEditor from "@/components/eraser/index-editor"
 import * as eraserIndexGauge from "@/components/eraser/index-gauge"
 import * as eraserIndexPresentationsEditor from "@/components/eraser/index-presentations-editor"
 import * as eraserIndexReferences from "@/components/eraser/index-references"
 import * as eraserIndexWindows from "@/components/eraser/index-windows"
 import * as eraserPageIndexBlock from "@/components/eraser/page-index-block"
 import * as eraserPageSectionGrid from "@/components/eraser/page-section-grid"
-import * as eraserPagesIndexViews from "@/components/eraser/pages-index-views"
 import * as eraserRichText from "@/components/eraser/rich-text"
 import * as libAppMenu from "@/lib/app-menu"
 import * as libCustomPagesData from "@/lib/custom-pages-data"
@@ -60,6 +60,7 @@ import * as libEraserModules from "@/lib/eraser-modules"
 import * as libEraserPageBlueprints from "@/lib/eraser-page-blueprints"
 import * as libIndexPresentations from "@/lib/index-presentations"
 import * as libIndexSavedViews from "@/lib/index-saved-views"
+import * as libIndexSchemaShared from "@/lib/index-schema-shared"
 import * as libIndexWindows from "@/lib/index-windows"
 import * as libPageExplorer from "@/lib/page-explorer"
 import * as libPageFolders from "@/lib/page-folders"
@@ -109,13 +110,13 @@ const modules: Record<string, Readonly<Record<string, unknown>>> = {
   "@/components/eraser/app-shell": lent(eraserAppShell),
   "@/components/eraser/custom-page-view": lent(eraserCustomPageView),
   "@/components/eraser/editor-controls": lent(eraserEditorControls),
+  "@/components/eraser/index-editor": lent(eraserIndexEditor),
   "@/components/eraser/index-gauge": lent(eraserIndexGauge),
   "@/components/eraser/index-presentations-editor": lent(eraserIndexPresentationsEditor),
   "@/components/eraser/index-references": lent(eraserIndexReferences),
   "@/components/eraser/index-windows": lent(eraserIndexWindows),
   "@/components/eraser/page-index-block": lent(eraserPageIndexBlock),
   "@/components/eraser/page-section-grid": lent(eraserPageSectionGrid),
-  "@/components/eraser/pages-index-views": lent(eraserPagesIndexViews),
   "@/components/eraser/rich-text": lent(eraserRichText),
   "@/lib/app-menu": lent(libAppMenu),
   "@/lib/custom-pages-data": lent(libCustomPagesData),
@@ -124,6 +125,7 @@ const modules: Record<string, Readonly<Record<string, unknown>>> = {
   "@/lib/eraser-page-blueprints": lent(libEraserPageBlueprints),
   "@/lib/index-presentations": lent(libIndexPresentations),
   "@/lib/index-saved-views": lent(libIndexSavedViews),
+  "@/lib/index-schema-shared": lent(libIndexSchemaShared),
   "@/lib/index-windows": lent(libIndexWindows),
   "@/lib/page-explorer": lent(libPageExplorer),
   "@/lib/page-folders": lent(libPageFolders),

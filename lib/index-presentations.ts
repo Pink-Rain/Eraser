@@ -995,6 +995,12 @@ export function textWithFormulas<T>(text: string, rows: T[], valueOf: (row: T, c
 
 /** Les vues réglées dans « Modifier », que les onglets-fenêtres affichent. */
 export type PresentationKind = Exclude<AllPresentationKind, "table" | "cards" | "stats">
+
+/** Les formes de la Liste : la façon de ranger, sous un seul éditeur (leurs clés d'enregistrement ne changent pas). */
+export const LIST_FAMILY: PresentationKind[] = ["list", "kanban", "master-detail"]
+
+/** L'identifiant de la version étoilée d'une vue (celle rangée sous son genre). */
+export const MAIN_PRESENTATION_ID = "principal"
 export const presentationKinds = allPresentationKinds.filter((kind): kind is (typeof allPresentationKinds)[number] & { value: PresentationKind } => kind.value !== "table" && kind.value !== "cards")
 export const isPresentationKind = (value: unknown): value is PresentationKind => presentationKinds.some((kind) => kind.value === value)
 

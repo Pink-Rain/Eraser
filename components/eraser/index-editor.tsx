@@ -12,7 +12,9 @@ import { CardsPanel, IndexCardEditor, duplicateCard } from "@/components/eraser/
 import { ColumnDescriptionButton, ColumnLockButton, ColumnTypeMenu } from "@/components/eraser/index-column-toolbar"
 import { AutoFillSettingsEditor } from "@/components/eraser/index-autofill-editor"
 import { autoFillProblem, cleanAutoFill } from "@/lib/index-autofill"
-import { IndexPresentationsEditor, LIST_FAMILY, MAIN_PRESENTATION_ID, PresentationsPanel } from "@/components/eraser/index-presentations-editor"
+import { IndexPresentationsEditor, PresentationsPanel } from "@/components/eraser/index-presentations-editor"
+import { LIST_FAMILY, MAIN_PRESENTATION_ID } from "@/lib/index-presentations"
+import { appearancesHref } from "@/lib/custom-pages"
 import { columnStyleCss, pillStyle, stylePalette } from "@/components/eraser/index-style"
 import { creatableKinds } from "@/lib/index-schema-shared"
 import { isNameColumn, linkedColumnProblems } from "@/lib/world-index-definitions"
@@ -66,6 +68,15 @@ import { layoutIcons } from "@/components/eraser/index-windows"
 
 /** Ce que montre l'éditeur : les colonnes, le formulaire, le survol, les cartes ou une vue. */
 export type EditorMode = "columns" | LayoutKind | "cards" | `view:${PresentationKind}` | "stats" | "items"
+
+export type EditorScope = "moteur" | "atelier" | "tout"
+
+/** Les onglets de « Modifier » selon ce qu'il règle (voir `scope` d'`IndexEditor`). */
+export function editorModeAllowed(scope: EditorScope, mode: EditorMode) {
+  if (scope === "moteur") return mode === "columns" || mode === "form" || mode === "cards" || mode === "stats" || mode === "items"
+  if (scope === "atelier") return mode === "form" || mode === "hover" || mode === "cards" || mode.startsWith("view:")
+  return true
+}
 import {
   alignColumns,
   canonicalObjectHeader,
@@ -830,9 +841,16 @@ function useDragList<T extends { id: string }>(items: T[], onMove: (next: T[]) =
  * milieu, les réglages de la colonne choisie à droite, tous visibles. Rien n'est écrit
  * tant qu'on n'a pas enregistré ; le résumé dit exactement ce qui va changer.
  */
-export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {}, layouts = {}, onSaveLayouts, cardsIndex, cards = {}, onSaveCards, initialMode = "columns", initialTab, locks = {}, onSaveLocks, presentations = {}, onSavePresentations, viewPresets = [], onSaveViewPreset, onDeleteViewPreset, previewRows = {}, valuesOf, optionsOf, linkedSourcesOf, statsPanel, itemsPanel, stats = [], onFillAutoColumn }: {
+export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {}, layouts = {}, onSaveLayouts, cardsIndex, cards = {}, onSaveCards, initialMode = "columns", initialTab, locks = {}, onSaveLocks, presentations = {}, onSavePresentations, viewPresets = [], onSaveViewPreset, onDeleteViewPreset, previewRows = {}, valuesOf, optionsOf, linkedSourcesOf, statsPanel, itemsPanel, stats = [], onFillAutoColumn, scope = "tout" }: {
   model: IndexEditorModel
   open: boolean
+  /**
+   * Ce que cet éditeur règle. « moteur » (le « Modifier » d'un index) : colonnes, formulaire
+   * principal (celui qu'ouvre le nom d'une ligne), carte officielle (celle à l'étoile), stats,
+   * affichage des items. « atelier » (Apparences, dans l'atelier des pages) : survols, cartes,
+   * formulaires et présentations. « tout » : l'ensemble.
+   */
+  scope?: EditorScope
   pending?: boolean
   error?: string
   title?: string
@@ -938,7 +956,12 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   ].filter(Boolean).map((problem) => `${candidate.name} : ${problem}`)).concat(linkedColumnProblems(model.key, operations)), [model.key, operations, tabs])
 
   // « Colonnes », ou la mise en page de la fiche ou du survol de l'onglet choisi.
-  const [mode, setMode] = useState<EditorMode>(() => (initialMode === "cards" && !onSaveCards) || (initialMode.startsWith("view:") && !onSavePresentations) || (initialMode === "stats" && !statsPanel) || (initialMode === "items" && !itemsPanel) ? "columns" : initialMode)
+  const [mode, setMode] = useState<EditorMode>(() => {
+    const wanted = (initialMode === "cards" && !onSaveCards) || (initialMode.startsWith("view:") && !onSavePresentations) || (initialMode === "stats" && !statsPanel) || (initialMode === "items" && !itemsPanel) ? "columns" : initialMode
+    if (editorModeAllowed(scope, wanted)) return wanted
+    // Hors de ce que règle cet éditeur : son premier onglet.
+    return scope === "atelier" ? (onSaveCards ? "cards" : "hover") : "columns"
+  })
   // La Liste réunit liste, kanban et maître-détail sous un seul onglet (« view:list ») : sa version choisie dit sa forme (« forme|id »).
   const openedKind = mode.startsWith("view:") ? mode.slice(5) as PresentationKind : null
   const listFamily = openedKind !== null && LIST_FAMILY.includes(openedKind)
@@ -1291,7 +1314,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
           </div>
           <span className="flex flex-wrap items-center gap-2">
             {(layoutsEnabled || cardsEnabled || presentationsEnabled || (itemsPanel && !readOnly)) && <span className="inline-flex flex-wrap rounded-lg border bg-muted/30 p-0.5" role="tablist" aria-label="Que modifier">
-              {([["columns", Columns3, "Colonnes"], ...(layoutsEnabled ? [["form", LayoutTemplate, "Formulaire"], ["hover", MessageSquareQuote, "Survol"]] as const : []), ...(cardsEnabled ? [["cards", LayoutGrid, "Cartes"]] as const : []), ...(presentationsEnabled ? presentationKinds.filter((kind) => kind.value === "list" || !LIST_FAMILY.includes(kind.value)).map((kind) => [`view:${kind.value}`, layoutIcons[kind.value], kind.label] as const) : []), ...(statsPanel && !readOnly ? [["stats", layoutIcons.stats, "Stats"] as const] : []), ...(itemsPanel && !readOnly ? [["items", PackageSearch, "Affichage des items"] as const] : [])] as Array<readonly [EditorMode, LucideIcon, string]>).map(([key, Icon, label]) => <Button key={key} type="button" role="tab" aria-selected={mode === key || (key === "view:list" && listFamily)} size="sm" variant={mode === key || (key === "view:list" && listFamily) ? "default" : "ghost"} className="h-7" onClick={() => setMode(key)}><Icon />{label}</Button>)}
+              {([["columns", Columns3, "Colonnes"], ...(layoutsEnabled ? [["form", LayoutTemplate, "Formulaire"], ["hover", MessageSquareQuote, "Survol"]] as const : []), ...(cardsEnabled ? [["cards", LayoutGrid, "Cartes"]] as const : []), ...(presentationsEnabled ? presentationKinds.filter((kind) => kind.value === "list" || !LIST_FAMILY.includes(kind.value)).map((kind) => [`view:${kind.value}`, layoutIcons[kind.value], kind.label] as const) : []), ...(statsPanel && !readOnly ? [["stats", layoutIcons.stats, "Stats"] as const] : []), ...(itemsPanel && !readOnly ? [["items", PackageSearch, "Affichage des items"] as const] : [])] as Array<readonly [EditorMode, LucideIcon, string]>).filter(([key]) => editorModeAllowed(scope, key)).map(([key, Icon, label]) => <Button key={key} type="button" role="tab" aria-selected={mode === key || (key === "view:list" && listFamily)} size="sm" variant={mode === key || (key === "view:list" && listFamily) ? "default" : "ghost"} className="h-7" onClick={() => setMode(key)}><Icon />{label}</Button>)}
             </span>}
           </span>
         </div>
@@ -1360,6 +1383,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             return <LayoutViewsPanel
               key={editKey}
               kind={kind}
+              starredOnly={scope === "moteur" ? <>Le formulaire qu’ouvre le nom d’une ligne. Les autres formulaires, les survols, les cartes et les présentations se créent dans l’<a className="font-semibold text-primary underline underline-offset-2" href={appearancesHref(model.key)}>atelier des pages</a>.</> : undefined}
               tabName={tab.name}
               items={[{ id: DEFAULT_FORM_ID, name: mainName }, ...named.map((item) => ({ id: item.id, name: item.name }))]}
               selectedId={chosen?.id ?? DEFAULT_FORM_ID}
@@ -1423,6 +1447,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             return <CardsPanel
               key={tab.id}
               tabName={tab.name}
+              starredOnly={scope === "moteur" ? <>La carte officielle de cet onglet. Les autres cartes se créent dans l’<a className="font-semibold text-primary underline underline-offset-2" href={appearancesHref(model.key)}>atelier des pages</a>.</> : undefined}
               columns={cardColumnsOf(tab)}
               value={entry}
               builtin={entry.builtin}

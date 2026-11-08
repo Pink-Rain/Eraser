@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { Bookmark, BookmarkPlus, Check, LayoutTemplate, LoaderCircle, MessageSquareQuote, Pencil, Replace, Settings2, Trash2 } from "lucide-react"
 
 import { useIndexSettings } from "@/components/eraser/index-windows"
@@ -130,7 +130,7 @@ function ManagePresetsDialog({ tabName, columns, presets, onClose, onSave, onDel
  * celle qu'Eraser montre) et ses presets (appliquer, enregistrer, copier vers d'autres
  * onglets, gérer). Rien n'est écrit avant « Enregistrer » de la fenêtre, sauf les presets.
  */
-export function LayoutViewsPanel({ kind, tabName, items, selectedId, onSelect, onStar, onRename, onMove, onNew, onDuplicate, onRemove, mainRemovable = false, full, layout, otherTabs, disabled, onApply, onCopyTo }: {
+export function LayoutViewsPanel({ kind, tabName, items, selectedId, onSelect, onStar, onRename, onMove, onNew, onDuplicate, onRemove, mainRemovable = false, full, layout, otherTabs, disabled, onApply, onCopyTo, starredOnly }: {
   kind: LayoutKind
   tabName: string
   /** Les versions : l'étoilée (`principal`) d'abord, puis les autres. */
@@ -155,6 +155,8 @@ export function LayoutViewsPanel({ kind, tabName, items, selectedId, onSelect, o
   onApply: (layout: IndexLayout) => void
   /** Copier la version choisie : ajoutée aux onglets cochés ; `star` : mise aussi à l'étoile. */
   onCopyTo: (tabIds: string[], star: boolean) => void
+  /** Seulement la version à l'étoile, avec cette note (le moteur des index : voir `VariantsPanel`). */
+  starredOnly?: ReactNode
 }) {
   const { layoutPresets, saveLayoutPreset, deleteLayoutPreset } = useIndexSettings("")
   const presets = layoutPresets.filter((preset) => preset.kind === kind)
@@ -187,6 +189,7 @@ export function LayoutViewsPanel({ kind, tabName, items, selectedId, onSelect, o
       onCopy={otherTabs.length ? () => setDialog("copy") : undefined}
       copyHint={otherTabs.length ? `Copier ${what} vers d’autres onglets…` : "Cet index n’a pas d’autre onglet"}
       onManagePresets={presets.length ? () => setDialog("manage") : undefined}
+      starredOnly={starredOnly}
       disabled={disabled}
     />
     {dialog === "save" && <NamePresetDialog

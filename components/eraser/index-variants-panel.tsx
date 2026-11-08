@@ -31,7 +31,7 @@ function Tool({ icon: Icon, label, onClick, disabled, className }: { icon: Lucid
   return <Button type="button" variant="ghost" size="icon-sm" className={cn(iconButton, className)} disabled={disabled} onClick={onClick} title={label} aria-label={label}><Icon /></Button>
 }
 
-export function VariantsPanel({ title, icon: Icon, noun, items, selectedId, starredId, isStarred = (id) => id === starredId, onSelect, onStar, starHint, onRename, renameable = () => true, onMove, pinFirst = false, onNew, newHint, onDuplicate, onRemove, removable = () => true, full = false, empty, presets, onApplyPreset, onSavePreset, savePresetHint, onCopy, copyHint, onManagePresets, footer, disabled = false }: {
+export function VariantsPanel({ title, icon: Icon, noun, items, selectedId, starredId, isStarred = (id) => id === starredId, onSelect, onStar, starHint, onRename, renameable = () => true, onMove, pinFirst = false, onNew, newHint, onDuplicate, onRemove, removable = () => true, full = false, empty, presets, onApplyPreset, onSavePreset, savePresetHint, onCopy, copyHint, onManagePresets, footer, starredOnly, disabled = false }: {
   /** « Formulaires », « Survols », « Cartes », « Listes »… */
   title: string
   icon: LucideIcon
@@ -74,9 +74,15 @@ export function VariantsPanel({ title, icon: Icon, noun, items, selectedId, star
   onManagePresets?: () => void
   /** Sous les presets : revenir à l'affichage d'Eraser, une note… */
   footer?: ReactNode
+  /**
+   * Seulement la version à l'étoile (le moteur des index : sa carte officielle, son formulaire
+   * principal), avec cette note à la place de la liste : les autres versions se créent ailleurs
+   * (l'atelier des pages). Sans version, « + » crée la première.
+   */
+  starredOnly?: ReactNode
   disabled?: boolean
 }) {
-  const selected = items.find((item) => item.id === selectedId) ?? items[0]
+  const selected = starredOnly ? items.find((item) => isStarred(item.id)) ?? items[0] : items.find((item) => item.id === selectedId) ?? items[0]
   const at = selected ? items.findIndex((item) => item.id === selected.id) : -1
   const starred = selected ? isStarred(selected.id) : false
   const groups = [...new Set(presets.map((preset) => preset.group ?? ""))]
@@ -88,13 +94,16 @@ export function VariantsPanel({ title, icon: Icon, noun, items, selectedId, star
   return <section className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 rounded-xl border bg-muted/20 p-2 [&_[data-slot=native-select-wrapper]]:w-full [&_[data-slot=native-select-wrapper]]:min-w-0" aria-label={title}>
     <div className="flex items-center justify-between gap-1">
       <p className={cn(panelTitle, "px-1")}><Icon className="size-3.5 shrink-0" /><span className="truncate">{title}</span></p>
-      <span className="flex shrink-0 items-center">
+      {(!starredOnly || !items.length) && <span className="flex shrink-0 items-center">
         <Tool icon={Plus} label={full ? "Le nombre de versions est au plus" : newHint} disabled={disabled || full} onClick={onNew} />
-        <Tool icon={CopyPlus} label={full ? "Le nombre de versions est au plus" : `Dupliquer : une copie de ${the} ${noun} affiché${feminine ? "e" : ""}`} disabled={disabled || full || !selected} onClick={onDuplicate} />
-      </span>
+        {!starredOnly && <Tool icon={CopyPlus} label={full ? "Le nombre de versions est au plus" : `Dupliquer : une copie de ${the} ${noun} affiché${feminine ? "e" : ""}`} disabled={disabled || full || !selected} onClick={onDuplicate} />}
+      </span>}
     </div>
 
-    {selected ? <>
+    {selected && starredOnly ? <>
+      <p className="flex min-w-0 items-center gap-1.5 px-1 text-xs font-medium"><Star className="size-3.5 shrink-0 text-[#c9a227]" fill="currentColor" /><span className="truncate">{selected.name}</span></p>
+      <div className="rounded-lg bg-primary/5 px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">{starredOnly}</div>
+    </> : selected ? <>
       <div className="flex items-center gap-1">
         <NativeSelect value={selected.id} disabled={disabled} onChange={(event) => onSelect(event.target.value)} className="h-8 min-w-0 flex-1 py-0 text-xs" aria-label={`${noun[0].toLocaleUpperCase("fr")}${noun.slice(1)} modifié${feminine ? "e" : ""}`}>
           {items.map((item) => <NativeSelectOption key={item.id} value={item.id}>{isStarred(item.id) ? "★ " : ""}{item.name}</NativeSelectOption>)}
@@ -119,7 +128,7 @@ export function VariantsPanel({ title, icon: Icon, noun, items, selectedId, star
         <p className={cn(panelTitle, "px-1")}><Bookmark className="size-3 shrink-0" />Presets</p>
         <span className="flex shrink-0 items-center">
           <Tool icon={BookmarkPlus} label={onSavePreset ? `Enregistrer ${this_} ${noun} en preset (pour tous les index)` : savePresetHint ?? "Rien à enregistrer"} disabled={disabled || !onSavePreset || !selected} onClick={() => onSavePreset?.()} />
-          <Tool icon={Send} label={onCopy ? copyHint ?? "Copier vers d’autres onglets…" : copyHint ?? "Cet index n’a pas d’autre onglet"} disabled={disabled || !onCopy || !selected} onClick={() => onCopy?.()} />
+          {!starredOnly && <Tool icon={Send} label={onCopy ? copyHint ?? "Copier vers d’autres onglets…" : copyHint ?? "Cet index n’a pas d’autre onglet"} disabled={disabled || !onCopy || !selected} onClick={() => onCopy?.()} />}
           {onManagePresets && <Tool icon={Settings2} label="Gérer les presets (renommer, supprimer)" disabled={disabled} onClick={onManagePresets} />}
         </span>
       </div>

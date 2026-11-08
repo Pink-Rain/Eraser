@@ -5,7 +5,6 @@ import Link from "next/link"
 import { ExternalLink, Puzzle, RefreshCw } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { extensionRoleLabels } from "@/lib/extensions"
 import type { ExtensionOverview } from "@/lib/extensions-sync"
 
 export type ExtensionsAdminData = { api: number; installable: boolean; extensions: ExtensionOverview[] }
@@ -20,8 +19,8 @@ function publishedLine(extension: ExtensionOverview) {
 
 /**
  * Administration › Extensions : les extensions liées à Eraser (lib/extensions.ts), leur version
- * publiée et celle de cet ordinateur. Toutes les installations les reçoivent toutes ; qui peut
- * en ouvrir une est réglé dans le code.
+ * publiée et celle de cet ordinateur. Toutes les installations les reçoivent toutes ; chaque
+ * extension règle les droits de ses modules.
  */
 export function ExtensionsAdmin({ initial }: { initial: ExtensionsAdminData }) {
   const [data, setData] = useState(initial)
@@ -44,7 +43,7 @@ export function ExtensionsAdmin({ initial }: { initial: ExtensionsAdminData }) {
       <h1 className="font-display text-4xl font-semibold sm:text-5xl">Extensions</h1>
       <p className="mt-3 max-w-2xl text-muted-foreground">
         Chaque extension vit dans son propre dépôt GitHub. Tous les ordinateurs les reçoivent toutes et les mettent à jour seuls (au
-        lancement d’Eraser, toutes les six heures, et avec « Chercher les mises à jour »). Seuls ceux qui y ont accès peuvent les ouvrir.
+        lancement d’Eraser, toutes les six heures, et avec « Chercher les mises à jour »). Chaque module d’une extension a ses propres droits.
       </p>
       {!data.installable && <p className="mt-3 max-w-2xl text-sm text-muted-foreground">Ce serveur ne tourne pas dans l’application Windows : les extensions ne s’y installent pas.</p>}
       <div className="mt-6 flex flex-wrap items-center gap-3">
@@ -75,9 +74,6 @@ export function ExtensionsAdmin({ initial }: { initial: ExtensionsAdminData }) {
               {extension.lastError && <p className="text-destructive">Dernier téléchargement : {extension.lastError}</p>}
             </div>
 
-            <p className="mt-4 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-              Ouverte à : {extension.openTo.map((role) => extensionRoleLabels[role]).join(", ")}
-            </p>
           </section>
         ))}
       </div>

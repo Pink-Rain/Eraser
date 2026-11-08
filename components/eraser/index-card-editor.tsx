@@ -951,7 +951,7 @@ export function pickedCard(value: TabCards, selected: string | null) {
  * Le panneau des cartes d'un onglet, sous la liste des onglets : la carte choisie (liste
  * déroulante, l'étoile pour celle montrée d'abord), son nom, et ce qu'on en fait.
  */
-export function CardsPanel({ tabName, columns, value, builtin, builtins, samples, otherTabs, selected, onSelect, onChange, onCopyTo, onReset, disabled = false }: {
+export function CardsPanel({ tabName, columns, value, builtin, builtins, samples, otherTabs, selected, onSelect, onChange, onCopyTo, onReset, starredOnly, disabled = false }: {
   tabName: string
   columns: CardColumn[]
   value: TabCards
@@ -965,6 +965,8 @@ export function CardsPanel({ tabName, columns, value, builtin, builtins, samples
   onChange: (value: TabCards) => void
   onCopyTo: (tabIds: string[], card: CardTemplate, star: boolean) => void
   onReset?: () => void
+  /** Seulement la carte à l'étoile (la carte officielle du moteur), avec cette note : voir `VariantsPanel`. */
+  starredOnly?: ReactNode
   disabled?: boolean
 }) {
   const { cardPresets, saveCardPreset, deleteCardPreset } = useIndexSettings("")
@@ -1016,6 +1018,7 @@ export function CardsPanel({ tabName, columns, value, builtin, builtins, samples
       onCopy={otherTabs.length ? () => setDialog("copy") : undefined}
       copyHint={otherTabs.length ? "Copier cette carte vers d’autres onglets…" : "Cet index n’a pas d’autre onglet"}
       onManagePresets={cardPresets.length ? () => setDialog("manage") : undefined}
+      starredOnly={starredOnly}
       disabled={disabled}
       footer={<>
         {builtin && value.cards.length > 0 && <p className="rounded-lg bg-primary/5 px-2 py-1.5 text-[10px] leading-4 text-muted-foreground"><Star className="mr-1 inline size-3 text-[#c9a227]" />Les cartes qu’Eraser affiche déjà pour cet index. Modifie-les librement : elles sont enregistrées pour tout le monde à « Enregistrer ».</p>}

@@ -76,16 +76,6 @@ test("les extensions liées : identifiants stables, dépôts du propriétaire", 
   assert.equal(extensions.linkedExtension("autre"), null);
 });
 
-test("qui ouvre une extension : réglé dans le code, selon la vue ; un admin ouvre tout", () => {
-  assert.deepEqual(extensions.linkedExtensions.map((entry) => [entry.id, entry.openTo]), [["doc", ["mj", "admin"]], ["map", ["joueur", "mj", "admin"]], ["page", ["admin"]]]);
-  // Un MJ qui regarde « en joueur » voit ce que voit un joueur.
-  assert.equal(extensions.extensionOpenFor("map", { role: "joueur", accountRole: "mj" }), true);
-  assert.equal(extensions.extensionOpenFor("doc", { role: "joueur", accountRole: "mj" }), false);
-  assert.equal(extensions.extensionOpenFor("page", { role: "mj", accountRole: "mj" }), false);
-  assert.equal(extensions.extensionOpenFor("page", { role: "joueur", accountRole: "admin" }), true);
-  assert.equal(extensions.extensionOpenFor("autre", { role: "admin", accountRole: "admin" }), true);
-});
-
 test("versions et chemins : préversions avant la version finale, rien hors du dossier", () => {
   assert.equal(extensions.compareVersions("0.1.0", "0.1.1"), -1);
   assert.equal(extensions.compareVersions("1.0.0-alpha.3", "1.0.0"), -1);

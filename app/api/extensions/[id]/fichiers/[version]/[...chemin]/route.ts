@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises"
 
-import { extensionContentType, extensionOpenFor, linkedExtension } from "@/lib/extensions"
+import { extensionContentType, linkedExtension } from "@/lib/extensions"
 import { extensionFile } from "@/lib/extensions-install"
 import { authorizedAccount } from "@/lib/server-auth"
 
@@ -16,7 +16,7 @@ export async function GET(
   const { id, version, chemin } = await params
   const account = await authorizedAccount()
   if (!account) return new Response("Accès refusé.", { status: 403 })
-  if (!linkedExtension(id) || !extensionOpenFor(id, account)) return new Response("Extension introuvable.", { status: 404 })
+  if (!linkedExtension(id)) return new Response("Extension introuvable.", { status: 404 })
   const file = await extensionFile(id, version, (chemin ?? []).join("/"))
   if (!file) return new Response("Fichier introuvable.", { status: 404 })
   return new Response(await readFile(file), {

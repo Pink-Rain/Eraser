@@ -2,20 +2,19 @@ import { notFound, redirect } from "next/navigation"
 
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { ExtensionHost, ExtensionUnavailable } from "@/components/eraser/extension-host"
-import { EXTENSION_API_VERSION, extensionOpenFor, linkedExtension } from "@/lib/extensions"
+import { EXTENSION_API_VERSION, linkedExtension } from "@/lib/extensions"
 import { extensionsDirectory, readInstalledExtension } from "@/lib/extensions-install"
 import { authorizedAccount } from "@/lib/server-auth"
 
 export const dynamic = "force-dynamic"
 
-/** Une extension installée (lib/extensions.ts), ouverte dans la coque d'Eraser. */
+/** Une extension installée (lib/extensions.ts), ouverte dans la coque d'Eraser. Ses droits se règlent par module, dans l'extension. */
 export default async function ExtensionPage({ params }: { params: Promise<{ id: string; chemin?: string[] }> }) {
   const { id, chemin } = await params
   const definition = linkedExtension(id)
   if (!definition) notFound()
   const account = await authorizedAccount()
   if (!account) redirect("/")
-  if (!extensionOpenFor(id, account)) redirect("/")
   const installed = await readInstalledExtension(id)
 
   let content

@@ -186,6 +186,20 @@ noms et ne se renomment jamais : actions `save-view`, `delete-view`,
 `save-view-preset`, clés `views` et `viewPresets` de l’API des réglages, portées
 du Worker, colonnes de la feuille, préfixe de version `vue:`, élément `@vue`.
 
+### Où se règle l'apparence d'un index (alpha 276)
+
+- Le « Modifier » d'un index (`IndexEditor`, `scope="moteur"`) ne règle plus que ce qui reste au
+  moteur : les colonnes, le **formulaire principal** (celui qu'ouvre le nom d'une ligne), la
+  **carte officielle** (celle à l'étoile, `defaultId`), les stats et l'affichage des items. Les
+  listes de versions n'y montrent que l'étoilée (`starredOnly` de `VariantsPanel`).
+- Les **Apparences** d'un index, dans l'atelier des pages (extension Eraser Page,
+  `/extension/page/apparences/<index>`, `scope="atelier"`) : survols, cartes, formulaires et
+  présentations (liste, kanban, maître-détail, calendrier, chronologie, galerie, arborescence,
+  codex, tableau de bord). Le bouton « Apparences » de l'écran d'un index y mène.
+- Les réglages et leurs clés sur le Worker ne changent pas ; l'affichage reste dans Eraser. Le code
+  des éditeurs (cartes, formulaires et survols, présentations) est encore dans Eraser, prêté à
+  l'atelier : le séparer du « Modifier » est l'étape suivante.
+
 ## Colonnes liées ↔
 
 Une colonne liée (`kind: "linked"`, `link: { index, tab, column }`) nomme la colonne qui lui
@@ -514,8 +528,8 @@ documents de campagne, encore vide), `map` (Pink-Rain/Eraser_map, tabletop, enco
 
 - **Liaison** : `linkedExtensions` dans `lib/extensions.ts`, dans le code seulement. L'identifiant
   nomme le dossier d'installation, l'adresse `/extension/<id>` et ses données : il ne se renomme
-  jamais. `openTo` y dit qui peut l'ouvrir (selon la vue ; un admin peut toujours) ; ses API
-  vérifient les droits de toute façon.
+  jamais. Tout compte connecté peut ouvrir l'adresse d'une extension : **les droits se règlent par
+  module, dans l'extension** (selon `eraser.account`), et les API d'Eraser les vérifient toujours.
 - **Toutes les installations reçoivent toutes les extensions**, quel que soit le rôle (alpha 275 ;
   l'ancien choix de l'admin, portée Worker `extensions`, n'est plus lu). Administration ›
   Extensions (`components/eraser/extensions-admin.tsx`, `/api/extensions`) montre leurs versions,
@@ -569,7 +583,9 @@ documents de campagne, encore vide), `map` (Pink-Rain/Eraser_map, tabletop, enco
   demande plus attend la mise à jour d'Eraser.
 - **L'atelier des pages** (extension `page`) : l'Index des pages (`/extension/page`, `?dossier=`,
   `?vue=`, `?nouvelle=1`), l'atelier d'une page (`/extension/page/atelier/<id>`, `studioHref`) et
-  l'éditeur du menu (`/extension/page/menu`). Eraser garde l'affichage des pages, leur modèle,
+  l'éditeur du menu (`/extension/page/menu`), réservés aux admins ; les **Apparences** d'un index
+  (`/extension/page/apparences/<index>`, `appearancesHref`), pour les MJ et les admins. Eraser
+  garde l'affichage des pages, leur modèle,
   leurs API d'enregistrement, « Modifier la page » (montré si l'extension est installée) et les
   données de chaque écran (`GET /api/pages/atelier?ecran=index|page|menu`,
   `lib/page-atelier-data.ts`). Les anciennes adresses (`/pages`, `/pages/atelier/<id>`,

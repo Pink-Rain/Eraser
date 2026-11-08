@@ -98,6 +98,10 @@
   « Eraser · Réglages des index », `vue:`, `@vue`).
 - Les éditeurs enregistrent la valeur « par défaut » comme absente : vérifier que
   l’affichage a bien le même défaut.
+- **Survols, cartes, formulaires et présentations se créent dans l'atelier des pages**
+  (Apparences d'un index, extension Eraser Page). Le « Modifier » d'un index (`scope="moteur"`)
+  ne garde que les colonnes, le formulaire principal, la carte officielle, les stats et
+  l'affichage des items : ne pas y remettre le reste.
 - « Liste » réunit dans « Modifier » les formes `list`, `kanban` et `master-detail` : leurs
   clés d'enregistrement restent séparées (une version désignée « forme|id » dans l'éditeur).
 - Les rôles d'un lecteur pour une ligne (joueur, joueur de la campagne, joueur propriétaire,
@@ -193,8 +197,10 @@
 
 - Une extension vit dans son propre dépôt GitHub public (`Pink-Rain/Eraser_doc`, `Eraser_map`,
   `Eraser_page`) et se lie dans `linkedExtensions` (`lib/extensions.ts`), jamais depuis
-  l'application. Toutes les installations les reçoivent toutes ; `openTo` dit qui les ouvre. Ne
-  jamais renommer l'identifiant d'une extension liée (`doc`, `map`, `page`).
+  l'application. Toutes les installations les reçoivent toutes. **Les droits se règlent par module,
+  dans chaque extension**, jamais par extension (le tabletop aura des modules pour les MJ, d'autres
+  pour les joueurs…) ; les API d'Eraser les vérifient. Ne jamais renommer l'identifiant d'une
+  extension liée (`doc`, `map`, `page`).
 - **L'atelier des pages vit dans `Pink-Rain/Eraser_page`** (extension `page`) : ne pas le recréer
   dans Eraser. Eraser garde l'affichage, le modèle et les API des pages, et les données de
   l'atelier (`lib/page-atelier-data.ts`). Un changement de l'atelier se fait dans ce dépôt ; un

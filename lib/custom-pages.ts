@@ -311,6 +311,11 @@ export function pageMenuHref(page: Pick<CustomPage, "place" | "slug" | "campaign
  */
 export const ATELIER_HREF = "/extension/page"
 
+/** L'écran Apparences d'un index dans l'atelier : ses survols, cartes, formulaires et présentations. */
+export function appearancesHref(index: string) {
+  return `${ATELIER_HREF}/apparences/${encodeURIComponent(index)}`
+}
+
 /** L'atelier d'une page : son identifiant dans le chemin (jamais en « ?id= »). */
 export function studioHref(id: string) {
   return `${ATELIER_HREF}/atelier/${encodeURIComponent(id)}`

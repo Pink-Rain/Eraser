@@ -34,7 +34,7 @@ import { foldName, isNameColumnSpec } from "@/lib/index-columns"
 import { viewRoles, type ViewRole } from "@/lib/view-roles"
 import type { StatDefinition } from "@/lib/index-stats"
 import type { NamedLayout } from "@/lib/index-layouts"
-import { builtinPresentationPresets, calendarFormChoices, calendarScaleOf, calendarScales, dashboardTileKinds, DEFAULT_ITEM_CARD, PRESENTATION_ITEM_CARD, fitLayoutToColumns, groupFormulaOps, listToolTypes, namedPresentationsOf, presentationKinds, presentationClicks, rowRuleOps, type CalendarForms, type CalendarScale, type DashboardTile, type KanbanLane, type ListTool, type NamedPresentation, type PresentationClick, type PresentationKind, type RowRule, type TabPresentations, type TileFormula, type Presentation, type PresentationLook, type PresentationPreset } from "@/lib/index-presentations"
+import { LIST_FAMILY, MAIN_PRESENTATION_ID, builtinPresentationPresets, calendarFormChoices, calendarScaleOf, calendarScales, dashboardTileKinds, DEFAULT_ITEM_CARD, PRESENTATION_ITEM_CARD, fitLayoutToColumns, groupFormulaOps, listToolTypes, namedPresentationsOf, presentationKinds, presentationClicks, rowRuleOps, type CalendarForms, type CalendarScale, type DashboardTile, type KanbanLane, type ListTool, type NamedPresentation, type PresentationClick, type PresentationKind, type RowRule, type TabPresentations, type TileFormula, type Presentation, type PresentationLook, type PresentationPreset } from "@/lib/index-presentations"
 import { presentationStartersFor } from "@/lib/index-presentation-starters"
 import { cn } from "@/lib/utils"
 import { useEffect } from "react"
@@ -582,8 +582,6 @@ function CardChoice({ ctx, withClick = true }: { ctx: Ctx; withClick?: boolean }
 // Liste : une seule vue, trois formes (liste, kanban, maître-détail), quatre pages
 // ---------------------------------------------------------------------------
 
-/** Les formes de la Liste : la façon de ranger, sous un seul éditeur (leurs clés d'enregistrement ne changent pas). */
-export const LIST_FAMILY: PresentationKind[] = ["list", "kanban", "master-detail"]
 export const listFormLabels: Record<string, string> = { list: "Liste", kanban: "Kanban", "master-detail": "Maître-détail" }
 
 /** Les colonnes du kanban et ses couloirs : « Groupe » quand la liste est en kanban. */
@@ -1303,8 +1301,6 @@ export function PresentationKindSettings({ kind, layout, columns, onChange, card
 // Le panneau (sous les onglets) : les versions de la vue et ses presets
 // ---------------------------------------------------------------------------
 
-/** L'identifiant de la version étoilée d'une vue (celle rangée sous son genre). */
-export const MAIN_PRESENTATION_ID = "principal"
 
 /** Les versions d'une vue d'un onglet : l'étoilée d'abord, puis les autres. */
 export function presentationVersionsOf(value: TabPresentations, kind: PresentationKind) {

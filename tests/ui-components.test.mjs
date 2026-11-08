@@ -1516,3 +1516,34 @@ test("Modifier › Vues : réglages par onglet, presets adaptés aux colonnes, t
   assert.equal(views.cleanPresentationPreset({ name: "Mon kanban", layout: { kind: "kanban", laneWidth: "narrow" } }).layout.laneWidth, "narrow");
   assert.ok(views.builtinPresentationPresets.every((preset) => views.cleanPresentationPreset(preset)));
 });
+
+test("« Modifier » d'un index et Apparences de l'atelier : chacun ses onglets, le moteur garde seulement l'étoilé", async () => {
+  const { editorModeAllowed } = await vite.ssrLoadModule("/components/eraser/index-editor.tsx");
+  const modes = ["columns", "form", "hover", "cards", "view:list", "view:calendar", "stats", "items"];
+  // Le moteur : colonnes, formulaire principal, carte officielle, stats, affichage des items.
+  assert.deepEqual(modes.filter((mode) => editorModeAllowed("moteur", mode)), ["columns", "form", "cards", "stats", "items"]);
+  // L'atelier des pages : survols, cartes, formulaires, présentations.
+  assert.deepEqual(modes.filter((mode) => editorModeAllowed("atelier", mode)), ["form", "hover", "cards", "view:list", "view:calendar"]);
+  assert.deepEqual(modes.filter((mode) => editorModeAllowed("tout", mode)), modes);
+
+  const { VariantsPanel } = await vite.ssrLoadModule("/components/eraser/index-variants-panel.tsx");
+  const { Square } = await import("lucide-react");
+  const base = {
+    title: "Formulaires", icon: Square, noun: "formulaire", selectedId: "autre", starredId: "principal",
+    items: [{ id: "principal", name: "Fiche officielle" }, { id: "autre", name: "Fiche courte" }],
+    onSelect() {}, onStar() {}, starHint: "", onNew() {}, newHint: "Nouveau formulaire", onDuplicate() {}, presets: [], onApplyPreset() {},
+  };
+  const only = renderToStaticMarkup(React.createElement(VariantsPanel, { ...base, starredOnly: "Les autres se créent dans l’atelier des pages." }));
+  assert.match(only, /Fiche officielle/);
+  assert.doesNotMatch(only, /Fiche courte/);
+  assert.match(only, /Les autres se créent dans l’atelier des pages/);
+  assert.doesNotMatch(only, /Nouveau formulaire/);
+  // Pas de liste des versions (les presets restent).
+  assert.doesNotMatch(only, /aria-label="Formulaire modifié"/);
+  // Sans version, « + » crée la première (la carte officielle d'un onglet qui n'en a pas).
+  assert.match(renderToStaticMarkup(React.createElement(VariantsPanel, { ...base, items: [], starredOnly: "…" })), /Nouveau formulaire/);
+  // Ailleurs, la liste entière, comme avant.
+  const full = renderToStaticMarkup(React.createElement(VariantsPanel, base));
+  assert.match(full, /Fiche courte/);
+  assert.match(full, /aria-label="Formulaire modifié"/);
+});

@@ -5,9 +5,10 @@
  * téléchargement est dans lib/extensions-install.ts, les réglages dans lib/extensions-store.ts.
  *
  * Une extension est liée à Eraser ici, dans le code, jamais depuis l'application. Toutes les
- * installations reçoivent toutes les extensions liées ; qui peut en ouvrir une (`openTo`) est
- * réglé ici aussi, et ses API vérifient les droits. Ne jamais renommer un identifiant déjà lié :
- * il nomme le dossier d'installation, l'adresse de la page et ses données sur le serveur partagé.
+ * installations reçoivent toutes les extensions liées, et tout compte connecté peut ouvrir leur
+ * adresse : les droits se règlent par module, dans chaque extension (selon `eraser.account`), et
+ * les API d'Eraser les vérifient toujours. Ne jamais renommer un identifiant déjà lié : il nomme
+ * le dossier d'installation, l'adresse de la page et ses données sur le serveur partagé.
  *
  * Format d'une version publiée (Releases GitHub du dépôt de l'extension) :
  * - `eraser-extension.json` : le manifeste (`ExtensionManifest`) ;
@@ -15,7 +16,6 @@
  *   `{ format: "eraser-extension-pack", files: { "main.js": "<base64>", … } }`, que
  *   `scripts/pack-extension.mjs` fabrique. Son empreinte SHA-256 est dans le manifeste.
  */
-import type { SiteRole } from "@/lib/auth-types"
 
 /**
  * La version de ce qu'Eraser offre aux extensions (`window.EraserExtensions`, l'objet donné à
@@ -36,30 +36,17 @@ export type ExtensionDefinition = {
   description: string
   /** Le dépôt GitHub public qui publie l'extension (« Propriétaire/Nom »). */
   repository: string
-  /** Qui peut l'ouvrir, selon la vue du compte (un admin peut toujours). Toutes les installations la reçoivent. */
-  openTo: SiteRole[]
 }
 
 /** Les extensions liées à Eraser. Une nouvelle s'ajoute ici, avec son dépôt. */
 export const linkedExtensions: ExtensionDefinition[] = [
-  { id: "doc", name: "Eraser Doc", description: "Les documents de campagne : lettres, affiches, parchemins à donner aux joueurs.", repository: "Pink-Rain/Eraser_doc", openTo: ["mj", "admin"] },
-  { id: "map", name: "Eraser Map", description: "Le tabletop : cartes, tokens et table partagée en direct.", repository: "Pink-Rain/Eraser_map", openTo: ["joueur", "mj", "admin"] },
-  // L'atelier des pages (créer, modifier, le menu) : les administrateurs, comme `canBuildPages`.
-  { id: "page", name: "Eraser Page", description: "L'atelier des pages : créer et modifier les pages d'Eraser et le menu.", repository: "Pink-Rain/Eraser_page", openTo: ["admin"] },
+  { id: "doc", name: "Eraser Doc", description: "Les documents de campagne : lettres, affiches, parchemins à donner aux joueurs.", repository: "Pink-Rain/Eraser_doc" },
+  { id: "map", name: "Eraser Map", description: "Le tabletop : cartes, tokens et table partagée en direct.", repository: "Pink-Rain/Eraser_map" },
+  { id: "page", name: "Eraser Page", description: "L'atelier des pages : créer et modifier les pages d'Eraser et le menu.", repository: "Pink-Rain/Eraser_page" },
 ]
 
 export function linkedExtension(id: string): ExtensionDefinition | null {
   return linkedExtensions.find((extension) => extension.id === id) ?? null
-}
-
-export const extensionRoleLabels: Record<SiteRole, string> = { joueur: "Joueurs", mj: "MJ", admin: "Admins" }
-
-/**
- * Peut-on ouvrir l'extension ? Selon la vue choisie (un admin qui regarde « en joueur » voit ce
- * que voit un joueur) ; un admin peut toujours ouvrir ce qui est installé.
- */
-export function extensionOpenFor(id: string, account: { role: SiteRole; accountRole: SiteRole }) {
-  return account.accountRole === "admin" || Boolean(linkedExtension(id)?.openTo.includes(account.role))
 }
 
 export type ExtensionManifest = {

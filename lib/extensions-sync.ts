@@ -2,7 +2,7 @@
  * Quand une installation télécharge ses extensions : au lancement (après un court délai, pour
  * ne pas retarder la première page), puis toutes les six heures, et à « Chercher les mises à
  * jour ». Toutes les installations reçoivent toutes les extensions liées (lib/extensions.ts),
- * quel que soit le rôle du compte : qui peut en ouvrir une est réglé dans le code (`openTo`).
+ * quel que soit le rôle du compte ; chaque extension règle les droits de ses modules.
  */
 import { EXTENSION_API_VERSION, linkedExtensions, type ExtensionDefinition } from "@/lib/extensions"
 import { extensionsDirectory, lastExtensionCheck, latestPublished, readInstalledExtension, updateExtension, type ExtensionCheck } from "@/lib/extensions-install"

@@ -4,7 +4,8 @@ import dynamic from "next/dynamic"
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useRememberedSearch } from "@/hooks/use-remembered-search"
 import { usePathname, useRouter } from "next/navigation"
-import { ArrowRightLeft, BookmarkPlus, CircleHelp, Coins, FileText, Filter, LoaderCircle, Pencil, Plus, RefreshCw, Search, Send, Settings2, SpellCheck, Trash2 } from "lucide-react"
+import { ArrowRightLeft, BookmarkPlus, CircleHelp, Coins, FileText, Filter, LoaderCircle, Palette, Pencil, Plus, RefreshCw, Search, Send, Settings2, SpellCheck, Trash2 } from "lucide-react"
+import Link from "next/link"
 
 import { FullscreenButton, SheetsLinkButton, ToolbarIconButton, useFullscreenPanel } from "@/components/eraser/index-toolbar"
 import { chooseCampaign, copyToClipboard, DrawRowButton, rowCard, sendToCampaignChat, useChoiceDialog, useIndexNotices } from "@/components/eraser/index-action-ui"
@@ -19,6 +20,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useEditorDock } from "@/components/eraser/editor-dock"
 import { OwnerSelector } from "@/components/eraser/owner-selector"
 import type { EditorMode } from "@/components/eraser/index-editor"
+import { appearancesHref } from "@/lib/custom-pages"
 import { followItemDisplayRenames, ItemDisplayEditor, type ItemDisplayColumn } from "@/components/eraser/item-display-editor"
 import { ITEM_DISPLAY_EDITOR_PARAM } from "@/components/eraser/item-display"
 import { isItemPlace, type ItemPlace } from "@/lib/item-display"
@@ -1783,6 +1785,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   const itemDisplayRows = useMemo(() => !itemsEditor || !editorSamples ? [] : Object.values(editorSamples.preview).flat(), [editorSamples, itemsEditor])
   const editorNode = editor ? <IndexEditor
         model={editor}
+        scope="moteur"
         sampleRows={editorSamples?.sample}
         open
         pending={pending === "schema"}
@@ -1873,7 +1876,9 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
           />}
           {!embed && table && !statsView && <ToolbarIconButton label="Enregistrer comme vue : cet onglet, son affichage, ton tri et tes filtres du tableau, pour tout le monde" onClick={saveHereAsView} disabled={busy}><BookmarkPlus /></ToolbarIconButton>}
           <ToolbarIconButton label="Nouvelle vue : des lignes choisies, dans un ordre, sous une forme (tableau, cartes, liste, kanban…) ou un onglet stat" onClick={() => setViewDialog({ mode: "new" })} disabled={busy || !tables.length}><Filter /></ToolbarIconButton>
-          <Button type="button" variant="outline" onClick={() => void openEditor("columns")} disabled={busy} title="Colonnes, types, réglages, onglets, mises en page et cartes de cet index">{pending === "editor" ? <LoaderCircle className="animate-spin" /> : <Settings2 />}Modifier</Button>
+          <Button type="button" variant="outline" onClick={() => void openEditor("columns")} disabled={busy} title="Colonnes, types, réglages, onglets, formulaire et carte officielle de cet index">{pending === "editor" ? <LoaderCircle className="animate-spin" /> : <Settings2 />}Modifier</Button>
+          {/* Survols, cartes, formulaires et présentations : dans l'atelier des pages (extension Eraser Page). */}
+          <Button asChild variant="outline" title="Survols, cartes, formulaires et présentations de cet index, dans l’atelier des pages"><Link href={appearancesHref(indexKey)} prefetch={false}><Palette />Apparences</Link></Button>
           <Button type="button" variant="ghost" size="icon" onClick={() => setGuideOpen(true)} title="Guide des colonnes : types, formules, boutons, aléatoire" aria-label="Guide des colonnes"><CircleHelp /></Button>
           <Button type="button" onClick={() => { setCreatingInDialog(false); startAdding() }} disabled={!table || busy}><Plus />{embed?.addLabel ?? `Ajouter ${spanning ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}`}</Button>
         </div>
