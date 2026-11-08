@@ -39,7 +39,7 @@ test("Menu d'Eraser par défaut : chaque rôle voit ses entrées, comme avant l'
   assert.deepEqual(mj.find((item) => item.key === "bac-a-sable").children.map((child) => child.key), ["bac-a-sable/magasin", "bac-a-sable/pnjs"]);
   const admin = menu.resolveMenu(null, { role: "admin", pages: {} });
   // « Pages » (après le Bac à sable, jamais dedans) : son « + » crée une page.
-  assert.deepEqual(admin.find((item) => item.key === "pages").action, { href: "/pages?nouvelle=1", label: "Nouvelle page" });
+  assert.deepEqual(admin.find((item) => item.key === "pages").action, { href: "/extension/page?nouvelle=1", label: "Nouvelle page" });
   assert.deepEqual(admin.map((item) => item.key), ["accueil", "regles", "index-rouges", "index", "bac-a-sable", "pages", "administration"]);
   // Les pages créées apparaissent sous leur section (sauf si elles sont placées ailleurs dans le menu).
   const withPages = menu.resolveMenu([{ id: "page:p-2" }], { role: "joueur", pages: { "p-2": { title: "Dieux", href: "/regles/dieux", icon: "", emoji: "" } }, sectionPages: { regles: [{ title: "Guide", href: "/regles/guide", icon: "", emoji: "" }, { title: "Dieux", href: "/regles/dieux", icon: "", emoji: "" }] } });
@@ -82,10 +82,11 @@ test("Garde-fous : l'admin garde le Créateur de pages et l'éditeur du menu, m�
   const items = [{ id: "groupe:cache", label: "Rangé", hidden: true, roles: ["admin", "mj"], children: [{ id: "pages", hidden: true }] }];
   const admin = menu.resolveMenu(items, { role: "admin", pages: {} });
   const pagesEntry = admin.find((item) => item.key === "pages");
-  assert.equal(pagesEntry.href, "/pages");
-  assert.equal(pagesEntry.action.href, "/pages?nouvelle=1");
+  // L'atelier des pages vit dans l'extension Eraser Page.
+  assert.equal(pagesEntry.href, "/extension/page");
+  assert.equal(pagesEntry.action.href, "/extension/page?nouvelle=1");
   const mj = menu.resolveMenu(items, { role: "mj", pages: {} });
-  assert.ok(!JSON.stringify(mj).includes('"href":"/pages"'));
+  assert.ok(!JSON.stringify(mj).includes('"href":"/extension/page"'));
   // Un MJ ne règle pas les entrées réservées aux admins.
   const kept = menu.keepAdminEntries([{ id: "administration", hidden: true, label: "Caché", children: [] }, { id: "regles", hidden: true }], [{ id: "administration", label: "Admin" }]);
   assert.deepEqual(kept[0], { id: "administration", label: "Admin", children: [] });

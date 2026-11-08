@@ -39,9 +39,9 @@ export async function GET() {
   }
   // Le créateur de pages : administrateurs seulement.
   if (account.role === "admin") targets.push(
-    { label: "Index des pages", href: "/pages", group: "Pages", hint: "Créateur de pages" },
-    { label: "Nouvelle page", href: "/pages?nouvelle=1", group: "Pages", hint: "Créateur de pages" },
-    { label: "Menu (éditeur du menu latéral)", href: "/pages/menu", group: "Pages", hint: "Créateur de pages" },
+    { label: "Index des pages", href: "/extension/page", group: "Pages", hint: "Créateur de pages" },
+    { label: "Nouvelle page", href: "/extension/page?nouvelle=1", group: "Pages", hint: "Créateur de pages" },
+    { label: "Menu (éditeur du menu latéral)", href: "/extension/page/menu", group: "Pages", hint: "Créateur de pages" },
   )
   targets.push(...customPages)
   const seenCampaigns = new Set<string>()

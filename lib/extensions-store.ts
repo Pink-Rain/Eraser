@@ -1,49 +1,14 @@
 /**
- * Où vivent les réglages des extensions (lib/extensions.ts) : sur le serveur partagé
- * (« eraser-accounts », `shared_records`), comme l'affichage des items. Toutes les installations
- * voient le même choix ; rien n'est écrit dans Google Sheets.
- *
- * - Portée « extensions », une entrée par extension liée (clé : son identifiant), valeur
- *   `{ "roles": ["joueur", "mj", "admin"] }` : qui la reçoit. Sans entrée, personne.
- * - Portée « extension:<id> » : les données que la partie serveur d'une extension garde
- *   (`extensionDataStore`), 20 000 caractères au plus par entrée.
+ * Les données que la partie serveur d'une extension garde sur le serveur partagé
+ * (« eraser-accounts », `shared_records`, portée « extension:<id> », 20 000 caractères au plus
+ * par entrée). L'ancienne portée « extensions » (qui recevait quelle extension, alpha 272 à 274)
+ * n'est plus lue : toutes les installations reçoivent toutes les extensions.
  */
-import type { SiteRole } from "@/lib/auth-types"
-import { extensionRoleOrder, linkedExtension, linkedExtensions, parseExtensionRoles, type ExtensionSettings } from "@/lib/extensions"
+import { linkedExtensions } from "@/lib/extensions"
 import { deleteSharedRecord, listSharedRecords, readSharedRecord, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
-import { sharedSnapshot } from "@/lib/shared-snapshot"
 
-const SCOPE = "extensions"
 /** La limite d'une valeur du serveur partagé. */
 const MAX_VALUE = 20_000
-
-async function readAll(): Promise<ExtensionSettings> {
-  const settings: ExtensionSettings = {}
-  if (!sharedStoreAvailable()) return settings
-  for (const record of await listSharedRecords(SCOPE)) {
-    if (linkedExtension(record.key)) settings[record.key] = { roles: parseExtensionRoles(record.value) }
-  }
-  return settings
-}
-
-// Lu à chaque page par la vérification des extensions (lib/extensions-sync.ts) : servi tout de
-// suite, relu derrière passé 5 min. Un choix de l'admin arrive donc partout en quelques minutes.
-const snapshot = sharedSnapshot(readAll, { freshMs: 5 * 60_000 })
-
-/** Qui reçoit chaque extension. Aucun réglage sans serveur partagé : aucune extension. `fresh` : relu tout de suite. */
-export async function listExtensionSettings(options: { fresh?: boolean } = {}): Promise<ExtensionSettings> {
-  return snapshot.read(options.fresh)
-}
-
-/** Enregistre qui reçoit une extension liée. */
-export async function saveExtensionRoles(id: string, roles: SiteRole[]): Promise<ExtensionSettings> {
-  if (!linkedExtension(id)) throw new Error("EXTENSION_UNKNOWN")
-  if (!sharedStoreAvailable()) throw new Error("EXTENSION_SETTINGS_UNAVAILABLE")
-  const clean = extensionRoleOrder.filter((role) => roles.includes(role))
-  if (clean.length) await writeSharedRecord(SCOPE, id, JSON.stringify({ roles: clean }))
-  else await deleteSharedRecord(SCOPE, id)
-  return snapshot.read(true)
-}
 
 export type ExtensionDataEntry = { key: string; value: string; updatedAt: string }
 

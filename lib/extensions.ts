@@ -4,10 +4,10 @@
  * Eraser. Règles pures, communes à la page d'administration, au serveur et aux tests ; le
  * téléchargement est dans lib/extensions-install.ts, les réglages dans lib/extensions-store.ts.
  *
- * Une extension est liée à Eraser ici, dans le code, jamais depuis l'application : un admin
- * choisit seulement qui la reçoit (joueurs, MJ, admins). Ne jamais renommer un identifiant
- * déjà lié : il nomme le dossier d'installation, l'adresse de la page et l'entrée du serveur
- * partagé qui garde ses réglages.
+ * Une extension est liée à Eraser ici, dans le code, jamais depuis l'application. Toutes les
+ * installations reçoivent toutes les extensions liées ; qui peut en ouvrir une (`openTo`) est
+ * réglé ici aussi, et ses API vérifient les droits. Ne jamais renommer un identifiant déjà lié :
+ * il nomme le dossier d'installation, l'adresse de la page et ses données sur le serveur partagé.
  *
  * Format d'une version publiée (Releases GitHub du dépôt de l'extension) :
  * - `eraser-extension.json` : le manifeste (`ExtensionManifest`) ;
@@ -23,7 +23,7 @@ import type { SiteRole } from "@/lib/auth-types"
  * attend qu'Eraser soit à jour. À incrémenter quand on ajoute quelque chose dont une extension
  * aura besoin ; ne jamais retirer ce qu'une version précédente offrait.
  */
-export const EXTENSION_API_VERSION = 1
+export const EXTENSION_API_VERSION = 2
 
 export const EXTENSION_MANIFEST_ASSET = "eraser-extension.json"
 export const EXTENSION_PACK_ASSET = "eraser-extension.pack.gz"
@@ -36,51 +36,30 @@ export type ExtensionDefinition = {
   description: string
   /** Le dépôt GitHub public qui publie l'extension (« Propriétaire/Nom »). */
   repository: string
+  /** Qui peut l'ouvrir, selon la vue du compte (un admin peut toujours). Toutes les installations la reçoivent. */
+  openTo: SiteRole[]
 }
 
 /** Les extensions liées à Eraser. Une nouvelle s'ajoute ici, avec son dépôt. */
 export const linkedExtensions: ExtensionDefinition[] = [
-  { id: "doc", name: "Eraser Doc", description: "Les documents de campagne : lettres, affiches, parchemins à donner aux joueurs.", repository: "Pink-Rain/Eraser_doc" },
-  { id: "map", name: "Eraser Map", description: "Le tabletop : cartes, tokens et table partagée en direct.", repository: "Pink-Rain/Eraser_map" },
-  { id: "page", name: "Eraser Page", description: "L'atelier des pages : créer et modifier les pages d'Eraser et le menu.", repository: "Pink-Rain/Eraser_page" },
+  { id: "doc", name: "Eraser Doc", description: "Les documents de campagne : lettres, affiches, parchemins à donner aux joueurs.", repository: "Pink-Rain/Eraser_doc", openTo: ["mj", "admin"] },
+  { id: "map", name: "Eraser Map", description: "Le tabletop : cartes, tokens et table partagée en direct.", repository: "Pink-Rain/Eraser_map", openTo: ["joueur", "mj", "admin"] },
+  // L'atelier des pages (créer, modifier, le menu) : les administrateurs, comme `canBuildPages`.
+  { id: "page", name: "Eraser Page", description: "L'atelier des pages : créer et modifier les pages d'Eraser et le menu.", repository: "Pink-Rain/Eraser_page", openTo: ["admin"] },
 ]
 
 export function linkedExtension(id: string): ExtensionDefinition | null {
   return linkedExtensions.find((extension) => extension.id === id) ?? null
 }
 
-export const extensionRoleOrder: SiteRole[] = ["joueur", "mj", "admin"]
 export const extensionRoleLabels: Record<SiteRole, string> = { joueur: "Joueurs", mj: "MJ", admin: "Admins" }
-
-/** Qui reçoit chaque extension : rien d'office, l'admin choisit. */
-export type ExtensionSettings = Record<string, { roles: SiteRole[] }>
-
-/** Les rôles d'un réglage relu, nettoyés et rangés ; une valeur illisible n'en donne aucun. */
-export function parseExtensionRoles(value: unknown): SiteRole[] {
-  let parsed = value
-  if (typeof value === "string") {
-    try { parsed = JSON.parse(value) } catch { return [] }
-  }
-  const roles = parsed && typeof parsed === "object" ? (parsed as { roles?: unknown }).roles : null
-  if (!Array.isArray(roles)) return []
-  return extensionRoleOrder.filter((role) => roles.includes(role))
-}
-
-export function extensionRoles(settings: ExtensionSettings, id: string): SiteRole[] {
-  return settings[id]?.roles ?? []
-}
-
-/** Cette installation doit-elle télécharger l'extension pour ce compte (son vrai rôle) ? */
-export function extensionWantedBy(settings: ExtensionSettings, id: string, accountRole: SiteRole | null | undefined) {
-  return Boolean(accountRole && extensionRoles(settings, id).includes(accountRole))
-}
 
 /**
  * Peut-on ouvrir l'extension ? Selon la vue choisie (un admin qui regarde « en joueur » voit ce
- * que voit un joueur) ; un admin peut toujours ouvrir ce qui est installé sur son ordinateur.
+ * que voit un joueur) ; un admin peut toujours ouvrir ce qui est installé.
  */
-export function extensionOpenFor(settings: ExtensionSettings, id: string, account: { role: SiteRole; accountRole: SiteRole }) {
-  return account.accountRole === "admin" || extensionRoles(settings, id).includes(account.role)
+export function extensionOpenFor(id: string, account: { role: SiteRole; accountRole: SiteRole }) {
+  return account.accountRole === "admin" || Boolean(linkedExtension(id)?.openTo.includes(account.role))
 }
 
 export type ExtensionManifest = {

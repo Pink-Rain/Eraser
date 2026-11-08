@@ -1,5 +1,5 @@
 /**
- * Ce que l'éditeur du menu reçoit (page /pages/menu et GET /api/menu) : le menu réglé, les pages
+ * Ce que l'éditeur du menu reçoit (l'éditeur du menu de l'extension Eraser Page et GET /api/menu) : le menu réglé, les pages
  * qu'on peut y placer — celles de l'atelier et celles d'Eraser, sous la même forme — et les
  * dossiers du créateur de pages.
  */

@@ -63,7 +63,7 @@ export const indexPageSlugs = ["armes-modificateurs", "index-des-attributs", "in
  * liaison Google, le compagnon Roll20, toute route /api (OAuth compris), et le créateur de
  * pages lui-même avec l'éditeur du menu (on ne doit pas pouvoir s'en fermer l'accès).
  */
-export const forbiddenReplacements = ["/api", "/connexion", "/administration/comptes-et-roles", "/administration/corbeille", "/administration/google-drive", "/campagne/[id]/roll20", "/pages", "/fiche", "/reference", "/ressources/index", ...indexPageSlugs.map((slug) => `/ressources/${slug}`)]
+export const forbiddenReplacements = ["/api", "/connexion", "/administration/comptes-et-roles", "/administration/corbeille", "/administration/google-drive", "/campagne/[id]/roll20", "/pages", "/extension", "/fiche", "/reference", "/ressources/index", ...indexPageSlugs.map((slug) => `/ressources/${slug}`)]
 
 const segments = (path: string) => path.split(/[?#]/)[0].split("/").filter(Boolean)
 

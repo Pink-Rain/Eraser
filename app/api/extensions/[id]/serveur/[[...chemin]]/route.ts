@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 
 import { EXTENSION_API_VERSION, extensionOpenFor, linkedExtension } from "@/lib/extensions"
 import { readInstalledExtension, runExtensionServer } from "@/lib/extensions-install"
-import { extensionDataStore, listExtensionSettings } from "@/lib/extensions-store"
+import { extensionDataStore } from "@/lib/extensions-store"
 import { authorizedAccount } from "@/lib/server-auth"
 
 /**
@@ -15,7 +15,7 @@ async function handle(request: Request, { params }: { params: Promise<{ id: stri
   const { id, chemin } = await params
   const account = await authorizedAccount()
   if (!account) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
-  if (!linkedExtension(id) || !extensionOpenFor(await listExtensionSettings(), id, account)) return NextResponse.json({ error: "Extension introuvable." }, { status: 404 })
+  if (!linkedExtension(id) || !extensionOpenFor(id, account)) return NextResponse.json({ error: "Extension introuvable." }, { status: 404 })
   const installed = await readInstalledExtension(id)
   if (!installed) return NextResponse.json({ error: "Cette extension n'est pas installée sur cet ordinateur." }, { status: 404 })
   if (installed.api > EXTENSION_API_VERSION) return NextResponse.json({ error: "Cette extension demande une version plus récente d'Eraser." }, { status: 409 })

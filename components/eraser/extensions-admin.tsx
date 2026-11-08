@@ -5,9 +5,7 @@ import Link from "next/link"
 import { ExternalLink, Puzzle, RefreshCw } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
-import type { SiteRole } from "@/lib/auth-types"
-import { extensionRoleLabels, extensionRoleOrder } from "@/lib/extensions"
+import { extensionRoleLabels } from "@/lib/extensions"
 import type { ExtensionOverview } from "@/lib/extensions-sync"
 
 export type ExtensionsAdminData = { api: number; installable: boolean; extensions: ExtensionOverview[] }
@@ -21,33 +19,14 @@ function publishedLine(extension: ExtensionOverview) {
 }
 
 /**
- * Administration › Extensions : les extensions liées à Eraser (lib/extensions.ts) et, pour
- * chacune, qui la reçoit. Une case cochée s'affiche tout de suite et s'enregistre ensuite ; un
- * refus du serveur la remet comme avant.
+ * Administration › Extensions : les extensions liées à Eraser (lib/extensions.ts), leur version
+ * publiée et celle de cet ordinateur. Toutes les installations les reçoivent toutes ; qui peut
+ * en ouvrir une est réglé dans le code.
  */
 export function ExtensionsAdmin({ initial }: { initial: ExtensionsAdminData }) {
   const [data, setData] = useState(initial)
   const [error, setError] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
-
-  function setRoles(id: string, roles: SiteRole[]) {
-    setData((current) => ({ ...current, extensions: current.extensions.map((extension) => extension.id === id ? { ...extension, roles } : extension) }))
-  }
-
-  async function toggle(extension: ExtensionOverview, role: SiteRole, checked: boolean) {
-    const before = extension.roles
-    const roles = extensionRoleOrder.filter((entry) => entry === role ? checked : before.includes(entry))
-    setRoles(extension.id, roles)
-    setError(null)
-    const response = await fetch("/api/extensions", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: extension.id, roles }) }).catch(() => null)
-    const body = await response?.json().catch(() => ({})) as { roles?: SiteRole[]; error?: string } | undefined
-    if (!response?.ok) {
-      setRoles(extension.id, before)
-      setError(body?.error || "Le choix n'a pas pu être enregistré.")
-      return
-    }
-    if (body?.roles) setRoles(extension.id, body.roles)
-  }
 
   async function check() {
     setChecking(true)
@@ -64,8 +43,8 @@ export function ExtensionsAdmin({ initial }: { initial: ExtensionsAdminData }) {
       <div className="mb-5 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-primary/75"><span className="h-px w-7 bg-primary/50" />Administration</div>
       <h1 className="font-display text-4xl font-semibold sm:text-5xl">Extensions</h1>
       <p className="mt-3 max-w-2xl text-muted-foreground">
-        Chaque extension vit dans son propre dépôt GitHub et se met à jour toute seule. Coche qui la reçoit : leurs ordinateurs la
-        téléchargent au prochain lancement d’Eraser, ou dans les minutes qui suivent s’il est déjà ouvert.
+        Chaque extension vit dans son propre dépôt GitHub. Tous les ordinateurs les reçoivent toutes et les mettent à jour seuls (au
+        lancement d’Eraser, toutes les six heures, et avec « Chercher les mises à jour »). Seuls ceux qui y ont accès peuvent les ouvrir.
       </p>
       {!data.installable && <p className="mt-3 max-w-2xl text-sm text-muted-foreground">Ce serveur ne tourne pas dans l’application Windows : les extensions ne s’y installent pas.</p>}
       <div className="mt-6 flex flex-wrap items-center gap-3">
@@ -96,17 +75,9 @@ export function ExtensionsAdmin({ initial }: { initial: ExtensionsAdminData }) {
               {extension.lastError && <p className="text-destructive">Dernier téléchargement : {extension.lastError}</p>}
             </div>
 
-            <div className="mt-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Téléchargée automatiquement pour</p>
-              <div className="mt-2 flex flex-wrap gap-x-6 gap-y-2">
-                {extensionRoleOrder.map((role) => (
-                  <label key={role} className="flex cursor-pointer items-center gap-2 text-sm">
-                    <Checkbox checked={extension.roles.includes(role)} onCheckedChange={(value) => void toggle(extension, role, value === true)} />
-                    {extensionRoleLabels[role]}
-                  </label>
-                ))}
-              </div>
-            </div>
+            <p className="mt-4 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              Ouverte à : {extension.openTo.map((role) => extensionRoleLabels[role]).join(", ")}
+            </p>
           </section>
         ))}
       </div>

@@ -33,9 +33,9 @@ export default async function RootLayout({
   if (account?.role && viewAccount) {
     // Une fois par lancement : les index se lisent en arrière-plan pour s'ouvrir tout de suite (lib/warm-up.ts).
     warmUpOnce(account.role);
-    // Les extensions cochées pour ce rôle (Administration › Extensions) : téléchargées et mises
-    // à jour en arrière-plan, au lancement puis quand l'admin change son choix (lib/extensions-sync.ts).
-    syncExtensionsSoon(account.role);
+    // Les extensions (toutes, quel que soit le rôle) : téléchargées et mises à jour en
+    // arrière-plan, au lancement puis toutes les six heures (lib/extensions-sync.ts).
+    syncExtensionsSoon();
     // Cette coque est rendue à chaque navigation (vinext relance le layout racine, requêtes
     // RSC comprises), et même deux fois par page : une première fois « à blanc », sans
     // paramètres de requête, pour y détecter une redirection, puis pour de vrai. Attendre ici

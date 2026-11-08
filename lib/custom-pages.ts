@@ -305,9 +305,15 @@ export function pageMenuHref(page: Pick<CustomPage, "place" | "slug" | "campaign
   return page.replaces && !page.replaces.includes("[") ? page.replaces : pageHref(page)
 }
 
-/** L'atelier d'une page : son identifiant dans le chemin (jamais en « ?id= », voir app/pages/atelier). */
+/**
+ * L'atelier des pages vit dans l'extension Eraser Page (lib/extensions.ts) : son Index des pages
+ * est à cette adresse, l'éditeur du menu sous « /menu », l'atelier d'une page sous « /atelier/<id> ».
+ */
+export const ATELIER_HREF = "/extension/page"
+
+/** L'atelier d'une page : son identifiant dans le chemin (jamais en « ?id= »). */
 export function studioHref(id: string) {
-  return `/pages/atelier/${encodeURIComponent(id)}`
+  return `${ATELIER_HREF}/atelier/${encodeURIComponent(id)}`
 }
 
 /** Où se range la page, en mots (« Règles », « Campagne », « Hors menu »). */

@@ -8,7 +8,7 @@
  * partagé et le menu d'Eraser. Une page d'Eraser remplacée par une page de l'atelier prend son
  * titre, son icône et sa description (c'est elle qu'on ouvre à cette adresse).
  */
-import { allBlocks, canReadPage, pageHref, pageVisibilities, pageVisibleTo, placeLabel, type CustomPage, type PageContent, type PageRole } from "@/lib/custom-pages"
+import { allBlocks, ATELIER_HREF, canReadPage, pageHref, pageVisibilities, pageVisibleTo, placeLabel, type CustomPage, type PageContent, type PageRole } from "@/lib/custom-pages"
 import { menuCatalog, type MenuIconKey } from "@/lib/app-menu"
 import { listCustomPages } from "@/lib/custom-pages-store"
 import type { IndexSource } from "@/lib/custom-pages-data"
@@ -131,7 +131,7 @@ export function pagesIndexSourceOf(rows: PagesIndexRow[]): IndexSource {
   return {
     key: PAGES_INDEX,
     title: PAGES_INDEX_TITLE,
-    path: "/pages",
+    path: ATELIER_HREF,
     nameHeader: "Titre",
     openToPlayers: true,
     rowHref: (id) => byId.get(id),

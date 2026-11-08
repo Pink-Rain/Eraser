@@ -3,7 +3,7 @@ import { tabLayoutsOf } from "@/lib/index-layout-defaults"
 import { tabFormsOf } from "@/lib/index-layouts"
 import { listIndexLayouts } from "@/lib/index-layouts-store"
 
-import { canManagePages, cleanBlock, pageForViewer, type ViewBlock } from "@/lib/custom-pages"
+import { ATELIER_HREF, canManagePages, cleanBlock, pageForViewer, type ViewBlock } from "@/lib/custom-pages"
 import { isMeCondition, statBlockData, viewBlockData, viewKindsOf, type BlockDataOptions } from "@/lib/custom-pages-data"
 import { identityUidsForUser } from "@/lib/identity-links"
 import { backlinksOf, fillRowText, rowContextOf, rowPageHref, templateForRow, type RowContext } from "@/lib/custom-pages-rows"
@@ -147,7 +147,7 @@ export async function GET(request: Request) {
         const builtin = Object.values(worldIndexDefinitions).map((definition) => ({ key: definition.key, title: definition.title, path: definition.path }))
         const custom = (await listCustomIndexes().catch(() => [])).map((entry) => ({ key: entry.key, title: entry.title, path: `/ressources/index/${entry.key}` }))
         // L'index des pages : les pages elles-mêmes (créées et d'Eraser), pour des menus, des galeries de pages…
-        const pages = { key: PAGES_INDEX, title: PAGES_INDEX_TITLE, path: "/pages" }
+        const pages = { key: PAGES_INDEX, title: PAGES_INDEX_TITLE, path: ATELIER_HREF }
         return NextResponse.json({ indexes: [...builtin, ...custom, pages].sort((left, right) => left.title.localeCompare(right.title, "fr")) })
       }
       const key = await blockIndexKey(wanted)

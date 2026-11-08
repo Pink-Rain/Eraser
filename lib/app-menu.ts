@@ -47,8 +47,9 @@ export type MenuCatalogEntry = {
 const all: SiteRole[] = ["joueur", "mj", "admin"]
 const managers: SiteRole[] = ["mj", "admin"]
 
-export const MENU_EDITOR_HREF = "/pages/menu"
-export const PAGES_HREF = "/pages"
+// L'atelier des pages (extension Eraser Page, voir `ATELIER_HREF` de lib/custom-pages.ts).
+export const MENU_EDITOR_HREF = "/extension/page/menu"
+export const PAGES_HREF = "/extension/page"
 
 /** Le menu d'Eraser, dans son ordre d'origine (une section avant ses liens). */
 export const menuCatalog: MenuCatalogEntry[] = [
@@ -71,7 +72,7 @@ export const menuCatalog: MenuCatalogEntry[] = [
   { id: "bac-a-sable/pages", label: "Pages créées dans Bac à sable", icon: "file-plus", roles: managers, parent: "bac-a-sable", dynamic: "section-pages", place: "bac-a-sable" },
   // Le créateur de pages (l'Index des pages, d'où l'on ouvre aussi l'éditeur du menu) : « + » crée une page.
   // Administrateurs seulement : un MJ lit les pages, il ne les construit pas.
-  { id: "pages", label: "Pages", icon: "file-plus", roles: ["admin"], href: PAGES_HREF, prefix: true, locked: true, action: { href: "/pages?nouvelle=1", label: "Nouvelle page" } },
+  { id: "pages", label: "Pages", icon: "file-plus", roles: ["admin"], href: PAGES_HREF, prefix: true, locked: true, action: { href: `${PAGES_HREF}?nouvelle=1`, label: "Nouvelle page" } },
   { id: "administration", label: "Administration", icon: "shield", roles: ["admin"], href: "/administration", section: true, prefix: true },
   { id: "administration/comptes", label: "Comptes et rôles", icon: "link", roles: ["admin"], href: "/administration/comptes-et-roles", parent: "administration" },
   { id: "administration/google-drive", label: "Google Drive et Sheets", icon: "link", roles: ["admin"], href: "/administration/google-drive", parent: "administration" },

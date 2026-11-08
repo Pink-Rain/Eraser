@@ -22,7 +22,7 @@ import { IMAGE_LOOK_DEFAULTS, imageFadeMask, pageImageUrl, placeLabel, sectionLa
 /**
  * Les pages du créateur de pages, telles qu'on les lit : les sections et leurs colonnes,
  * chaque bloc dans sa forme de lecture. Le serveur n'envoie que ce que le lecteur voit
- * (lib/custom-pages.ts › pageForViewer). L'atelier (page-studio.tsx) réutilise les mêmes
+ * (lib/custom-pages.ts › pageForViewer). L'atelier (extension Eraser Page) réutilise les mêmes
  * rendus pour son aperçu.
  */
 

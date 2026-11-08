@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type ComponentType } from "react"
 import * as ReactDOMClient from "react-dom/client"
 import * as jsxRuntime from "react/jsx-runtime"
 import { useRouter } from "next/navigation"
@@ -12,10 +12,17 @@ import { EXTENSION_API_VERSION } from "@/lib/extensions"
 
 /**
  * Ce qu'Eraser prête aux extensions dans le navigateur (version `EXTENSION_API_VERSION`). Une
- * extension rend avec le React d'Eraser — jamais le sien — pour pouvoir un jour afficher les
- * composants qu'Eraser lui prêtera.
+ * extension rend avec le React d'Eraser — jamais le sien — et demande ses pièces (composants,
+ * routeur, modèles) à `require` (components/eraser/extension-modules.ts).
  */
-type ExtensionGlobals = { api: number; React: typeof React; ReactDOMClient: typeof ReactDOMClient; jsxRuntime: typeof jsxRuntime }
+type ExtensionGlobals = {
+  api: number
+  React: typeof React
+  ReactDOMClient: typeof ReactDOMClient
+  jsxRuntime: typeof jsxRuntime
+  /** Depuis l'API 2 : un module prêté par Eraser, par le nom sous lequel le code l'importe. */
+  require: (id: string) => unknown
+}
 
 declare global {
   interface Window {
@@ -25,7 +32,7 @@ declare global {
 
 export type ExtensionAccount = { uid: string; displayName: string; role: SiteRole }
 
-/** L'objet donné à `mount` puis à `update` : stable d'une version d'API à l'autre, on n'y retire rien. */
+/** L'objet donné à l'extension : stable d'une version d'API à l'autre, on n'y retire rien. */
 export type EraserExtensionContext = ExtensionGlobals & {
   extension: { id: string; version: string; base: string }
   account: ExtensionAccount
@@ -40,15 +47,18 @@ export type EraserExtensionContext = ExtensionGlobals & {
 }
 
 type ExtensionModule = {
+  /** API 2 : un composant rendu dans la coque d'Eraser (ses contextes, ses composants prêtés). */
+  Page?: ComponentType<{ eraser: EraserExtensionContext }>
+  /** API 1 : l'extension monte elle-même son rendu dans un élément. */
   mount?: (element: HTMLElement, eraser: EraserExtensionContext) => unknown
   update?: (eraser: EraserExtensionContext) => void
 }
 
 /**
- * Charge le module d'une extension installée et le monte dans la page, dans la coque d'Eraser
- * (barre latérale, polices, thème). Le module exporte `mount(élément, eraser)`, qui peut rendre
- * une fonction (ou `{ unmount }`) appelée en quittant la page, et peut exporter
- * `update(eraser)`, appelée quand l'adresse change sans quitter l'extension.
+ * Charge le module d'une extension installée et l'affiche dans la coque d'Eraser (barre latérale,
+ * polices, thème). Le module exporte `Page`, un composant qui reçoit `eraser` et se rend dans
+ * l'arbre d'Eraser ; ou bien `mount(élément, eraser)` (qui peut rendre une fonction de
+ * démontage) et `update(eraser)`, appelée quand l'adresse change sans quitter l'extension.
  */
 export function ExtensionHost({ id, version, entry, styles, path, account }: {
   id: string
@@ -59,22 +69,24 @@ export function ExtensionHost({ id, version, entry, styles, path, account }: {
   account: ExtensionAccount
 }) {
   const container = useRef<HTMLDivElement>(null)
-  const latest = useRef<EraserExtensionContext | null>(null)
-  const loaded = useRef<ExtensionModule | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
+  const [requireLent, setRequireLent] = useState<ExtensionGlobals["require"] | null>(null)
+  const [loaded, setLoaded] = useState<ExtensionModule | null>(null)
   const router = useRouter()
   const files = `/api/extensions/${encodeURIComponent(id)}/fichiers/${encodeURIComponent(version)}`
   const pathKey = path.join("/")
   const stylesKey = styles.join("\n")
 
-  // Le contexte suit l'adresse et le compte ; l'extension montée le reçoit par `update`.
-  useEffect(() => {
+  // Le contexte suit l'adresse et le compte : `Page` le reçoit en propriété, `mount` par `update`.
+  const context = useMemo<EraserExtensionContext | null>(() => {
+    if (!requireLent) return null
     const base = `/extension/${id}`
-    const context: EraserExtensionContext = {
+    return {
       api: EXTENSION_API_VERSION,
       React,
       ReactDOMClient,
       jsxRuntime,
+      require: requireLent,
       extension: { id, version, base },
       account: { uid: account.uid, displayName: account.displayName, role: account.role },
       path: pathKey ? pathKey.split("/") : [],
@@ -85,16 +97,11 @@ export function ExtensionHost({ id, version, entry, styles, path, account }: {
       server: (next, init) => fetch(`/api/extensions/${encodeURIComponent(id)}/serveur/${next.replace(/^\/+/, "")}`, init),
       eraser: (next, init) => next.startsWith("/api/") ? fetch(next, init) : Promise.reject(new Error("Une API d'Eraser commence par « /api/ ».")),
     }
-    latest.current = context
-    loaded.current?.update?.(context)
-  }, [id, version, pathKey, account.uid, account.displayName, account.role, router])
+  }, [requireLent, id, version, pathKey, account.uid, account.displayName, account.role, router])
 
+  // Les pièces prêtées d'abord (chargées seulement quand une extension s'ouvre), puis l'extension et ses styles.
   useEffect(() => {
-    const element = container.current
-    if (!element) return
-    window.EraserExtensions = { api: EXTENSION_API_VERSION, React, ReactDOMClient, jsxRuntime }
     let alive = true
-    let unmount: (() => void) | null = null
     const links = (stylesKey ? stylesKey.split("\n") : []).map((style) => {
       const link = document.createElement("link")
       link.rel = "stylesheet"
@@ -103,31 +110,52 @@ export function ExtensionHost({ id, version, entry, styles, path, account }: {
       document.head.appendChild(link)
       return link
     })
-    import(/* @vite-ignore */ `${files}/${entry}`)
-      .then((extension: ExtensionModule) => {
+    import("@/components/eraser/extension-modules")
+      .then(({ eraserRequire }) => {
+        window.EraserExtensions = { api: EXTENSION_API_VERSION, React, ReactDOMClient, jsxRuntime, require: eraserRequire }
+        if (alive) setRequireLent(() => eraserRequire)
+        return import(/* @vite-ignore */ `${files}/${entry}`) as Promise<ExtensionModule>
+      })
+      .then((extension) => {
         if (!alive) return
-        if (typeof extension.mount !== "function") throw new Error("Son module n'exporte pas « mount ».")
-        if (!latest.current) throw new Error("Contexte d'Eraser absent.")
-        loaded.current = extension
-        const result = extension.mount(element, latest.current)
-        if (typeof result === "function") unmount = result as () => void
-        else if (result && typeof (result as { unmount?: unknown }).unmount === "function") unmount = () => (result as { unmount: () => void }).unmount()
+        if (typeof extension.Page !== "function" && typeof extension.mount !== "function") throw new Error("Son module n'exporte ni « Page » ni « mount ».")
+        setLoaded(extension)
       })
       .catch((error: unknown) => {
         if (alive) setFailure(error instanceof Error ? error.message : "Erreur inconnue.")
       })
     return () => {
       alive = false
-      loaded.current = null
-      try { unmount?.() } catch (error) { console.error("EXTENSION_UNMOUNT_FAILED", id, error) }
+      setLoaded(null)
       for (const link of links) link.remove()
-      element.replaceChildren()
     }
   }, [files, entry, stylesKey, id])
 
+  // API 1 : l'extension monte elle-même son rendu, une fois, puis reçoit chaque nouveau contexte.
+  const contextRef = useRef(context)
+  useEffect(() => {
+    contextRef.current = context
+    if (context && loaded && typeof loaded.Page !== "function") loaded.update?.(context)
+  }, [context, loaded])
+  useEffect(() => {
+    const element = container.current
+    if (!element || !loaded || typeof loaded.Page === "function" || typeof loaded.mount !== "function" || !contextRef.current) return
+    let unmount: (() => void) | null = null
+    const result = loaded.mount(element, contextRef.current)
+    if (typeof result === "function") unmount = result as () => void
+    else if (result && typeof (result as { unmount?: unknown }).unmount === "function") unmount = () => (result as { unmount: () => void }).unmount()
+    return () => {
+      try { unmount?.() } catch (error) { console.error("EXTENSION_UNMOUNT_FAILED", id, error) }
+      element.replaceChildren()
+    }
+  }, [loaded, id])
+
+  const Page = loaded && typeof loaded.Page === "function" ? loaded.Page : null
+
   return <>
     {failure && <ExtensionUnavailable title="L'extension n'a pas pu s'ouvrir" detail={failure} />}
-    <div ref={container} data-eraser-extension={id} className="flex w-full min-w-0 flex-1 flex-col" />
+    {Page && context && <Page eraser={context} />}
+    <div ref={container} data-eraser-extension={id} className={Page ? "hidden" : "flex w-full min-w-0 flex-1 flex-col"} />
   </>
 }
 

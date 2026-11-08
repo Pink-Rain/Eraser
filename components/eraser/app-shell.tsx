@@ -386,6 +386,8 @@ export function AppShell({
   // Une extension mise à jour (en arrière-plan ou par « Chercher les mises à jour ») : annoncée
   // une fois sous le bouton, d'après la dernière version vue sur cet ordinateur.
   const extensionsKey = extensions.map((extension) => `${extension.id}@${extension.version}`).join(",")
+  // « Modifier la page » ouvre l'atelier, qui vit dans l'extension Eraser Page : seulement si elle est là.
+  const atelierInstalled = extensions.some((extension) => extension.id === "page")
   useEffect(() => {
     if (!extensionsKey) return
     const changed = extensionsKey.split(",").flatMap((entry) => {
@@ -928,7 +930,7 @@ export function AppShell({
           <ShellBreadcrumb pathname={pendingPage?.to || pathname} current={pendingPage?.title || currentPageLabel} campaignName={(id) => visibleCampaigns.find((campaign) => campaign.id === id)?.name} />
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <PageSearch />
-            {user.role === "admin" && viewRole === "admin" && !pendingPage && <PageEditButton pathname={pathname} pageId={editPageId} />}
+            {user.role === "admin" && viewRole === "admin" && !pendingPage && atelierInstalled && <PageEditButton pathname={pathname} pageId={editPageId} />}
             <SharePageButton title={currentPageLabel} />
             <VolumeControl />
             <Badge variant="outline" className="hidden shrink-0 border-primary/20 bg-primary/5 sm:inline-flex">

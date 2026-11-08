@@ -76,19 +76,14 @@ test("les extensions liées : identifiants stables, dépôts du propriétaire", 
   assert.equal(extensions.linkedExtension("autre"), null);
 });
 
-test("qui reçoit une extension : rien d'office, le vrai rôle pour télécharger, la vue pour ouvrir", () => {
-  assert.deepEqual(extensions.parseExtensionRoles('{"roles":["admin","joueur","pirate"]}'), ["joueur", "admin"]);
-  assert.deepEqual(extensions.parseExtensionRoles("illisible"), []);
-  assert.deepEqual(extensions.parseExtensionRoles({ roles: "mj" }), []);
-  const settings = { map: { roles: ["joueur"] } };
-  assert.equal(extensions.extensionWantedBy(settings, "map", "joueur"), true);
-  assert.equal(extensions.extensionWantedBy(settings, "map", "mj"), false);
-  assert.equal(extensions.extensionWantedBy(settings, "doc", "joueur"), false);
-  assert.equal(extensions.extensionWantedBy({}, "map", null), false);
-  // Un MJ qui regarde « en joueur » voit ce que voit un joueur ; un admin ouvre tout ce qui est installé.
-  assert.equal(extensions.extensionOpenFor(settings, "map", { role: "joueur", accountRole: "mj" }), true);
-  assert.equal(extensions.extensionOpenFor(settings, "map", { role: "mj", accountRole: "mj" }), false);
-  assert.equal(extensions.extensionOpenFor({}, "map", { role: "joueur", accountRole: "admin" }), true);
+test("qui ouvre une extension : réglé dans le code, selon la vue ; un admin ouvre tout", () => {
+  assert.deepEqual(extensions.linkedExtensions.map((entry) => [entry.id, entry.openTo]), [["doc", ["mj", "admin"]], ["map", ["joueur", "mj", "admin"]], ["page", ["admin"]]]);
+  // Un MJ qui regarde « en joueur » voit ce que voit un joueur.
+  assert.equal(extensions.extensionOpenFor("map", { role: "joueur", accountRole: "mj" }), true);
+  assert.equal(extensions.extensionOpenFor("doc", { role: "joueur", accountRole: "mj" }), false);
+  assert.equal(extensions.extensionOpenFor("page", { role: "mj", accountRole: "mj" }), false);
+  assert.equal(extensions.extensionOpenFor("page", { role: "joueur", accountRole: "admin" }), true);
+  assert.equal(extensions.extensionOpenFor("autre", { role: "admin", accountRole: "admin" }), true);
 });
 
 test("versions et chemins : préversions avant la version finale, rien hors du dossier", () => {
@@ -206,4 +201,36 @@ test("« Chercher les mises à jour » relit GitHub une fois par minute au plus"
   // L'admin (« Vérifier les mises à jour ») relit tout de suite.
   check = await install.updateExtension(map, { force: true });
   assert.equal(check.installed?.version, "0.8.0");
+});
+
+test("ce qu'Eraser prête aux extensions se charge dans le navigateur : aucun code du serveur", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const { existsSync } = await import("node:fs");
+  const resolveFile = (base) => [`${base}.ts`, `${base}.tsx`, `${base}/index.ts`].find((candidate) => existsSync(join(root, candidate)));
+  const server = /^(lib\/(shared-store|google-sheets|server-auth|site-auth|accounts-remote|custom-pages-store|page-folders-store|app-menu-store|custom-pages-server|extensions-install|extensions-sync|extensions-store)\.ts|db\/|desktop\/)/;
+  const lending = await readFile(join(root, "components/eraser/extension-modules.ts"), "utf8");
+  const lent = [...lending.matchAll(/^import \* as \w+ from "@\/([^"]+)"/gm)].map((match) => match[1]);
+  assert.ok(lent.includes("lib/custom-pages") && lent.includes("components/ui/button"));
+  for (const id of lent) {
+    const start = resolveFile(id);
+    assert.ok(start, id);
+    const seen = new Set([start]);
+    const stack = [start];
+    while (stack.length) {
+      const file = stack.pop();
+      const source = await readFile(join(root, file), "utf8");
+      // Une instruction par import (le code n'a pas de points-virgules) ; les imports de types
+      // disparaissent à la compilation : seuls les autres comptent.
+      const statements = source.split(/\n(?=(?:import|export)\b)/).filter((chunk) => /^(?:import|export)\b/.test(chunk) && !/^(?:import|export)\s+type\b/.test(chunk));
+      for (const statement of statements) {
+        const match = /from\s+"@\/([^"]+)"/.exec(statement);
+        if (!match) continue;
+        const next = resolveFile(match[1]);
+        if (!next || seen.has(next)) continue;
+        assert.ok(!server.test(next), `${id} tire ${next}, du code du serveur`);
+        seen.add(next);
+        stack.push(next);
+      }
+    }
+  }
 });

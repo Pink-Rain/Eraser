@@ -193,13 +193,20 @@
 
 - Une extension vit dans son propre dépôt GitHub public (`Pink-Rain/Eraser_doc`, `Eraser_map`,
   `Eraser_page`) et se lie dans `linkedExtensions` (`lib/extensions.ts`), jamais depuis
-  l'application. Ne jamais renommer l'identifiant d'une extension liée (`doc`, `map`, `page`).
-- Détail dans `ARCHITECTURE.md` (« Extensions »). Ce qu'Eraser offre aux extensions est versionné
-  par `EXTENSION_API_VERSION` : ne jamais en retirer, incrémenter dès qu'on y ajoute.
+  l'application. Toutes les installations les reçoivent toutes ; `openTo` dit qui les ouvre. Ne
+  jamais renommer l'identifiant d'une extension liée (`doc`, `map`, `page`).
+- **L'atelier des pages vit dans `Pink-Rain/Eraser_page`** (extension `page`) : ne pas le recréer
+  dans Eraser. Eraser garde l'affichage, le modèle et les API des pages, et les données de
+  l'atelier (`lib/page-atelier-data.ts`). Un changement de l'atelier se fait dans ce dépôt ; un
+  nouveau type de bloc touche les deux (lire son `AGENTS.md`).
+- Ce qu'Eraser prête aux extensions (`components/eraser/extension-modules.ts`) et
+  `EXTENSION_API_VERSION` forment le contrat : ne jamais retirer ni renommer un module prêté, ni
+  changer ses exports, sans mettre à jour les extensions ; jamais de module qui tire du code
+  serveur. Détail dans `ARCHITECTURE.md` (« Extensions »).
 - Une extension n'appelle jamais Google elle-même : elle passe par une API d'Eraser (porte du quota,
   lectures partagées). Elle garde ses données sur le Worker (`store`, portée `extension:<id>`).
-- Travailler sur une extension se fait dans son dépôt ; ne toucher Eraser que si l'extension a
-  besoin de quelque chose de nouveau de sa part.
+- Publier : Eraser d'abord quand l'extension en dépend, puis l'extension (construite contre
+  `windows-app-migration`).
 
 ## Vérifications avant publication
 
