@@ -187,3 +187,23 @@ test("la partie serveur d'une extension répond avec ce qu'Eraser lui prête", a
   const withoutServer = await install.runExtensionServer({ ...installed, server: null }, new Request("http://127.0.0.1/"), {});
   assert.equal(withoutServer.status, 404);
 });
+
+test("versions installées gardées en mémoire pour la coque, à jour après chaque installation", async () => {
+  // Premier appel : la lecture du disque part en arrière-plan.
+  install.knownInstalledVersions();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(install.knownInstalledVersions(), [{ id: "map", version: "0.3.0" }]);
+  publish("Pink-Rain/Eraser_map", "0.7.0");
+  await install.updateExtension(map, { force: true });
+  assert.deepEqual(install.knownInstalledVersions(), [{ id: "map", version: "0.7.0" }]);
+});
+
+test("« Chercher les mises à jour » relit GitHub une fois par minute au plus", async () => {
+  // GitHub vient d'être lu (test précédent) : une version publiée juste après attend la minute.
+  publish("Pink-Rain/Eraser_map", "0.8.0");
+  let check = await install.updateExtension(map, { force: true, forceFloorMs: 60_000 });
+  assert.equal(check.installed?.version, "0.7.0");
+  // L'admin (« Vérifier les mises à jour ») relit tout de suite.
+  check = await install.updateExtension(map, { force: true });
+  assert.equal(check.installed?.version, "0.8.0");
+});

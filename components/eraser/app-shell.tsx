@@ -74,6 +74,8 @@ import {
 } from "@/components/ui/sidebar"
 import { internalAppPath } from "@/lib/app-links"
 import { allowedRoleViews, type SiteRole } from "@/lib/auth-types"
+import { linkedExtension } from "@/lib/extensions"
+import type { ExtensionUpdateReport } from "@/lib/extensions-sync"
 import { AppTabsProvider } from "@/components/eraser/app-tabs"
 import { AccountAvatar, AccountDialog } from "@/components/eraser/account-dialog"
 import { DesktopTitlebar } from "@/components/eraser/desktop-titlebar"
@@ -99,6 +101,19 @@ const ItemNotifications = dynamic(() => import("@/components/eraser/item-notific
 
 const PageLabelContext = createContext<(label: string | null) => void>(() => undefined)
 /** Deux listes venues du serveur au contenu identique (les tableaux, eux, sont toujours neufs). */
+/** Garde sur cet ordinateur la version vue d'une extension ; rend celle d'avant (null : jamais vue). */
+function rememberExtensionVersion(id: string, version: string) {
+  const key = `eraser:extension-version:${id}`
+  try {
+    const seen = window.localStorage.getItem(key)
+    if (seen !== version) window.localStorage.setItem(key, version)
+    return seen
+  } catch {
+    // Navigation privée : rien n'est annoncé.
+    return version
+  }
+}
+
 function sameList(left: unknown[], right: unknown[]) {
   return left === right || (left.length === right.length && JSON.stringify(left) === JSON.stringify(right))
 }
@@ -287,6 +302,7 @@ export function AppShell({
   pageLabel,
   menu = null,
   campaignPages,
+  extensions = [],
   children,
 }: {
   user: ShellUser
@@ -300,6 +316,8 @@ export function AppShell({
   todos: AdminTodoRecord[]
   initialViewRole: SiteRole
   pageLabel: string
+  /** Les extensions installées sur cet ordinateur et leur version (lib/extensions-install.ts). */
+  extensions?: Array<{ id: string; version: string }>
   children: ReactNode
 }) {
   const pathname = usePathname()
@@ -365,6 +383,21 @@ export function AppShell({
   const todosLoadingRef = useRef(false)
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [updateNotice, setUpdateNotice] = useState("")
+  // Une extension mise à jour (en arrière-plan ou par « Chercher les mises à jour ») : annoncée
+  // une fois sous le bouton, d'après la dernière version vue sur cet ordinateur.
+  const extensionsKey = extensions.map((extension) => `${extension.id}@${extension.version}`).join(",")
+  useEffect(() => {
+    if (!extensionsKey) return
+    const changed = extensionsKey.split(",").flatMap((entry) => {
+      const [id, version] = entry.split("@")
+      const seen = rememberExtensionVersion(id, version)
+      return seen && seen !== version ? [`${linkedExtension(id)?.name ?? id} est passée à ${version}`] : []
+    })
+    if (!changed.length) return
+    const timer = window.setTimeout(() => setUpdateNotice(""), 10_000)
+    queueMicrotask(() => setUpdateNotice(changed.join(" · ")))
+    return () => window.clearTimeout(timer)
+  }, [extensionsKey])
 
   // Une modification enregistrée rend périmées les pages gardées par le routeur : elles
   // sont oubliées, et revenir sur un index le relit au lieu d'en montrer l'ancienne copie.
@@ -652,22 +685,33 @@ export function AppShell({
     window.location.assign("/connexion")
   }
 
+  /** Eraser et les extensions du compte, en même temps : un message court pour les deux. */
   async function checkForUpdates() {
     if (!window.eraserDesktop) { setUpdateNotice("Disponible uniquement dans l’application Windows."); return }
     setCheckingUpdate(true); setUpdateNotice("")
-    try {
-      const result = await window.eraserDesktop.checkForUpdates()
-      // Un message court : il n'y a rien, ou la version qui arrive.
-      if (result.status === "ready" || result.status === "available") setUpdateNotice(["Eraser", result.updateVersion, "en cours de téléchargement"].filter(Boolean).join(" "))
-      else if (result.status === "not-available") setUpdateNotice("Aucune mise à jour")
-      else if (result.status === "unavailable") setUpdateNotice("Disponible uniquement dans l’application Windows.")
-      else setUpdateNotice("Vérification impossible, réessaie plus tard.")
-    } catch {
-      setUpdateNotice("Vérification impossible, réessaie plus tard.")
-    } finally {
-      setCheckingUpdate(false)
-      window.setTimeout(() => setUpdateNotice(""), 8000)
+    const [eraser, extensionsReport] = await Promise.all([
+      window.eraserDesktop.checkForUpdates().catch(() => null),
+      fetch("/api/extensions/verifier", { method: "POST" })
+        .then(async (response) => response.ok ? (await response.json() as { extensions: ExtensionUpdateReport[] }).extensions : null)
+        .catch(() => null),
+    ])
+    const lines: string[] = []
+    // Eraser : rien, ou la version qui arrive.
+    if (eraser?.status === "ready" || eraser?.status === "available") lines.push(["Eraser", eraser.updateVersion, "en cours de téléchargement"].filter(Boolean).join(" "))
+    else if (eraser?.status === "unavailable") lines.push("Disponible uniquement dans l’application Windows.")
+    else if (eraser?.status !== "not-available") lines.push("Eraser : vérification impossible, réessaie plus tard.")
+    for (const extension of extensionsReport ?? []) {
+      if (extension.status === "updated" && extension.version) {
+        // Déjà annoncée ici : la page suivante ne la répète pas.
+        rememberExtensionVersion(extension.id, extension.version)
+        lines.push(`${extension.name} est passée à ${extension.version}`)
+      } else if (extension.status === "error") lines.push(`${extension.name} : téléchargement impossible`)
+      else if (extension.status === "waiting") lines.push(`${extension.name} attend une version plus récente d’Eraser`)
     }
+    if (!extensionsReport) lines.push("Extensions : vérification impossible, réessaie plus tard.")
+    setUpdateNotice(lines.length ? lines.join(" · ") : "Aucune mise à jour")
+    setCheckingUpdate(false)
+    window.setTimeout(() => setUpdateNotice(""), 10_000)
   }
 
   return (

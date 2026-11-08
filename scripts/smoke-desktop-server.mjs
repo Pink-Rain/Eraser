@@ -173,6 +173,12 @@ try {
   if (extensionAnswer?.version !== "0.1.0" || extensionAnswer.path?.join("/") !== "carte/2" || extensionAnswer.role !== "admin") {
     throw new Error(`La partie serveur de l'extension ne répond pas (${extensionServer.status} ${JSON.stringify(extensionAnswer)}).`)
   }
+  // « Chercher les mises à jour » : ouvert à tout compte connecté, refusé sans compte.
+  const anonymousCheck = await fetch(`${origin}/api/extensions/verifier`, { method: "POST" })
+  if (anonymousCheck.status !== 403) throw new Error(`La vérification des extensions est ouverte sans compte (${anonymousCheck.status}).`)
+  const extensionsCheck = await fetch(`${origin}/api/extensions/verifier`, { method: "POST", headers: { cookie: loginCookie } })
+  const extensionsCheckBody = extensionsCheck.ok ? await extensionsCheck.json() : null
+  if (!Array.isArray(extensionsCheckBody?.extensions)) throw new Error(`La vérification des extensions ne répond pas (${extensionsCheck.status}).`)
   console.log(`Serveur local Eraser vérifié (HTTP ${status}), formulaires, mot de passe, compte administrateur, flux OAuth et extensions opérationnels.`)
 } catch (error) {
   if (logs.trim()) console.error(logs.trim())

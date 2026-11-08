@@ -42,6 +42,40 @@ export async function syncExtensions(role: SiteRole, settings: ExtensionSettings
   return results
 }
 
+/** Ce que « Chercher les mises à jour » dit d'une extension du compte. */
+export type ExtensionUpdateReport = {
+  id: string
+  name: string
+  /** `updated` : une nouvelle version vient d'être installée ; `waiting` : elle attend un Eraser plus récent. */
+  status: "updated" | "current" | "none" | "waiting" | "error"
+  version: string | null
+  error: string | null
+}
+
+/**
+ * « Chercher les mises à jour » (barre latérale, tous les comptes) : relit GitHub et installe
+ * tout de suite les extensions que le rôle réel du compte reçoit, avec le choix de l'admin relu.
+ */
+export async function checkExtensionsNow(role: SiteRole): Promise<ExtensionUpdateReport[]> {
+  if (!extensionsDirectory()) return []
+  const settings = await listExtensionSettings({ fresh: true }).catch(() => listExtensionSettings())
+  lastSync.set(role, { wanted: linkedExtensions.filter((extension) => extensionWantedBy(settings, extension.id, role)).map((extension) => extension.id).join(","), at: Date.now() })
+  const reports: ExtensionUpdateReport[] = []
+  for (const extension of linkedExtensions) {
+    if (!extensionWantedBy(settings, extension.id, role)) continue
+    const before = (await readInstalledExtension(extension.id))?.version ?? null
+    // GitHub limite les lectures anonymes : relu au plus une fois par minute, même à coups de clics.
+    const result = await updateExtension(extension, { force: true, forceFloorMs: 60_000 })
+    const version = result.installed?.version ?? null
+    const status: ExtensionUpdateReport["status"] = result.error ? "error"
+      : version && version !== before ? "updated"
+        : result.needsNewerEraser ? "waiting"
+          : version ? "current" : "none"
+    reports.push({ id: extension.id, name: extension.name, status, version, error: result.error })
+  }
+  return reports
+}
+
 export type ExtensionOverview = ExtensionDefinition & {
   roles: SiteRole[]
   published:

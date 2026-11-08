@@ -528,6 +528,12 @@ seul et arrive sur chaque installation sans réinstaller Eraser. Liées aujourd'
   `current.json` désigne celle qui sert, la précédente reste à côté, les autres sont effacées.
   Un paquet altéré, illisible ou fait pour une API plus récente laisse la version installée en
   place. GitHub est lu sans compte (60 lectures par heure) : une réponse sert 10 min.
+- **« Chercher les mises à jour »** (barre latérale, tous les comptes) vérifie Eraser et, en même
+  temps, les extensions du compte (`POST /api/extensions/verifier`, `checkExtensionsNow` : choix de
+  l'admin relu, GitHub relu au plus une fois par minute), et dit ce qui a changé. La coque reçoit
+  les versions installées (`knownInstalledVersions`, en mémoire) et annonce sous ce bouton une
+  extension passée à une autre version depuis la dernière vue sur cet ordinateur
+  (`eraser:extension-version:<id>` dans le navigateur), même mise à jour en arrière-plan.
 - **Version publiée** : une Release du dépôt de l'extension joint `eraser-extension.json`
   (`id`, `version`, `api`, `entry`, `styles`, `server`, `pack`, `sha256`) et
   `eraser-extension.pack.gz` (JSON compressé `{ format: "eraser-extension-pack", files: { chemin:

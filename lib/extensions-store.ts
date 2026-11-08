@@ -30,9 +30,9 @@ async function readAll(): Promise<ExtensionSettings> {
 // suite, relu derrière passé 5 min. Un choix de l'admin arrive donc partout en quelques minutes.
 const snapshot = sharedSnapshot(readAll, { freshMs: 5 * 60_000 })
 
-/** Qui reçoit chaque extension. Aucun réglage sans serveur partagé : aucune extension. */
-export async function listExtensionSettings(): Promise<ExtensionSettings> {
-  return snapshot.read()
+/** Qui reçoit chaque extension. Aucun réglage sans serveur partagé : aucune extension. `fresh` : relu tout de suite. */
+export async function listExtensionSettings(options: { fresh?: boolean } = {}): Promise<ExtensionSettings> {
+  return snapshot.read(options.fresh)
 }
 
 /** Enregistre qui reçoit une extension liée. */

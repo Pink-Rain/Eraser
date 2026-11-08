@@ -18,6 +18,7 @@ import { gunzipSync } from "node:zlib"
 
 import {
   compareVersions,
+  linkedExtensions,
   EXTENSION_API_VERSION,
   EXTENSION_MANIFEST_ASSET,
   EXTENSION_PACK_FORMAT,
@@ -62,10 +63,13 @@ type GithubRelease = { draft?: boolean; assets?: Array<{ name?: string; browser_
 
 const publishedCache = new Map<string, { at: number; value: Promise<PublishedExtension> }>()
 
-/** La dernière version publiée d'une extension (gardée 10 min ; `force` relit GitHub). */
-export function latestPublished(definition: ExtensionDefinition, force = false): Promise<PublishedExtension> {
+/**
+ * La dernière version publiée d'une extension (gardée 10 min). `force` relit GitHub, sauf si la
+ * dernière lecture a moins de `forceFloorMs` (le bouton que tout le monde peut cliquer).
+ */
+export function latestPublished(definition: ExtensionDefinition, force = false, forceFloorMs = 0): Promise<PublishedExtension> {
   const cached = publishedCache.get(definition.id)
-  if (!force && cached && Date.now() - cached.at < PUBLISHED_FRESH_MS) return cached.value
+  if (cached && Date.now() - cached.at < (force ? forceFloorMs : PUBLISHED_FRESH_MS)) return cached.value
   const value = readLatestPublished(definition)
   publishedCache.set(definition.id, { at: Date.now(), value })
   // Une panne de réseau ne reste pas en mémoire 10 min : la prochaine demande réessaie.
@@ -133,6 +137,24 @@ async function readCurrent(id: string): Promise<CurrentFile | null> {
   } catch {
     return null
   }
+}
+
+/**
+ * Les versions installées sur cet ordinateur, gardées en mémoire pour la coque (rien n'est lu à
+ * chaque page) : lues une fois au premier appel, tenues à jour par chaque installation.
+ */
+let installedVersions: Map<string, string> | null = null
+
+export function knownInstalledVersions(): Array<{ id: string; version: string }> {
+  if (!installedVersions) {
+    const versions = new Map<string, string>()
+    installedVersions = versions
+    void Promise.all(linkedExtensions.map(async (extension) => {
+      const installed = await readInstalledExtension(extension.id)
+      if (installed && !versions.has(extension.id)) versions.set(extension.id, installed.version)
+    })).catch(() => undefined)
+  }
+  return [...installedVersions].map(([id, version]) => ({ id, version }))
 }
 
 /** La version installée sur cet ordinateur, si son point d'entrée est bien là. */
@@ -216,6 +238,7 @@ async function installPublished(definition: ExtensionDefinition, published: Extr
   await cleanup(directory, [current.version, current.previous ?? ""])
   const installed = await readInstalledExtension(definition.id)
   if (!installed) throw new Error("L'extension installée est introuvable.")
+  installedVersions?.set(definition.id, installed.version)
   return installed
 }
 
@@ -250,11 +273,11 @@ export function lastExtensionCheck(id: string) {
  * d'Eraser, est publiée. Une seule à la fois par extension ; une erreur laisse la version
  * installée en place.
  */
-export function updateExtension(definition: ExtensionDefinition, options: { force?: boolean } = {}): Promise<ExtensionCheck> {
+export function updateExtension(definition: ExtensionDefinition, options: { force?: boolean; forceFloorMs?: number } = {}): Promise<ExtensionCheck> {
   const pending = running.get(definition.id)
   if (pending) return pending
   const work = (async (): Promise<ExtensionCheck> => {
-    const [published, installed] = await Promise.all([latestPublished(definition, options.force), readInstalledExtension(definition.id)])
+    const [published, installed] = await Promise.all([latestPublished(definition, options.force, options.forceFloorMs), readInstalledExtension(definition.id)])
     const result: ExtensionCheck = { published, installed, needsNewerEraser: false, error: null, checkedAt: new Date().toISOString() }
     if (published.status !== "published") return result
     if (published.api > EXTENSION_API_VERSION) return { ...result, needsNewerEraser: true }

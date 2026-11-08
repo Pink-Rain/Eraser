@@ -6,6 +6,7 @@ import { OpenInAppPrompt } from "@/components/eraser/open-in-app-prompt";
 import { UpdatePrompt } from "@/components/eraser/update-prompt";
 import { listCampaignsForMj, listCharactersForUser } from "@/lib/google-sheets";
 import { replacementFor, shellMenu, warmShellCopies } from "@/lib/custom-pages-server";
+import { knownInstalledVersions } from "@/lib/extensions-install";
 import { syncExtensionsSoon } from "@/lib/extensions-sync";
 import { currentRequestPath } from "@/lib/request-path";
 import { currentAccount, currentViewAccount } from "@/lib/server-auth";
@@ -74,6 +75,7 @@ export default async function RootLayout({
         campaigns={campaigns}
         todos={[]}
         pageLabel="Eraser"
+        extensions={knownInstalledVersions()}
       >
         {page}
       </AppShell>
