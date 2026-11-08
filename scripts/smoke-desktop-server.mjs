@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -38,7 +38,19 @@ async function waitFor(url) {
   throw lastError || new Error("Le serveur local n’a pas répondu.")
 }
 
+// Une extension comme Eraser la range après l'avoir téléchargée (lib/extensions-install.ts) :
+// le serveur construit doit l'ouvrir, servir ses fichiers et charger sa partie serveur.
+async function installFakeExtension() {
+  const directory = join(dataDirectory, "extensions", "map")
+  await mkdir(join(directory, "0.1.0"), { recursive: true })
+  await writeFile(join(directory, "0.1.0", "main.js"), "export function mount(element) { element.textContent = 'Eraser Map' }")
+  await writeFile(join(directory, "0.1.0", "server.mjs"), "export default { async fetch(request, eraser) { return Response.json({ version: eraser.extension.version, path: eraser.path, role: eraser.account.role }) } }")
+  const manifest = { id: "map", version: "0.1.0", api: 1, entry: "main.js", styles: [], server: "server.mjs", pack: "eraser-extension.pack.gz", sha256: "0".repeat(64) }
+  await writeFile(join(directory, "current.json"), JSON.stringify({ version: "0.1.0", manifest, installedAt: new Date().toISOString() }))
+}
+
 try {
+  await installFakeExtension()
   const port = await freePort()
   child = spawn(process.execPath, [join(serverDirectory, "server.js")], {
     cwd: serverDirectory,
@@ -52,6 +64,8 @@ try {
       // Les migrations embarquées dans le serveur : celles qu'utilise une mise à jour sans réinstallation.
       ERASER_MIGRATIONS_DIR: join(serverDirectory, "migrations"),
       GOOGLE_TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      // Jamais le vrai GitHub pendant la vérification : une adresse locale fermée.
+      ERASER_EXTENSIONS_RELEASES_URL: "http://127.0.0.1:9/repos/{repo}/releases",
     },
     stdio: ["ignore", "pipe", "pipe"],
   })
@@ -137,7 +151,29 @@ try {
     headers: { cookie: loginCookie },
   })
   if (oauthStart.status !== 400) throw new Error("Le test OAuth sans identifiants aurait dû être refusé proprement.")
-  console.log(`Serveur local Eraser vérifié (HTTP ${status}), formulaires, mot de passe, compte administrateur et flux OAuth opérationnels.`)
+
+  // Extensions : la liste de l'administration, la page, les fichiers et la partie serveur.
+  const anonymousExtensions = await fetch(`${origin}/api/extensions`)
+  if (anonymousExtensions.status !== 403) throw new Error(`La liste des extensions est ouverte sans compte (${anonymousExtensions.status}).`)
+  const extensionsList = await fetch(`${origin}/api/extensions`, { headers: { cookie: loginCookie } })
+  const extensionsBody = extensionsList.ok ? await extensionsList.json() : null
+  const fakeMap = extensionsBody?.extensions?.find((extension) => extension.id === "map")
+  if (!extensionsBody?.installable || extensionsBody.extensions.length !== 3 || fakeMap?.installed?.version !== "0.1.0") {
+    throw new Error(`Administration › Extensions ne voit pas l'extension installée (${extensionsList.status} ${JSON.stringify(extensionsBody)}).`)
+  }
+  const extensionPage = await fetch(`${origin}/extension/map/carte`, { headers: { cookie: loginCookie } })
+  const extensionHtml = await extensionPage.text()
+  if (!extensionPage.ok || !extensionHtml.includes('data-eraser-extension="map"')) throw new Error(`La page de l'extension ne s'ouvre pas (${extensionPage.status}).`)
+  const extensionModule = await fetch(`${origin}/api/extensions/map/fichiers/0.1.0/main.js`, { headers: { cookie: loginCookie } })
+  if (!extensionModule.ok || !/javascript/.test(extensionModule.headers.get("content-type") || "") || !(await extensionModule.text()).includes("export function mount")) {
+    throw new Error(`Le module de l'extension n'est pas servi (${extensionModule.status}).`)
+  }
+  const extensionServer = await fetch(`${origin}/api/extensions/map/serveur/carte/2`, { headers: { cookie: loginCookie } })
+  const extensionAnswer = extensionServer.ok ? await extensionServer.json() : null
+  if (extensionAnswer?.version !== "0.1.0" || extensionAnswer.path?.join("/") !== "carte/2" || extensionAnswer.role !== "admin") {
+    throw new Error(`La partie serveur de l'extension ne répond pas (${extensionServer.status} ${JSON.stringify(extensionAnswer)}).`)
+  }
+  console.log(`Serveur local Eraser vérifié (HTTP ${status}), formulaires, mot de passe, compte administrateur, flux OAuth et extensions opérationnels.`)
 } catch (error) {
   if (logs.trim()) console.error(logs.trim())
   console.error(error)

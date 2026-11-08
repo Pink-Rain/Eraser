@@ -184,6 +184,18 @@
   compagnon refuse un Mod d'une autre version. Après toute modification, recopier le Mod dans
   `public/roll20/` et refaire `public/roll20/eraser-roll20-companion.zip` (fichiers à la racine).
 
+## Extensions
+
+- Une extension vit dans son propre dépôt GitHub public (`Pink-Rain/Eraser_doc`, `Eraser_map`,
+  `Eraser_page`) et se lie dans `linkedExtensions` (`lib/extensions.ts`), jamais depuis
+  l'application. Ne jamais renommer l'identifiant d'une extension liée (`doc`, `map`, `page`).
+- Détail dans `ARCHITECTURE.md` (« Extensions »). Ce qu'Eraser offre aux extensions est versionné
+  par `EXTENSION_API_VERSION` : ne jamais en retirer, incrémenter dès qu'on y ajoute.
+- Une extension n'appelle jamais Google elle-même : elle passe par une API d'Eraser (porte du quota,
+  lectures partagées). Elle garde ses données sur le Worker (`store`, portée `extension:<id>`).
+- Travailler sur une extension se fait dans son dépôt ; ne toucher Eraser que si l'extension a
+  besoin de quelque chose de nouveau de sa part.
+
 ## Vérifications avant publication
 
 1. `npm ci`

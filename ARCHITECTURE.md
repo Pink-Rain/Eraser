@@ -494,6 +494,58 @@ campagne est encore représenté dans `roll20_campaign_links` en SQLite locale.
 migration des liens existants doit être traitée séparément et de façon
 réversible.
 
+## Extensions
+
+Une extension est un morceau d'Eraser qui vit dans son propre dépôt GitHub public, se publie
+seul et arrive sur chaque installation sans réinstaller Eraser. Liées aujourd'hui, encore vides :
+`doc` (Pink-Rain/Eraser_doc, documents de campagne), `map` (Pink-Rain/Eraser_map, tabletop),
+`page` (Pink-Rain/Eraser_page, atelier des pages).
+
+- **Liaison** : `linkedExtensions` dans `lib/extensions.ts`, dans le code seulement. L'identifiant
+  nomme le dossier d'installation, l'adresse `/extension/<id>` et l'entrée des réglages : il ne se
+  renomme jamais.
+- **Qui la reçoit** : Administration › Extensions (`components/eraser/extensions-admin.tsx`,
+  `/api/extensions`). L'admin coche Joueurs, MJ, Admins ; rien d'office. Gardé sur le Worker,
+  portée `extensions`, une entrée par extension `{ "roles": [...] }` (`lib/extensions-store.ts`,
+  copie relue toutes les 5 min).
+- **Téléchargement** (`lib/extensions-install.ts`, `lib/extensions-sync.ts`) : par le serveur
+  local, pas par l'enveloppe Electron (aucun incrément d'`eraserShell`). La coque appelle
+  `syncExtensionsSoon(rôle réel du compte)` à chaque page : au lancement (10 s après), quand le
+  choix de l'admin change, et toutes les six heures, les extensions cochées pour ce rôle sont
+  comparées à leur dernière Release GitHub. Une version plus récente est téléchargée, son
+  empreinte SHA-256 vérifiée, puis rangée dans `<données>/extensions/<id>/<version>/` ;
+  `current.json` désigne celle qui sert, la précédente reste à côté, les autres sont effacées.
+  Un paquet altéré, illisible ou fait pour une API plus récente laisse la version installée en
+  place. GitHub est lu sans compte (60 lectures par heure) : une réponse sert 10 min.
+- **Version publiée** : une Release du dépôt de l'extension joint `eraser-extension.json`
+  (`id`, `version`, `api`, `entry`, `styles`, `server`, `pack`, `sha256`) et
+  `eraser-extension.pack.gz` (JSON compressé `{ format: "eraser-extension-pack", files: { chemin:
+  base64 } }`). `scripts/pack-extension.mjs` les fabrique depuis `dist/` et le champ
+  `eraserExtension` du `package.json` ; il est recopié tel quel dans chaque dépôt d'extension.
+- **Page** : `/extension/<id>/<chemin…>` (`app/extension/[id]/[[...chemin]]`) charge le module
+  `entry` (`components/eraser/extension-host.tsx`) depuis
+  `/api/extensions/<id>/fichiers/<version>/…` (fichiers immuables, imports relatifs dans la même
+  version) et appelle `mount(élément, eraser)` dans la coque d'Eraser ; `update(eraser)` suit les
+  changements d'adresse ; `mount` peut rendre la fonction de démontage. L'extension rend avec le
+  React d'Eraser (`eraser.React`, `eraser.ReactDOMClient`, `eraser.jsxRuntime`, aussi sur
+  `window.EraserExtensions`), jamais le sien. `eraser` donne aussi le compte, `path`,
+  `navigate`, `server` (sa partie serveur) et `eraser` (les API `/api/…` d'Eraser).
+- **Partie serveur** (facultative) : `/api/extensions/<id>/serveur/<chemin…>` charge le module
+  `server` du disque (import natif de Node) et lui confie la requête : `default.fetch(requête,
+  eraser)`, ou `handle`. `eraser` y donne le compte, le chemin et `store` (`get`, `set`,
+  `remove`, `list`), ses données sur le Worker, portée `extension:<id>`, 20 000 caractères par
+  entrée. Google n'est pas encore prêté : une extension qui en a besoin passe par une API
+  d'Eraser, ou l'API de l'extension s'agrandit (porte du quota comprise).
+- **Accès** : une extension s'ouvre si le rôle de la vue est coché, ou pour un admin ; les droits
+  d'écriture restent vérifiés par les API d'Eraser.
+- **Version de l'API** : `EXTENSION_API_VERSION`. On ne retire jamais rien de ce qu'elle offre ;
+  on l'incrémente quand on ajoute ce dont une extension aura besoin. Une extension qui demande
+  plus attend la mise à jour d'Eraser.
+- **Vérifications** : `tests/extensions.test.mjs` (faux GitHub local : installation, mise à jour,
+  refus) ; `desktop:verify` ouvre une extension posée sur le disque, ses fichiers et sa partie
+  serveur sur le serveur construit (`ERASER_EXTENSIONS_RELEASES_URL` vise une adresse fermée,
+  jamais le vrai GitHub).
+
 ## Build, installation et mises à jour
 
 `electron-builder.yml` produit un installateur NSIS x64 nommé
