@@ -1,6 +1,6 @@
 /**
  * Les cadenas des colonnes, tels qu'on les règle dans « Modifier » › Colonnes : un cadenas
- * posé ou retiré à la main, les usages qu'on ajoute (« Le tabletop lit cette colonne »), et
+ * posé ou retiré à la main, les usages qu'on ajoute (« Le pont Roll20 lit cette colonne »), et
  * les usages d'Eraser qu'on écarte. Nom et ID restent toujours verrouillés : chaque ligne est
  * retrouvée par eux.
  *
@@ -15,7 +15,7 @@ import { freePolicy, type ColumnPolicy } from "@/lib/index-schema-shared"
 export type ColumnLockOverride = {
   /** `true` : cadenas posé à la main (même sans usage écrit) ; `false` : cadenas d'Eraser retiré. */
   locked?: boolean
-  /** Les usages écrits à la main (« Le tabletop lit cette colonne »). */
+  /** Les usages écrits à la main (« Le pont Roll20 lit cette colonne »). */
   uses?: string[]
   /** Les usages d'Eraser écartés de la liste (par leur texte). */
   hidden?: string[]

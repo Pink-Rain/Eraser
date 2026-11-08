@@ -132,11 +132,11 @@ test("les nouvelles étapes : un formulaire ici, une ligne d'un autre index, une
   };
   await actions.runActionButton({ id: "1", label: "", steps: [{ type: "open-form" }] }, runtime);
   await actions.runActionButton({ id: "2", label: "", steps: [{ type: "open-row", index: "places", row: "{Lieu}" }] }, runtime);
-  await actions.runActionButton({ id: "3", label: "", steps: [{ type: "open-eraser", href: "/tabletop" }] }, runtime);
+  await actions.runActionButton({ id: "3", label: "", steps: [{ type: "open-eraser", href: "/bac-a-sable/magasin" }] }, runtime);
   await actions.runActionButton({ id: "4", label: "", steps: [{ type: "random-row" }, { type: "show-card", card: "" }] }, runtime);
   // Une page d'Eraser commence par « / » : une adresse web n'en est pas une.
   await actions.runActionButton({ id: "5", label: "", steps: [{ type: "open-eraser", href: "https://exemple.org" }] }, runtime);
-  assert.deepEqual(calls.slice(0, 5), [["form", "principal"], ["row", "places", "Valombre", undefined], ["navigate", "/tabletop"], ["random", undefined, undefined], ["card", "*"]]);
+  assert.deepEqual(calls.slice(0, 5), [["form", "principal"], ["row", "places", "Valombre", undefined], ["navigate", "/bac-a-sable/magasin"], ["random", undefined, undefined], ["card", "*"]]);
   assert.equal(calls[5][0], "notify");
   assert.equal(calls[5][2], "error");
 });

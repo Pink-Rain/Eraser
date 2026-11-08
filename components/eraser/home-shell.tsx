@@ -108,7 +108,6 @@ const ruleLinks: QuickLink[] = [
 ]
 
 const toolLinks: QuickLink[] = [
-  { href: "/bac-a-sable/tabletop", label: "Tabletop", icon: Map },
   { href: "/bac-a-sable/magasin", label: "Magasin", icon: Store },
   { href: "/bac-a-sable/pnjs", label: "PNJs du bac à sable", icon: FlaskConical },
   { href: "/administration/comptes-et-roles", label: "Comptes et rôles", icon: ShieldCheck },

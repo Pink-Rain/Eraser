@@ -29,7 +29,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   try {
     const contentType = request.headers.get("content-type") || ""
     // Seules les cases changées sont écrites : réécrire toute la fiche avec la copie du
-    // navigateur effaçait ce qu'un autre (le MJ, le tabletop) venait d'y modifier.
+    // navigateur effaçait ce qu'un autre (le MJ, un autre écran) venait d'y modifier.
     if (contentType.includes("multipart/form-data")) {
       const form = await request.formData()
       const file = form.get("portrait")

@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { CAMPAIGN_LIVE_OUT_EVENT, campaignLiveFromPayload, receiveCampaignChange, type CampaignLiveEnvelope } from "@/lib/campaign-live"
 import { rollDiceExpression } from "@/lib/math-expression"
-import type { TabletopActivityRecord } from "@/lib/tabletop-schema"
+import type { ChatActivityRecord } from "@/lib/chat-activity"
 import { chatMessageTime } from "@/lib/chat-time"
 import { cn } from "@/lib/utils"
 import { ownedBy } from "@/lib/ownership"
@@ -23,7 +23,7 @@ type ChatAccount = { uid: string; name: string }
 type ConnectionState = "connecting" | "ready" | "error"
 type Presence = { role: ChatUser["role"]; uid: string; name: string }
 
-// Voir lib/tabletop-access.ts : un message à un compte ou un jet privé garde
+// Voir lib/campaign-chat.ts : un message à un compte ou un jet privé garde
 // l'audience « character » et préfixe son destinataire.
 const ACCOUNT_PREFIX = "account:"
 const PRIVATE_PREFIX = "self:"
@@ -39,7 +39,7 @@ function targetAtStart<T extends { name: string }>(targets: T[], tail: string) {
   return [...targets].sort((left, right) => right.name.length - left.name.length).find((candidate) => folded.startsWith(`${foldName(candidate.name)} `))
 }
 
-function audienceLabel(activity: TabletopActivityRecord) {
+function audienceLabel(activity: ChatActivityRecord) {
   if (activity.audience === "gm") return "MJ seulement"
   if (activity.recipientId.startsWith(PRIVATE_PREFIX)) return "Privé"
   return `À ${activity.recipientName}`
@@ -55,7 +55,7 @@ function readSeen(campaignId: string) {
   try { return window.localStorage.getItem(SEEN_KEY + campaignId) || "" } catch { return "" }
 }
 
-function latestActivityAt(activities: TabletopActivityRecord[]) {
+function latestActivityAt(activities: ChatActivityRecord[]) {
   return activities.reduce((latest, activity) => activity.createdAt > latest ? activity.createdAt : latest, "")
 }
 
@@ -63,11 +63,11 @@ function dataRecord(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) && !(value instanceof ArrayBuffer) ? value as Record<string, unknown> : null
 }
 
-function activityFromPayload(value: unknown): TabletopActivityRecord | null {
+function activityFromPayload(value: unknown): ChatActivityRecord | null {
   const record = dataRecord(value)
   if (!record || (record.kind !== "chat" && record.kind !== "dice") || ![record.id, record.mapId, record.authorUid, record.authorName, record.text, record.diceExpression, record.diceResult, record.createdAt].every((entry) => typeof entry === "string")) return null
   return {
-    ...(record as unknown as TabletopActivityRecord),
+    ...(record as unknown as ChatActivityRecord),
     audience: record.audience === "gm" || record.audience === "character" ? record.audience : "public",
     recipientId: typeof record.recipientId === "string" ? record.recipientId : "",
     recipientName: typeof record.recipientName === "string" ? record.recipientName : "",
@@ -96,7 +96,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
   const [accounts, setAccounts] = useState<ChatAccount[]>([])
   const [online, setOnline] = useState<ChatAccount[]>([])
   const [me, setMe] = useState<ChatAccount | null>(null)
-  const [activities, setActivities] = useState<TabletopActivityRecord[]>([])
+  const [activities, setActivities] = useState<ChatActivityRecord[]>([])
   const [connection, setConnection] = useState<ConnectionState>("connecting")
   const [chatText, setChatText] = useState("")
   const [notice, setNotice] = useState("")
@@ -106,7 +106,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
   const presenceRef = useRef<Map<string, Presence>>(new Map())
   const myNameRef = useRef("")
   const membersRef = useRef<ChatMember[]>([])
-  const realtimeRef = useRef<{ activity: (payload: TabletopActivityRecord) => void } | null>(null)
+  const realtimeRef = useRef<{ activity: (payload: ChatActivityRecord) => void } | null>(null)
   const activityEndRef = useRef<HTMLDivElement>(null)
   const noticeTimerRef = useRef<number | null>(null)
 
@@ -118,11 +118,9 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
     try { if (readSeen(forCampaign) < at) window.localStorage.setItem(SEEN_KEY + forCampaign, at) } catch { /* navigation privée */ }
   }, [])
 
-  const hideOnThisPage = /\/tabletop(\/|$)/.test(pathname)
   const roomId = campaignId ? `chat:${campaignId}` : ""
   // Le salon en direct coûte cher à rejoindre (une vingtaine de connexions pair à pair, des
-  // relais) : il attend que l'application soit au repos, ou qu'on ouvre le chat. Le
-  // tabletop, qui a déjà son propre salon, ne le rejoint pas.
+  // relais) : il attend que l'application soit au repos, ou qu'on ouvre le chat.
   const [warm, setWarm] = useState(false)
   useEffect(() => {
     if (warm) return
@@ -184,7 +182,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
     if (!warm) return
     let cancelled = false
     void fetch(`/api/campaign-chat?pageLinked=${encodeURIComponent(campaignId)}`)
-      .then((response) => responseJson<{ activities: TabletopActivityRecord[]; members: ChatMember[]; accounts?: ChatAccount[]; me?: ChatAccount }>(response))
+      .then((response) => responseJson<{ activities: ChatActivityRecord[]; members: ChatMember[]; accounts?: ChatAccount[]; me?: ChatAccount }>(response))
       .then((payload) => {
         if (cancelled) return
         // Premier passage dans ce salon : l'historique compte comme déjà lu.
@@ -202,7 +200,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
   }, [campaignId, markSeen, showNotice, warm])
 
   useEffect(() => {
-    if (!roomId || !warm || hideOnThisPage) return
+    if (!roomId || !warm) return
     let cancelled = false
     let room: Room | null = null
     let onLiveOut: ((event: Event) => void) | null = null
@@ -264,7 +262,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
       if (onLiveOut) window.removeEventListener(CAMPAIGN_LIVE_OUT_EVENT, onLiveOut)
       if (room) void room.leave()
     }
-  }, [roomId, campaignId, hideOnThisPage, markSeen, user.role, user.uid, warm])
+  }, [roomId, campaignId, markSeen, user.role, user.uid, warm])
 
   // Le nom du compte, partout : plus de « MJ » ni de nom de personnage.
   const speakerName = me?.name || "Joueur"
@@ -282,11 +280,11 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
   const directSelection = directTail === null ? null : targetAtStart(directTargets, directTail)
   const directSuggestions = directTail === null || directSelection ? [] : directTargets.filter((target) => !directTail.trim() || foldName(target.name).includes(foldName(directTail.trim()))).slice(0, 8)
 
-  async function publishActivity(activity: TabletopActivityRecord) {
+  async function publishActivity(activity: ChatActivityRecord) {
     setActivities((current) => [...current.filter((item) => item.id !== activity.id), activity].slice(-200))
     realtimeRef.current?.activity(activity)
     try {
-      const payload = await responseJson<{ activity: TabletopActivityRecord }>(await fetch("/api/campaign-chat", {
+      const payload = await responseJson<{ activity: ChatActivityRecord }>(await fetch("/api/campaign-chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ pageLinked: campaignId, ...activity }),
@@ -357,8 +355,6 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
   }
 
   const unread = !open && seen.campaignId === campaignId && activities.some((activity) => activity.authorUid !== user.uid && activity.createdAt > seen.at)
-
-  if (hideOnThisPage) return null
 
   return (
     <div className="fixed bottom-4 right-4 z-40">

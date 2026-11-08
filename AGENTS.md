@@ -169,10 +169,15 @@
 - Ne jamais renommer les clés enregistrées (colonnes de la feuille, champs du JSON des
   zones, `{"target":"document"}` dans le JSON d'un exemplaire d'inventaire).
 
-## Tabletop et Roll20
+## Chat, tabletop et Roll20
 
-- Le tabletop utilise notamment Leaflet et Trystero. Ses routes, composants et
-  styles ne doivent pas être supprimés comme du scaffolding générique.
+- Le tabletop a quitté Eraser (alpha 273) : il renaîtra dans l'extension Eraser Map
+  (`Pink-Rain/Eraser_map`), sur d'autres principes. Ne pas le recréer dans Eraser ni y
+  recopier l'ancien code.
+- Le chat (`components/eraser/global-table-chat.tsx`, `lib/campaign-chat.ts`) garde ses
+  messages dans l'onglet « Journal » du classeur Google « Tabletop » : ce classeur, son nom et
+  la clé `tabletop` de `jdrSheetDefinitions` restent. Ses anciens onglets (Cartes, Tokens,
+  Dossiers) ne sont plus lus ; ne jamais les effacer. Le chat passe en direct par Trystero.
 - Le compagnon Roll20 appelle
   `http://127.0.0.1:32147/api/roll20/bridge` ; Eraser doit rester ouvert.
 - Les sources Roll20 sont dans `integrations/roll20/` et les téléchargements
@@ -206,7 +211,7 @@
 6. `npm run desktop:verify`
 7. `npm run desktop:dist` sur Windows
 8. Installer `Eraser-Setup.exe` et tester connexion, Google Drive/Sheets,
-   campagnes, personnages, tabletop, Roll20 et mise à jour automatique.
+   campagnes, personnages, chat, extensions, Roll20 et mise à jour automatique.
 
 Le workflow Windows produit `Eraser-Setup.exe`, `latest.yml` et le `.blockmap`,
 puis teste une vraie installation. Une préversion est publiée seulement par un

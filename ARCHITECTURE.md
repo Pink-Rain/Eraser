@@ -23,7 +23,7 @@ qui doivent dépasser une seule installation.
 | `worker-accounts/` | Comptes, sessions, rôles, OAuth Google, identités et états communs |
 | Google Sheets | Source principale des données JDR |
 | Google Drive | Source principale des médias partagés |
-| Trystero | Synchronisation en temps réel du tabletop |
+| Trystero | Chat et changements des campagnes en temps réel |
 | Roll20 | Extension, Mod et pont HTTP vers le serveur local |
 
 ## Démarrage et stockage local
@@ -113,7 +113,7 @@ magasin (`magasin-et-fouille/sauvegardes?shop=ID`, la fenêtre du journal
 
 Les magasins sont les mêmes partout (`ShopCards`) : le MJ voit l'effet des items, un
 joueur seulement leur description (`shopForPlayers`, `lib/shop-purchase.ts`, appliqué
-aussi au tabletop et à Roll20). Chaque ligne garde ses exemplaires (`quantity` dans
+aussi à Roll20). Chaque ligne garde ses exemplaires (`quantity` dans
 « Objets JSON » ; absent : le « Nombre max » de l'item, sinon 1). Un achat
 (`.../buy`, `lib/shop-access.ts`) retient d'abord les exemplaires (`takeFromShop`,
 verrou « shops »), puis paie avec la bourse (`replaceCharacterPurse`) et remplit
@@ -425,7 +425,7 @@ n'est pas compilé et garde son comportement.
   menus Radix posent un calque sous eux au lieu de `pointer-events: none` sur `<body>`
   (`lib/modal-blocker.ts`, branché dans `@radix-ui/react-dismissable-layer` par
   `vite.config.ts`) ; `react-remove-scroll-bar` est remplacé par `lib/vendor/remove-scroll-bar.ts`
-  (`<body>` ne défile jamais) ; plus de `body:has(…)` (attribut `data-tabletop-windows`), ni de
+  (`<body>` ne défile jamais) ; plus de `body:has(…)`, ni de
   `:has()` sur la coque de la barre latérale.
 - Porte du quota (`lib/google-quota.ts`) : des requêtes refusées ensemble (429) ne comptent que
   pour un refus ; la pause ne s'allonge que pour un refus arrivé après la fin de la précédente.
@@ -433,7 +433,7 @@ n'est pas compilé et garde son comportement.
   installation que 6 s (l'arrière-plan, 80 s), puis lit Google elle-même ; une installation en
   pause de quota ne prend pas de bail, et son bail renouvelé le dit (`paused`) : personne ne
   l'attend.
-- Salon en direct (chat, tabletop) : trystero préparait vingt connexions pair à pair d'un coup
+- Salon en direct (chat) : trystero préparait vingt connexions pair à pair d'un coup
   (1,5 à 2 s de gel au lancement et à chaque changement de salon). `vite.config.ts`
   (`eraserTrysteroPool`) les fait préparer une à une, au repos, six au plus, la première
   comprise (elle initialise WebRTC : 0,5 à 0,7 s, à part de la tâche qui rejoint le salon). À
@@ -470,11 +470,22 @@ texte en paragraphes de morceaux stylés (gras, italique, souligné, barré, cou
 - Le Créateur de session montre les documents de la session ; Roll20 les reçoit en handouts
   (image) et en PDF du Journal (voir plus bas).
 
-## Tabletop
+## Chat (et ancien tabletop)
 
-Le tabletop conserve ses pages, routes API, composants Leaflet, styles globaux
-et synchronisation Trystero. Un tabletop appartient à une campagne ou au bac à
-sable. Les cartes et portraits partagés proviennent de Drive avec cache local.
+Le tabletop a été retiré d'Eraser à l'alpha 273 (pages, API, composants Leaflet, styles) :
+il renaîtra dans l'extension Eraser Map, sur d'autres principes. Ce qu'il partageait reste :
+
+- **Le chat** (`components/eraser/global-table-chat.tsx`, `/api/campaign-chat`,
+  `lib/campaign-chat.ts`) : canaux « Général », bac à sable d'un MJ (`listManagedPages`,
+  `lib/managed-campaigns.ts`, aussi utilisé par le don d'items) et campagnes. Ses messages
+  (`ChatActivityRecord`, `lib/chat-activity.ts`) sont écrits dans l'onglet « Journal » du
+  classeur Google « Tabletop » (`listChatActivities`, `saveChatActivity`) : le classeur garde
+  son nom, la clé `tabletop` et la clé de synchronisation `tabletop-workbook:v4`. Ses anciens
+  onglets (Cartes, Tokens, Dossiers) restent dans le Drive, ni relus ni effacés. Le salon en
+  direct est un salon Trystero par canal ; un message garde ses noms de champs (`mapId` : le
+  salon), échangés avec les autres installations.
+- **Les personnages pour Roll20** : `listCharacterTokenSummaries` (nom, profil, portrait, vie,
+  rapidité, joueur de l'index local).
 
 ## Roll20
 
@@ -571,8 +582,8 @@ télécharge en arrière-plan et installe au redémarrage ou à la fermeture.
 - Réconcilier `drizzle/meta/_journal.json` avec les migrations `0013–0015` sans
   supprimer ni réécrire l’historique SQL.
 - Ajouter un test d’intégration du vrai chemin `eraser-accounts`.
-- Découper plus tard les gros modules, notamment `lib/google-sheets.ts` et le
-  tabletop, sans mêler ces refactors au nettoyage.
+- Découper plus tard les gros modules, notamment `lib/google-sheets.ts`, sans
+  mêler ces refactors au nettoyage.
 - La synchronisation des images de classe dans Sheets construit encore une URL
   `chatgpt.site` dans `lib/google-sheets.ts`. Ce chemin doit être remplacé par
   un endpoint partagé durable dans un chantier fonctionnel dédié avant la

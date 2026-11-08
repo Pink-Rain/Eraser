@@ -65,7 +65,7 @@ const radixLayerPatches: Array<{ file: RegExp; find: string; replace: string }> 
 ]
 
 /**
- * Le salon en direct (chat, tabletop) prépare d'avance des connexions pair à pair : trystero en
+ * Le salon en direct du chat prépare d'avance des connexions pair à pair : trystero en
  * créait vingt d'un coup en rejoignant un salon. Chacune coûte des dizaines de millisecondes sous
  * Windows : l'écran gelait 1,5 à 2 s au lancement d'Eraser, et encore à chaque changement de
  * salon. Elles sont maintenant préparées une à une, quand la page est au repos, et six suffisent

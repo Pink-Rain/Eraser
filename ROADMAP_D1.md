@@ -9,7 +9,7 @@
   - contenants et contenus d’inventaire (personnages et campagnes).
 - **Tout le reste reste sur Google Sheets pour l’instant** : index du monde,
   classes et sorts, catalogue d’objets et types de contenants, vocabulaire,
-  PNJ, magasins, to-do d’administration, tabletop. Ils pourront suivre plus
+  PNJ, magasins, to-do d’administration, journal du chat. Ils pourront suivre plus
   tard, domaine par domaine, avec la même méthode.
 - Les médias (images, cartes, portraits) restent sur Google Drive.
 - Une seule application pour joueurs et MJ, qui s’adapte au rôle.
@@ -17,14 +17,9 @@
   feuilles du Drive, ou télécharger un `.xlsx` / `.csv`. Bouton
   **Importer** : depuis les feuilles du Drive ou un fichier, avec aperçu des
   différences avant d’appliquer.
-- **Le tabletop est éteint** (`TABLETOP_ENABLED` dans
-  `lib/tabletop-status.ts`) : ses pages affichent « Tabletop éteint — Non
-  prioritaire, utilisation de Roll20 ». Son code et ses données restent en
-  place. Il lit et modifie les personnages et les campagnes
-  (`lib/tabletop-access.ts`, par exemple `updateTabletopEntityHp`) : avant de
-  le rallumer après la migration, ces accès doivent passer par `lib/data/`.
-  Son onglet Journal, qui contient aussi le chat de campagne
-  (`/api/campaign-chat`), reste sur Sheets.
+- **Le tabletop a quitté Eraser** (alpha 273) : il renaîtra dans l'extension
+  Eraser Map. L'onglet Journal de son ancien classeur, qui garde le chat de
+  campagne (`/api/campaign-chat`), reste sur Sheets.
 - **Roll20 devient l’outil de jeu** : le pont Roll20 (`lib/roll20-bridge.ts`)
   lit les campagnes et les personnages, et doit être vérifié à chaque
   bascule.
@@ -140,7 +135,7 @@ journée).
    modifiées dans Sheets pendant le mode secours avec D1, et propose un
    import avec aperçu (même écran que le bouton Importer) pour ce qui
    manque.
-6. **Les autres domaines** (index, PNJ, tabletop…) ne sont pas concernés :
+6. **Les autres domaines** (index, PNJ, chat…) ne sont pas concernés :
    ils restent sur Sheets.
 
 Coût : la recopie vers Sheets consomme le quota Google (une écriture groupée
@@ -419,9 +414,8 @@ Roll20 avant la bascule.
 
 ### Plus tard (hors périmètre actuel)
 
-Données de référence, PNJ et magasins, tabletop : même méthode, domaine par
-domaine, seulement si le besoin s’en fait sentir. Pour le tabletop, ses
-accès aux personnages et campagnes passent d’abord par `lib/data/`.
+Données de référence, PNJ et magasins, journal du chat : même méthode, domaine
+par domaine, seulement si le besoin s’en fait sentir.
 
 ## Pour chaque domaine (phases 3 et 4)
 

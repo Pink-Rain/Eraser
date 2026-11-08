@@ -1,6 +1,6 @@
 // Sans import : lu à la fois par google-sheets et par shop-schema (qui importe google-sheets).
 
-/** Les magasins qui ont une devanture dessinée (tokens, tabletop, compagnon Roll20). */
+/** Les magasins qui ont une devanture dessinée (tokens, compagnon Roll20). */
 export type VisualShopKey = "market" | "bookshop" | "antique" | "armory" | "black-market" | "alchemist" | "tavern"
 /** Le type d'un magasin : ceux d'Eraser (« market »…) ou ceux créés dans Lieux › Magasin. */
 export type ShopKey = string

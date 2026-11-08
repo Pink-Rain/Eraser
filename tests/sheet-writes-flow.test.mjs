@@ -42,31 +42,28 @@ beforeEach(async () => {
   await db.delete(schema.sheetIndexSyncs);
 });
 
-const tokenHeaders = ["ID", "ID carte", "Type d’entité", "ID entité", "X", "Y", "Créé le", "Modifié le", "Nom", "Icône", "Échelle pion", "Échelle icône", "Couleur"];
+const journalHeaders = ["ID", "ID carte", "Type", "ID auteur", "Auteur", "Contenu", "Formule", "Résultat", "Horodatage", "Audience", "ID destinataire", "Destinataire"];
 
-/** Une ligne écrite en colonne J par l'ancien ajout de Google (« Tokens » réel, lignes 12 à 29). */
-const shiftedToken = (id) => [...Array(9).fill(""), id, "MAP-OLD", "npc", "PNJ-OLD", "800", "450", "2026-09-03", "2026-09-03", "", "", "1", "1", "#7f3430"];
+/** Une ligne écrite en colonne J par l'ancien ajout de Google (vu dans les « Tokens » du tabletop, lignes 12 à 29). */
+const shiftedMessage = (id) => [...Array(9).fill(""), id, "chat:OLD", "chat", "uid-old", "Ancien", "Bonjour", "", "", "2026-09-03", "public", "", ""];
 
 test("un ajout tombe en colonne A sous la dernière ligne remplie, même sous des lignes écrites en J", async () => {
   const id = fresh("tabletop");
   google.addSpreadsheet(id, [
-    { title: "Cartes", grid: [["ID", "Page liée", "Nom", "Image", "Largeur", "Hauteur", "Taille case (px)", "Distance par case", "Unité", "Clé de salon", "Créé par", "Créée le", "Modifiée le", "Dossier"]] },
-    { title: "Tokens", grid: [tokenHeaders, [], ["TOK-A", "MAP-OLD", "npc", "PNJ-A", "10", "10"], shiftedToken("TOK-J1"), shiftedToken("TOK-J2")] },
-    { title: "Dossiers", grid: [["ID", "Page liée", "Nom", "Ordre", "Créé le", "Modifié le"]] },
-    { title: "Journal", grid: [["ID", "ID carte", "Type", "ID auteur", "Auteur", "Contenu", "Formule", "Résultat", "Horodatage", "Audience", "ID destinataire", "Destinataire"]] },
+    { title: "Journal", grid: [journalHeaders, [], ["MSG-A", "chat:OLD", "chat", "uid-a", "A", "Salut"], shiftedMessage("MSG-J1"), shiftedMessage("MSG-J2")] },
   ]);
-  google.world.files.get(id).tabs[1].columnCount = 22;
-  await jdr.saveJdrSheet({ key: "tabletop", spreadsheetId: id, name: "tabletop", tabName: "Cartes", webViewLink: "" });
-  const map = await sheets.createTabletopMap("CAMP-1", "uid-1", "Forêt");
-  const token = await sheets.addTabletopToken(map.id, "npc", "PNJ-1", 10, 20);
-  const tokens = google.grid(id, "Tokens");
+  google.world.files.get(id).tabs[0].columnCount = 22;
+  await jdr.saveJdrSheet({ key: "tabletop", spreadsheetId: id, name: "tabletop", tabName: "Journal", webViewLink: "" });
+  await sheets.saveChatActivity({ id: "MSG-1", mapId: "chat:CAMP-1", kind: "chat", authorUid: "uid-1", authorName: "Aldor", text: "Me voilà", diceExpression: "", diceResult: "", createdAt: "2026-11-08T10:00:00.000Z", audience: "public", recipientId: "", recipientName: "" });
+  const journal = google.grid(id, "Journal");
   // Sous les deux lignes décalées (4 et 5), jamais dans la ligne vide 2 ni en colonne J.
-  assert.equal(tokens.length, 6);
-  assert.equal(tokens[5][0], token.id);
-  assert.equal(tokens[5][9] ?? "", "");
-  assert.equal(tokens[1].length, 0);
-  assert.equal(tokens[3][9], "TOK-J1");
-  assert.deepEqual((await sheets.listTabletopTokens(map.id)).map((item) => item.id), [token.id]);
+  assert.equal(journal.length, 6);
+  // Toute la ligne part de la colonne A : en J, son audience, pas un identifiant décalé.
+  assert.deepEqual(journal[5].slice(0, 3), ["MSG-1", "chat:CAMP-1", "chat"]);
+  assert.equal(journal[5][9], "public");
+  assert.equal(journal[1].length, 0);
+  assert.equal(journal[3][9], "MSG-J1");
+  assert.deepEqual((await sheets.listChatActivities("chat:CAMP-1")).map((item) => item.id), ["MSG-1"]);
 });
 
 test("une saisie garde son sens : formule, nombre, texte, case à cocher ; RAW écrit tel quel", async () => {
@@ -374,29 +371,6 @@ test("Session : lieux de l'Index des lieux liés (cachés aux joueurs d'abord) e
   assert.equal(unlinked.hidden.includes("place:LIE-1"), false);
   const cleared = await sessions.updateSessionDates("CAMP-1", "S-1", { calendar: "Calendrier de Cir'Hoit", startDate: "", endDate: "14 Brumaire 1023" });
   assert.deepEqual([cleared.calendar, cleared.startDate, cleared.endDate], ["", "", ""]);
-});
-
-test("Tabletop : une feuille réglée en français garde ses décimales, un changement n'écrit que sa case", async () => {
-  const id = fresh("tabletop");
-  google.addSpreadsheet(id, [
-    { title: "Cartes", grid: [["ID", "Page liée", "Nom", "Image", "Largeur", "Hauteur", "Taille case (px)", "Distance par case", "Unité", "Clé de salon", "Créé par", "Créée le", "Modifiée le", "Dossier"],
-      ["MAP-1", "CAMP-1", "Forêt", "", "1600", "900", "70", "1,5", "m", "", "uid-1", "2026-09-01", "2026-09-01", "Ville"]] },
-    { title: "Tokens", grid: [tokenHeaders, ["TOK-1", "MAP-1", "npc", "PNJ-1", "1369,397166", "450,5", "2026-09-01", "2026-09-01", "Garde", "🛡", "1", "1,25", "#7f3430"]] },
-    { title: "Dossiers", grid: [["ID", "Page liée", "Nom", "Ordre", "Créé le", "Modifié le"]] },
-    { title: "Journal", grid: [["ID", "ID carte", "Type", "ID auteur", "Auteur", "Contenu", "Formule", "Résultat", "Horodatage", "Audience", "ID destinataire", "Destinataire"]] },
-  ]);
-  await jdr.saveJdrSheet({ key: "tabletop", spreadsheetId: id, name: "tabletop", tabName: "Cartes", webViewLink: "" });
-  const [token] = await sheets.listTabletopTokens("MAP-1");
-  assert.deepEqual([token.x, token.y, token.iconScale], [1369.397166, 450.5, 1.25]);
-  const [map] = await sheets.listTabletopMaps("CAMP-1");
-  assert.equal(map.distancePerGrid, 1.5);
-  await sheets.updateTabletopTokenAppearance("MAP-1", "TOK-1", { scale: 2, label: "- le garde" });
-  const row = google.grid(id, "Tokens")[1];
-  assert.equal(row[10], "2");
-  assert.equal(row[11], "1,25");
-  assert.equal(row[8], "- le garde");
-  await sheets.updateTabletopMap("MAP-1", { name: "Forêt sombre" });
-  assert.deepEqual(google.grid(id, "Cartes")[1].slice(2, 9), ["Forêt sombre", "", "1600", "900", "70", "1,5", "m"]);
 });
 
 test("Feuille reliée : un onglet renommé à la main n'est jamais remplacé par un onglet vide", async () => {

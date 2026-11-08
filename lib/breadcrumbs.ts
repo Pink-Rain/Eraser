@@ -41,7 +41,6 @@ const campaignPages: Record<string, string> = {
   "magasin-et-fouille": "Magasins",
   "fouilles": "Fouilles",
   "pnjs": "PNJs",
-  "tabletop": "Tabletop",
 }
 
 /** `campaignName` : le nom d'une campagne d'après son identifiant, s'il est connu. */

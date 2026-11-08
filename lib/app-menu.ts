@@ -66,7 +66,6 @@ export const menuCatalog: MenuCatalogEntry[] = [
   { id: "index/etoiles", label: "Index étoilés", icon: "star", roles: managers, parent: "index", dynamic: "index-etoiles" },
   { id: "index/pages", label: "Pages créées dans Index", icon: "file-plus", roles: managers, parent: "index", dynamic: "section-pages", place: "ressources" },
   { id: "bac-a-sable", label: "Bac à sable", icon: "flask", roles: managers, href: "/bac-a-sable", section: true, prefix: true },
-  { id: "bac-a-sable/tabletop", label: "Tabletop", icon: "link", roles: managers, href: "/bac-a-sable/tabletop", parent: "bac-a-sable" },
   { id: "bac-a-sable/magasin", label: "Magasin", icon: "link", roles: managers, href: "/bac-a-sable/magasin", parent: "bac-a-sable" },
   { id: "bac-a-sable/pnjs", label: "PNJs", icon: "link", roles: managers, href: "/bac-a-sable/pnjs", parent: "bac-a-sable" },
   { id: "bac-a-sable/pages", label: "Pages créées dans Bac à sable", icon: "file-plus", roles: managers, parent: "bac-a-sable", dynamic: "section-pages", place: "bac-a-sable" },

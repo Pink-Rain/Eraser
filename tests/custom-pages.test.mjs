@@ -421,7 +421,7 @@ test("Données d'un bloc Vue : conditions (colonnes masquées comprises), tri av
 
 test("Pages d'Eraser : chaque page modifiable a un contenu de départ propre, redessiné ou dans un module", () => {
   const routes = blueprints.eraserPages;
-  assert.ok(routes.length > 30);
+  assert.ok(routes.length > 25);
   for (const route of routes) {
     const content = blueprints.eraserPageBlueprint(route.path);
     const clean = pages.cleanContent(content);

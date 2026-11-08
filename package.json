@@ -1,6 +1,6 @@
 {
   "name": "eraser-jdr",
-  "version": "0.1.1-alpha.272",
+  "version": "0.1.1-alpha.273",
   "eraserShell": 10,
   "private": true,
   "main": "desktop/main.cjs",
@@ -25,7 +25,6 @@
     "clsx": "2.1.1",
     "drizzle-orm": "0.45.2",
     "electron-updater": "6.6.2",
-    "leaflet": "^1.9.4",
     "lucide-react": "^1.31.0",
     "next": "16.2.6",
     "radix-ui": "^1.6.7",
@@ -39,7 +38,6 @@
     "@electron/asar": "3.2.18",
     "@rolldown/plugin-babel": "0.2.4",
     "@tailwindcss/postcss": "4.2.1",
-    "@types/leaflet": "^1.9.22",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",

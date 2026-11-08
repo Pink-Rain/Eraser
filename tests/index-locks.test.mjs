@@ -14,7 +14,7 @@ const definitions = await vite.ssrLoadModule("/lib/world-index-definitions.ts");
 const eraserLocked = { rename: false, type: false, remove: false, reasons: ["La fiche des créatures lit cette colonne par son nom."], allowed: "L’affichage." };
 
 test("un réglage de cadenas se relit nettoyé, borné, et jamais vide", () => {
-  assert.deepEqual(locks.cleanLockOverride({ locked: true, uses: [" Le tabletop ", "Le tabletop", ""], hidden: ["x"] }), { locked: true, uses: ["Le tabletop"], hidden: ["x"] });
+  assert.deepEqual(locks.cleanLockOverride({ locked: true, uses: [" Le pont Roll20 ", "Le pont Roll20", ""], hidden: ["x"] }), { locked: true, uses: ["Le pont Roll20"], hidden: ["x"] });
   assert.equal(locks.cleanLockOverride({ locked: "oui" }), null);
   assert.equal(locks.cleanTabLocks(""), null);
   assert.deepEqual(locks.cleanTabLocks(JSON.stringify({ "Région": { uses: ["La carte"] }, Vide: {} })), { region: { uses: ["La carte"] } });
@@ -26,8 +26,8 @@ test("un cadenas d'Eraser retiré libère la colonne ; un usage ajouté la verro
   assert.deepEqual([unlocked.rename, unlocked.type, unlocked.remove, unlocked.reasons, unlocked.unlocked], [true, true, true, [], true]);
   assert.deepEqual(unlocked.builtin, eraserLocked.reasons);
   // Les usages d'Eraser écartés disparaissent de la liste ; ceux qu'on écrit s'ajoutent.
-  const mixed = locks.applyLockOverride(eraserLocked, { hidden: eraserLocked.reasons, uses: ["Le tabletop lit cette colonne"] });
-  assert.deepEqual(mixed.reasons, ["Le tabletop lit cette colonne"]);
+  const mixed = locks.applyLockOverride(eraserLocked, { hidden: eraserLocked.reasons, uses: ["Le pont Roll20 lit cette colonne"] });
+  assert.deepEqual(mixed.reasons, ["Le pont Roll20 lit cette colonne"]);
   assert.equal(mixed.rename, false);
   // Un cadenas posé sur une colonne libre, même sans usage écrit.
   const posed = locks.applyLockOverride(shared.freePolicy, { locked: true });
@@ -50,8 +50,8 @@ test("un cadenas d'Eraser retiré libère la colonne ; un usage ajouté la verro
 test("le réglage à enregistrer est retrouvé depuis la politique affichée, et l'aller-retour est stable", () => {
   const unlocked = locks.applyLockOverride(eraserLocked, { locked: false });
   assert.deepEqual(locks.lockOverrideFor(unlocked), { locked: false });
-  const added = locks.applyLockOverride(eraserLocked, { uses: ["Le tabletop"] });
-  assert.deepEqual(locks.lockOverrideFor(added), { uses: ["Le tabletop"] });
+  const added = locks.applyLockOverride(eraserLocked, { uses: ["Le pont Roll20"] });
+  assert.deepEqual(locks.lockOverrideFor(added), { uses: ["Le pont Roll20"] });
   const posed = locks.applyLockOverride(shared.freePolicy, { locked: true });
   assert.deepEqual(locks.lockOverrideFor(posed), { locked: true });
   assert.equal(locks.lockOverrideFor(locks.applyLockOverride(eraserLocked, undefined)), null);

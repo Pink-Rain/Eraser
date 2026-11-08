@@ -103,7 +103,7 @@ import { displayedMultipleValue } from "@/lib/multiple-values"
 import type { CampaignNpcRecord, CityKey, GeneratedShop, SavedShopRecord, ShopSize } from "@/lib/shop-schema"
 import type { ShopSale } from "@/lib/shop-purchase"
 import { isShopKey } from "@/lib/shop-keys"
-import type { TabletopActivityRecord, TabletopEntityRecord, TabletopFolderRecord, TabletopMapRecord, TabletopTokenRecord } from "@/lib/tabletop-schema"
+import type { ChatActivityRecord } from "@/lib/chat-activity"
 import { matchValueRanges, normalizeGoogleSheetRows, sheetNumber, sheetRangeStartRow, textCell, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
 import { campaignSheetHeaders, classDifficultyValues, classSheetHeaders, classTypeValues, npcSheetHeaders } from "@/lib/entity-sheets"
 import { foldSheetHeader, headerAdditions, sheetColumns, withSheetHeaders, type SheetCell, type SheetColumns } from "@/lib/sheet-columns"
@@ -1225,7 +1225,7 @@ function rememberSheetHeaders(spreadsheetId: string, tabName: string, headers: r
 
 /**
  * Les colonnes d'un onglet d'après sa seule ligne 1, gardée une minute : une écriture
- * fréquente (le journal du tabletop) ne relit pas les en-têtes à chaque fois. `fresh` pour
+ * fréquente (le journal du chat) ne relit pas les en-têtes à chaque fois. `fresh` pour
  * placer des valeurs : une colonne déplacée dans Sheets depuis la dernière lecture est vue.
  */
 async function namedColumnsOf(spreadsheetId: string, tabName: string, expected: readonly string[], options: { aliases?: Record<string, readonly string[]>; fresh?: boolean } = {}) {
@@ -3062,22 +3062,12 @@ const npcSheetColumnWidths = [
   150, 120, 90, 100, 100, 360, 320, 420, 480, 190, 170, 170, 180, 170, 150, 190, 200, 420, 320, 320,
 ]
 
-const tabletopWorkbookTabs = [
-  {
-    name: "Cartes",
-    headers: ["ID", "Page liée", "Nom", "Image", "Largeur", "Hauteur", "Taille case (px)", "Distance par case", "Unité", "Clé de salon", "Créé par", "Créée le", "Modifiée le", "Dossier"],
-    widths: [180, 170, 240, 360, 100, 100, 130, 140, 100, 220, 190, 180, 180, 180],
-  },
-  {
-    name: "Tokens",
-    headers: ["ID", "ID carte", "Type d’entité", "ID entité", "X", "Y", "Créé le", "Modifié le", "Nom", "Icône", "Échelle pion", "Échelle icône", "Couleur"],
-    widths: [180, 180, 130, 190, 100, 100, 180, 180, 220, 100, 110, 110, 110],
-  },
-  {
-    name: "Dossiers",
-    headers: ["ID", "Page liée", "Nom", "Ordre", "Créé le", "Modifié le"],
-    widths: [180, 190, 240, 90, 180, 180],
-  },
+/**
+ * Le journal du chat (lib/campaign-chat.ts) : le seul onglet qu'Eraser lit encore dans le
+ * classeur « Tabletop », qui garde son nom dans le Drive. Les onglets de l'ancien tabletop
+ * (« Cartes », « Tokens », « Dossiers ») restent dans le classeur, jamais relus ni effacés.
+ */
+const chatJournalTabs = [
   {
     name: "Journal",
     headers: ["ID", "ID carte", "Type", "ID auteur", "Auteur", "Contenu", "Formule", "Résultat", "Horodatage", "Audience", "ID destinataire", "Destinataire"],
@@ -3212,12 +3202,14 @@ export const jdrSheetDefinitions: StructuredSheetDefinition[] = [
     columnWidths: [180, 180, 180, 110, 180, 120, 220, 480, 140, 260, 220, 160, 190, 170, 170, 80],
   },
   {
+    // Le classeur du journal du chat : son nom et sa clé viennent de l'ancien tabletop et ne
+    // changent pas (« Relier mes feuilles existantes » le retrouve par ce nom).
     key: "tabletop",
     name: "Tabletop",
-    tabName: "Cartes",
+    tabName: "Journal",
     frozenColumns: 2,
-    headers: [...tabletopWorkbookTabs[0].headers],
-    columnWidths: [...tabletopWorkbookTabs[0].widths],
+    headers: [...chatJournalTabs[0].headers],
+    columnWidths: [...chatJournalTabs[0].widths],
   },
 ]
 
@@ -3618,13 +3610,14 @@ async function ensureInventoryWorkbookSchema(spreadsheetId: string) {
   await getDb().insert(sheetIndexSyncs).values({ key: syncKey }).onConflictDoNothing()
 }
 
-async function ensureTabletopWorkbookSchema(spreadsheetId: string) {
+/** Crée l'onglet du journal s'il manque et vérifie ses colonnes (une fois par classeur ; la clé garde son ancien nom). */
+async function ensureChatJournalSchema(spreadsheetId: string) {
   const syncKey = `tabletop-workbook:v4:${spreadsheetId}`
   const [alreadySynced] = await getDb().select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, syncKey)).limit(1)
   if (alreadySynced) return
 
   let properties = await inventoryWorkbookProperties(spreadsheetId)
-  const missingTabs = tabletopWorkbookTabs.filter((tab) => !properties.some((sheet) => sheet.title === tab.name))
+  const missingTabs = chatJournalTabs.filter((tab) => !properties.some((sheet) => sheet.title === tab.name))
   if (missingTabs.length) {
     await googleSheetsJson(`spreadsheets/${spreadsheetId}:batchUpdate`, {
       method: "POST",
@@ -3644,12 +3637,12 @@ async function ensureTabletopWorkbookSchema(spreadsheetId: string) {
 
   const newlyCreatedNames = new Set(missingTabs.map((tab) => tab.name))
   // Les colonnes de chaque onglet existant, retrouvées par leur nom : rien n'est réécrit par place.
-  const headerRows = await readRanges(spreadsheetId, tabletopWorkbookTabs.map((tab) => sheetTabRange(tab.name, "1:1")))
-  const tabColumns = new Map(tabletopWorkbookTabs.map((tab, index) => [tab.name, sheetColumns(newlyCreatedNames.has(tab.name) ? [] : headerRows[index]?.[0] ?? [], tab.headers)]))
+  const headerRows = await readRanges(spreadsheetId, chatJournalTabs.map((tab) => sheetTabRange(tab.name, "1:1")))
+  const tabColumns = new Map(chatJournalTabs.map((tab, index) => [tab.name, sheetColumns(newlyCreatedNames.has(tab.name) ? [] : headerRows[index]?.[0] ?? [], tab.headers)]))
   const requests: Array<Record<string, unknown>> = []
-  for (const tab of tabletopWorkbookTabs) {
+  for (const tab of chatJournalTabs) {
     const sheet = properties.find((candidate) => candidate.title === tab.name)
-    if (sheet?.sheetId === undefined) throw new Error("TABLETOP_SHEET_TAB_UNAVAILABLE")
+    if (sheet?.sheetId === undefined) throw new Error("CHAT_JOURNAL_TAB_UNAVAILABLE")
     const columns = tabColumns.get(tab.name)!
     const fresh = !columns.headers.some(Boolean)
     const column = (name: string) => {
@@ -3709,15 +3702,6 @@ async function ensureTabletopWorkbookSchema(spreadsheetId: string) {
         },
       })
     }
-    const entityKind = column("Type d’entité")
-    if (tab.name === "Tokens" && entityKind) {
-      requests.push({
-        setDataValidation: {
-          range: { sheetId: sheet.sheetId, startRowIndex: 1, endRowIndex: rowCount, ...entityKind },
-          rule: { condition: { type: "ONE_OF_LIST", values: ["npc", "character", "shop", "marker"].map((value) => ({ userEnteredValue: value })) }, strict: true, showCustomUi: true },
-        },
-      })
-    }
     const activityKind = column("Type")
     if (tab.name === "Journal" && activityKind) {
       requests.push({
@@ -3734,27 +3718,16 @@ async function ensureTabletopWorkbookSchema(spreadsheetId: string) {
     body: JSON.stringify({ requests }),
   })
   clearSpreadsheetReadCache(spreadsheetId)
-  for (const tab of tabletopWorkbookTabs) {
+  for (const tab of chatJournalTabs) {
     const columns = tabColumns.get(tab.name)!
     if (columns.headers.some(Boolean)) await ensureNamedColumns(spreadsheetId, tab.name, columns)
   }
   await getDb().insert(sheetIndexSyncs).values({ key: syncKey }).onConflictDoNothing()
 }
 
-let tabletopWorkbookPromise: Promise<JdrSheetRecord | null> | null = null
+let chatJournalPromise: Promise<JdrSheetRecord | null> | null = null
 
-export async function isTabletopWorkbookReady() {
-  const sheet = await resolveJdrSheet("tabletop")
-  if (!sheet) return false
-  const [synced] = await getDb()
-    .select()
-    .from(sheetIndexSyncs)
-    .where(eq(sheetIndexSyncs.key, `tabletop-workbook:v4:${sheet.spreadsheetId}`))
-    .limit(1)
-  return Boolean(synced)
-}
-
-async function prepareTabletopWorkbook() {
+async function prepareChatJournal() {
   let sheet = await getJdrSheet("tabletop")
   if (!sheet) {
     const definition = jdrSheetDefinitions.find((item) => item.key === "tabletop")
@@ -3767,37 +3740,33 @@ async function prepareTabletopWorkbook() {
       tabName: definition.tabName,
       webViewLink: file.webViewLink || `https://docs.google.com/spreadsheets/d/${file.id}/edit`,
     })
-    if (!sheet) throw new Error("TABLETOP_SHEET_UNAVAILABLE")
+    if (!sheet) throw new Error("CHAT_JOURNAL_SHEET_UNAVAILABLE")
   }
-  await ensureTabletopWorkbookSchema(sheet.spreadsheetId)
+  await ensureChatJournalSchema(sheet.spreadsheetId)
   return sheet
 }
 
-export function ensureTabletopWorkbook() {
-  if (!tabletopWorkbookPromise) {
-    tabletopWorkbookPromise = prepareTabletopWorkbook().finally(() => {
-      tabletopWorkbookPromise = null
+/** Le classeur du journal du chat, relié (retrouvé par son nom, sinon créé) et prêt. */
+export function ensureChatJournal() {
+  if (!chatJournalPromise) {
+    chatJournalPromise = prepareChatJournal().finally(() => {
+      chatJournalPromise = null
     })
   }
-  return tabletopWorkbookPromise
-}
-
-export function prepareTabletopWorkbookInBackground() {
-  return runInBackground(ensureTabletopWorkbook(), "TABLETOP_WORKBOOK_PREPARATION_FAILED")
+  return chatJournalPromise
 }
 
 export async function ensureJdrSheets() {
   const output = []
   for (const definition of jdrSheetDefinitions) {
     if (definition.key === "tabletop") {
-      const sheet = await ensureTabletopWorkbook()
+      const sheet = await ensureChatJournal()
       if (sheet) output.push(sheet)
       continue
     }
     const existing = await getJdrSheet(definition.key)
     if (existing) {
       if (definition.key === "inventory") await ensureInventoryWorkbookSchema(existing.spreadsheetId)
-      if (definition.key === "tabletop") await ensureTabletopWorkbookSchema(existing.spreadsheetId)
       output.push(existing)
       continue
     }
@@ -3806,7 +3775,6 @@ export async function ensureJdrSheets() {
     if (!existingFile) await configureStructuredSheet(file.id, definition)
     if (definition.key === "inventory") await ensureInventoryWorkbookSchema(file.id)
     if (definition.key === "npcs") await ensureNpcSheetSchema(file.id, definition.tabName)
-    if (definition.key === "tabletop") await ensureTabletopWorkbookSchema(file.id)
     const stored = await saveJdrSheet({
       key: definition.key,
       spreadsheetId: file.id,
@@ -4308,7 +4276,7 @@ export async function diagnoseJdrSheets(withWriteTest = false): Promise<JdrSheet
 const worldIndexKeys = new Set<string>(Object.keys(worldIndexDefinitions).filter((key) => !isEntityWorldIndexKey(key)))
 
 export async function ensureJdrSheet(key: JdrSheetKey) {
-  if (key === "tabletop") return ensureTabletopWorkbook()
+  if (key === "tabletop") return ensureChatJournal()
   const stored = await getJdrSheet(key)
   if (stored) {
     const knownDefinition = jdrSheetDefinitions.find((item) => item.key === key)
@@ -4990,396 +4958,41 @@ export async function moveNpcsToPage(sourcePageLinked: string, targetPageLinked:
   return moved.flatMap((item) => npcFromRow(item.row, columns) ?? [])
 }
 
-function tabletopNumber(value: unknown, fallback: number, minimum: number, maximum: number) {
+function boundedSheetNumber(value: unknown, fallback: number, minimum: number, maximum: number) {
   // « 1,25 » dans une feuille réglée en français : lu 1,25, pas la valeur par défaut.
   const parsed = sheetNumber(value)
   return Number.isFinite(parsed) ? Math.max(minimum, Math.min(maximum, parsed)) : fallback
 }
 
-type TabletopTabName = (typeof tabletopWorkbookTabs)[number]["name"]
+type ChatJournalTabName = (typeof chatJournalTabs)[number]["name"]
 
-function tabletopHeaders(tab: TabletopTabName) {
-  return tabletopWorkbookTabs.find((candidate) => candidate.name === tab)?.headers ?? []
+function chatJournalHeaders(tab: ChatJournalTabName) {
+  return chatJournalTabs.find((candidate) => candidate.name === tab)?.headers ?? []
 }
 
 /**
- * Un onglet du Tabletop : ses colonnes retrouvées par leur nom, chaque ligne remise dans
- * l'ordre prévu (les lectures ci-dessous en dépendent). `rows[i]` est la ligne i + 2.
+ * Le journal du chat : ses colonnes retrouvées par leur nom, chaque ligne remise dans l'ordre
+ * prévu (la lecture ci-dessous en dépend). `rows[i]` est la ligne i + 2.
  */
-async function readTabletopTab(spreadsheetId: string, tab: TabletopTabName, options: { fresh?: boolean } = {}) {
-  // `fresh` pour une écriture : la ligne visée est retrouvée dans la feuille telle qu'elle
-  // est maintenant (un autre joueur a pu ajouter ou retirer un pion entre-temps).
-  const read = await readNamedSheet(spreadsheetId, tab, tabletopHeaders(tab), { fresh: options.fresh })
+async function readChatJournalTab(spreadsheetId: string, tab: ChatJournalTabName) {
+  const read = await readNamedSheet(spreadsheetId, tab, chatJournalHeaders(tab))
   const columns = await ensureNamedColumns(spreadsheetId, tab, read.columns).catch((error) => {
-    console.error("TABLETOP_COLUMNS_CHECK_FAILED", tab, error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    console.error("CHAT_JOURNAL_COLUMNS_CHECK_FAILED", tab, error instanceof Error ? error.message : "UNKNOWN_ERROR")
     return read.columns
   })
   return { columns, rows: read.rows.map((row) => canonicalRow(columns, row)) }
 }
 
 /**
- * Ajoute des lignes (décrites dans l'ordre prévu) à un onglet du Tabletop, chaque valeur sous
- * son en-tête. Le Tabletop n'a aucune formule : un message de journal ou un nom qui commence
- * par « = » ou « - » reste du texte.
+ * Ajoute des lignes (décrites dans l'ordre prévu) au journal, chaque valeur sous son en-tête.
+ * Le journal n'a aucune formule : un message qui commence par « = » ou « - » reste du texte.
  */
-async function appendTabletopRows(spreadsheetId: string, tab: TabletopTabName, rows: SheetCell[][], known?: SheetColumns) {
-  const columns = known ?? await ensureNamedColumns(spreadsheetId, tab, await namedColumnsOf(spreadsheetId, tab, tabletopHeaders(tab), { fresh: true }))
+async function appendChatJournalRows(spreadsheetId: string, tab: ChatJournalTabName, rows: SheetCell[][]) {
+  const columns = await ensureNamedColumns(spreadsheetId, tab, await namedColumnsOf(spreadsheetId, tab, chatJournalHeaders(tab), { fresh: true }))
   return appendRows(spreadsheetId, namedAppendRange(tab, columns), canonicalRows(columns, rows.map((row) => row.map((cell) => typeof cell === "string" ? textCell(cell) : cell))))
 }
 
-function tabletopMapFromRow(row: string[]): TabletopMapRecord | null {
-  if (!row[0] || !row[1]) return null
-  return {
-    id: row[0],
-    pageLinked: row[1],
-    name: row[2] || "Carte sans nom",
-    backgroundUrl: row[3] || "",
-    width: tabletopNumber(row[4], 1600, 320, 12000),
-    height: tabletopNumber(row[5], 900, 240, 12000),
-    gridSize: tabletopNumber(row[6], 70, 8, 500),
-    distancePerGrid: tabletopNumber(row[7], 1, 0.01, 10000),
-    distanceUnit: row[8] || "m",
-    roomKey: row[9] || "",
-    createdByUid: row[10] || "",
-    createdAt: row[11] || "",
-    updatedAt: row[12] || "",
-    folder: row[13] || "Sans dossier",
-  }
-}
-
-function tabletopMapRow(map: TabletopMapRecord) {
-  return [map.id, map.pageLinked, map.name, map.backgroundUrl, map.width, map.height, map.gridSize, map.distancePerGrid, map.distanceUnit, map.roomKey, map.createdByUid, map.createdAt, map.updatedAt, map.folder]
-}
-
-export async function listTabletopMaps(pageLinked: string) {
-  const sheet = await ensureJdrSheet("tabletop")
-  const { rows } = await readTabletopTab(sheet.spreadsheetId, "Cartes")
-  return rows.map(tabletopMapFromRow).filter((map): map is TabletopMapRecord => Boolean(map && map.pageLinked === pageLinked))
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-}
-
-export async function getTabletopMap(id: string) {
-  const sheet = await ensureJdrSheet("tabletop")
-  const { rows } = await readTabletopTab(sheet.spreadsheetId, "Cartes")
-  const row = rows.find((candidate) => candidate[0] === id)
-  return row ? tabletopMapFromRow(row) : null
-}
-
-export async function createTabletopMap(pageLinked: string, createdByUid: string, name: string, folder = "Sans dossier") {
-  const sheet = await ensureJdrSheet("tabletop")
-  const now = new Date().toISOString()
-  const map: TabletopMapRecord = {
-    id: crypto.randomUUID(),
-    pageLinked,
-    name: name.trim().slice(0, 120) || "Nouvelle carte",
-    backgroundUrl: "",
-    width: 1600,
-    height: 900,
-    gridSize: 70,
-    distancePerGrid: 1,
-    distanceUnit: "m",
-    roomKey: crypto.randomUUID().replaceAll("-", ""),
-    createdByUid,
-    createdAt: now,
-    updatedAt: now,
-    folder: folder.trim().slice(0, 80) || "Sans dossier",
-  }
-  await appendTabletopRows(sheet.spreadsheetId, "Cartes", [tabletopMapRow(map)])
-  return map
-}
-
-export async function updateTabletopMap(id: string, patch: Partial<Pick<TabletopMapRecord, "name" | "backgroundUrl" | "width" | "height" | "gridSize" | "distancePerGrid" | "distanceUnit" | "folder">>) {
-  const sheet = await ensureJdrSheet("tabletop")
-  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Cartes", { fresh: true })
-  const index = rows.findIndex((candidate) => candidate[0] === id)
-  if (index < 0) return null
-  const current = tabletopMapFromRow(rows[index])
-  if (!current) return null
-  const next: TabletopMapRecord = {
-    ...current,
-    name: typeof patch.name === "string" ? patch.name.trim().slice(0, 120) || current.name : current.name,
-    backgroundUrl: typeof patch.backgroundUrl === "string" ? patch.backgroundUrl.slice(0, 1500) : current.backgroundUrl,
-    width: patch.width === undefined ? current.width : tabletopNumber(patch.width, current.width, 320, 12000),
-    height: patch.height === undefined ? current.height : tabletopNumber(patch.height, current.height, 240, 12000),
-    gridSize: patch.gridSize === undefined ? current.gridSize : tabletopNumber(patch.gridSize, current.gridSize, 8, 500),
-    distancePerGrid: patch.distancePerGrid === undefined ? current.distancePerGrid : tabletopNumber(patch.distancePerGrid, current.distancePerGrid, 0.01, 10000),
-    distanceUnit: typeof patch.distanceUnit === "string" ? patch.distanceUnit.trim().slice(0, 20) || current.distanceUnit : current.distanceUnit,
-    folder: typeof patch.folder === "string" ? patch.folder.trim().slice(0, 80) || "Sans dossier" : current.folder,
-    updatedAt: new Date().toISOString(),
-  }
-  // Seules les cases du changement : réécrire toute la carte remettait une distance « 1,5 »
-  // mal lue à 1, et effaçait ce qui avait changé ailleurs entre-temps.
-  const rowNumber = index + 2
-  const cell = (letter: string, value: SheetCell) => canonicalWrites("Cartes", columns, `${letter}${rowNumber}:${letter}${rowNumber}`, [[value]])
-  await updateRanges(sheet.spreadsheetId, [
-    ...(patch.name !== undefined ? cell("C", textCell(next.name)) : []),
-    ...(patch.backgroundUrl !== undefined ? cell("D", next.backgroundUrl) : []),
-    ...(patch.width !== undefined ? cell("E", next.width) : []),
-    ...(patch.height !== undefined ? cell("F", next.height) : []),
-    ...(patch.gridSize !== undefined ? cell("G", next.gridSize) : []),
-    ...(patch.distancePerGrid !== undefined ? cell("H", next.distancePerGrid) : []),
-    ...(patch.distanceUnit !== undefined ? cell("I", textCell(next.distanceUnit)) : []),
-    ...cell("M", next.updatedAt),
-    ...(patch.folder !== undefined ? cell("N", textCell(next.folder)) : []),
-  ])
-  return next
-}
-
-function tabletopFolderFromRow(row: string[]): TabletopFolderRecord | null {
-  if (!row[0] || !row[1] || !row[2]) return null
-  return {
-    id: row[0],
-    pageLinked: row[1],
-    name: row[2],
-    sortOrder: tabletopNumber(row[3], 0, 0, 100000),
-    createdAt: row[4] || "",
-    updatedAt: row[5] || "",
-  }
-}
-
-function normalizedTabletopFolder(value: string) {
-  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("fr")
-}
-
-export async function listTabletopFolders(pageLinked: string, knownMaps?: TabletopMapRecord[]) {
-  const sheet = await ensureJdrSheet("tabletop")
-  const [{ rows: folderRows }, mapRows] = await Promise.all([
-    readTabletopTab(sheet.spreadsheetId, "Dossiers"),
-    knownMaps ? Promise.resolve(null) : readTabletopTab(sheet.spreadsheetId, "Cartes").then((read) => read.rows),
-  ])
-  const stored = folderRows.map(tabletopFolderFromRow).filter((folder): folder is TabletopFolderRecord => Boolean(folder && folder.pageLinked === pageLinked))
-  const known = new Set(stored.map((folder) => normalizedTabletopFolder(folder.name)))
-  const maps = knownMaps ?? (mapRows || []).map(tabletopMapFromRow).filter((map): map is TabletopMapRecord => Boolean(map && map.pageLinked === pageLinked))
-  const derivedNames = [...new Set(maps.map((map) => map.folder || "Sans dossier"))]
-    .filter((name) => normalizedTabletopFolder(name) !== normalizedTabletopFolder("Sans dossier") && !known.has(normalizedTabletopFolder(name)))
-  const derived = derivedNames.map<TabletopFolderRecord>((name, index) => ({ id: `legacy:${encodeURIComponent(normalizedTabletopFolder(name))}`, pageLinked, name, sortOrder: 10000 + index, createdAt: "", updatedAt: "" }))
-  return [
-    { id: "__unfiled__", pageLinked, name: "Sans dossier", sortOrder: -1, createdAt: "", updatedAt: "" },
-    ...stored,
-    ...derived,
-  ].sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, "fr"))
-}
-
-export async function createTabletopFolder(pageLinked: string, name: string) {
-  const cleaned = name.trim().replace(/\s+/g, " ").slice(0, 80)
-  if (!cleaned || normalizedTabletopFolder(cleaned) === normalizedTabletopFolder("Sans dossier")) return (await listTabletopFolders(pageLinked))[0]
-  const folders = await listTabletopFolders(pageLinked)
-  const existing = folders.find((folder) => normalizedTabletopFolder(folder.name) === normalizedTabletopFolder(cleaned))
-  if (existing && !existing.id.startsWith("legacy:")) return existing
-  const sheet = await ensureJdrSheet("tabletop")
-  const now = new Date().toISOString()
-  const folder: TabletopFolderRecord = { id: crypto.randomUUID(), pageLinked, name: cleaned, sortOrder: Math.max(0, ...folders.map((item) => item.sortOrder)) + 1, createdAt: now, updatedAt: now }
-  await appendTabletopRows(sheet.spreadsheetId, "Dossiers", [[folder.id, folder.pageLinked, folder.name, folder.sortOrder, folder.createdAt, folder.updatedAt]])
-  return folder
-}
-
-export async function renameTabletopFolder(pageLinked: string, folderId: string, currentName: string, name: string) {
-  const cleaned = name.trim().replace(/\s+/g, " ").slice(0, 80)
-  if (!cleaned || normalizedTabletopFolder(cleaned) === normalizedTabletopFolder("Sans dossier")) throw new Error("INVALID_TABLETOP_FOLDER")
-  const sheet = await ensureJdrSheet("tabletop")
-  const [{ columns: folderColumns, rows: folderRows }, { columns: mapColumns, rows: mapRows }] = await Promise.all([
-    readTabletopTab(sheet.spreadsheetId, "Dossiers", { fresh: true }),
-    readTabletopTab(sheet.spreadsheetId, "Cartes", { fresh: true }),
-  ])
-  const folderIndex = folderRows.findIndex((row) => row[0] === folderId && row[1] === pageLinked)
-  const storedFolder = folderIndex >= 0 ? tabletopFolderFromRow(folderRows[folderIndex]) : null
-  const oldName = storedFolder?.name || currentName.trim()
-  if (!oldName || normalizedTabletopFolder(oldName) === normalizedTabletopFolder("Sans dossier")) throw new Error("INVALID_TABLETOP_FOLDER")
-  const normalizedOldName = normalizedTabletopFolder(oldName)
-  const duplicate = folderRows.map(tabletopFolderFromRow).some((folder) => folder?.pageLinked === pageLinked && folder.id !== folderId && normalizedTabletopFolder(folder.name) === normalizedTabletopFolder(cleaned))
-    || mapRows.map(tabletopMapFromRow).some((map) => map?.pageLinked === pageLinked && normalizedTabletopFolder(map.folder) !== normalizedOldName && normalizedTabletopFolder(map.folder) === normalizedTabletopFolder(cleaned))
-  if (duplicate) throw new Error("TABLETOP_FOLDER_EXISTS")
-  const now = new Date().toISOString()
-  const updates: Array<{ range: string; values: SheetCell[][] }> = []
-  let folder: TabletopFolderRecord
-  if (storedFolder) {
-    folder = { ...storedFolder, name: cleaned, updatedAt: now }
-    updates.push(...canonicalWrites("Dossiers", folderColumns, `C${folderIndex + 2}:C${folderIndex + 2}`, [[textCell(folder.name)]]), ...canonicalWrites("Dossiers", folderColumns, `F${folderIndex + 2}:F${folderIndex + 2}`, [[folder.updatedAt]]))
-  } else {
-    folder = await createTabletopFolder(pageLinked, cleaned)
-  }
-  mapRows.forEach((row, index) => {
-    const map = tabletopMapFromRow(row)
-    if (map?.pageLinked === pageLinked && normalizedTabletopFolder(map.folder) === normalizedTabletopFolder(oldName)) {
-      updates.push(...canonicalWrites("Cartes", mapColumns, `M${index + 2}:N${index + 2}`, [[now, textCell(cleaned)]]))
-    }
-  })
-  if (updates.length) await updateRanges(sheet.spreadsheetId, updates)
-  return folder
-}
-
-export async function deleteTabletopFolder(pageLinked: string, folderId: string, currentName: string) {
-  const sheet = await ensureJdrSheet("tabletop")
-  const [{ columns: folderColumns, rows: folderRows }, { columns: mapColumns, rows: mapRows }] = await Promise.all([
-    readTabletopTab(sheet.spreadsheetId, "Dossiers", { fresh: true }),
-    readTabletopTab(sheet.spreadsheetId, "Cartes", { fresh: true }),
-  ])
-  const folderIndex = folderRows.findIndex((row) => row[0] === folderId && row[1] === pageLinked)
-  const storedFolder = folderIndex >= 0 ? tabletopFolderFromRow(folderRows[folderIndex]) : null
-  const oldName = storedFolder?.name || currentName.trim()
-  if (!oldName || normalizedTabletopFolder(oldName) === normalizedTabletopFolder("Sans dossier")) return false
-  const now = new Date().toISOString()
-  const updates: Array<{ range: string; values: SheetCell[][] }> = []
-  if (folderIndex >= 0) updates.push(...canonicalWrites("Dossiers", folderColumns, `A${folderIndex + 2}:F${folderIndex + 2}`, [["", "", "", "", "", ""]]))
-  mapRows.forEach((row, index) => {
-    const map = tabletopMapFromRow(row)
-    if (map?.pageLinked === pageLinked && normalizedTabletopFolder(map.folder) === normalizedTabletopFolder(oldName)) {
-      updates.push(...canonicalWrites("Cartes", mapColumns, `M${index + 2}:N${index + 2}`, [[now, "Sans dossier"]]))
-    }
-  })
-  if (updates.length) await updateRanges(sheet.spreadsheetId, updates)
-  return true
-}
-
-export async function copyTabletopMapToPage(sourceMapId: string, targetPageLinked: string, createdByUid: string, folder: string, allowedEntityKeys: Set<string>) {
-  const source = await getTabletopMap(sourceMapId)
-  if (!source) return null
-  let copy = await createTabletopMap(targetPageLinked, createdByUid, `${source.name} — copie`, folder || source.folder)
-  const backgroundUrl = source.backgroundUrl.startsWith("/api/tabletop/background/") ? "" : source.backgroundUrl
-  copy = (await updateTabletopMap(copy.id, { backgroundUrl, width: source.width, height: source.height, gridSize: source.gridSize, distancePerGrid: source.distancePerGrid, distanceUnit: source.distanceUnit })) || copy
-  const sourceTokens = await listTabletopTokens(source.id)
-  for (const token of sourceTokens) {
-    if (token.entityKind !== "marker" && !allowedEntityKeys.has(`${token.entityKind}:${token.entityId}`)) continue
-    await addTabletopToken(copy.id, token.entityKind, token.entityKind === "marker" ? crypto.randomUUID() : token.entityId, token.x, token.y, token.label, token.icon, token.scale, token.iconScale, token.color)
-  }
-  return copy
-}
-
-function tabletopTokenFromRow(row: string[]): TabletopTokenRecord | null {
-  if (!row[0] || !row[1] || !["npc", "character", "shop", "marker"].includes(row[2]) || !row[3]) return null
-  return {
-    id: row[0],
-    mapId: row[1],
-    entityKind: row[2] as TabletopTokenRecord["entityKind"],
-    entityId: row[3],
-    x: tabletopNumber(row[4], 0, -12000, 24000),
-    y: tabletopNumber(row[5], 0, -12000, 24000),
-    createdAt: row[6] || "",
-    updatedAt: row[7] || "",
-    label: row[8] || "",
-    icon: row[9] || "",
-    scale: tabletopNumber(row[10], 1, 0.35, 3),
-    iconScale: tabletopNumber(row[11], 1, 0.45, 2.25),
-    color: /^#[0-9a-f]{6}$/i.test(row[12] || "") ? row[12] : "#7f3430",
-  }
-}
-
-export async function listTabletopTokens(mapId: string) {
-  const sheet = await ensureJdrSheet("tabletop")
-  const { rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens")
-  return rows.map(tabletopTokenFromRow).filter((token): token is TabletopTokenRecord => Boolean(token && token.mapId === mapId))
-}
-
-export async function addTabletopToken(mapId: string, entityKind: TabletopTokenRecord["entityKind"], entityId: string, x: number, y: number, label = "", icon = "", scale = 1, iconScale = 1, color = "#7f3430") {
-  const sheet = await ensureJdrSheet("tabletop")
-  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens", { fresh: true })
-  const existing = rows.map(tabletopTokenFromRow).find((token) => token?.mapId === mapId && token.entityKind === entityKind && token.entityId === entityId)
-  if (existing) return existing
-  const now = new Date().toISOString()
-  const token: TabletopTokenRecord = {
-    id: crypto.randomUUID(), mapId, entityKind, entityId,
-    x: tabletopNumber(x, 800, -12000, 24000), y: tabletopNumber(y, 450, -12000, 24000),
-    createdAt: now, updatedAt: now, label: label.trim().slice(0, 120), icon: icon.trim().slice(0, 20),
-    scale: tabletopNumber(scale, 1, 0.35, 3), iconScale: tabletopNumber(iconScale, 1, 0.45, 2.25),
-    color: /^#[0-9a-f]{6}$/i.test(color) ? color : "#7f3430",
-  }
-  await appendTabletopRows(sheet.spreadsheetId, "Tokens", [[token.id, token.mapId, token.entityKind, token.entityId, token.x, token.y, token.createdAt, token.updatedAt, token.label, token.icon, token.scale, token.iconScale, token.color]], columns)
-  return token
-}
-
-export async function moveTabletopToken(mapId: string, tokenId: string, x: number, y: number) {
-  const sheet = await ensureJdrSheet("tabletop")
-  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens", { fresh: true })
-  const index = rows.findIndex((candidate) => candidate[0] === tokenId && candidate[1] === mapId)
-  if (index < 0) return null
-  const token = tabletopTokenFromRow(rows[index])
-  if (!token) return null
-  const next = { ...token, x: tabletopNumber(x, token.x, -12000, 24000), y: tabletopNumber(y, token.y, -12000, 24000), updatedAt: new Date().toISOString() }
-  await updateRanges(sheet.spreadsheetId, [
-    ...canonicalWrites("Tokens", columns, `E${index + 2}:F${index + 2}`, [[next.x, next.y]]),
-    ...canonicalWrites("Tokens", columns, `H${index + 2}:H${index + 2}`, [[next.updatedAt]]),
-  ])
-  return next
-}
-
-export async function updateTabletopTokenAppearance(mapId: string, tokenId: string, patch: Partial<Pick<TabletopTokenRecord, "scale" | "iconScale" | "label" | "icon" | "color">>) {
-  const sheet = await ensureJdrSheet("tabletop")
-  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens", { fresh: true })
-  const index = rows.findIndex((candidate) => candidate[0] === tokenId && candidate[1] === mapId)
-  if (index < 0) return null
-  const token = tabletopTokenFromRow(rows[index])
-  if (!token) return null
-  const next = {
-    ...token,
-    scale: patch.scale === undefined ? token.scale : tabletopNumber(patch.scale, token.scale, 0.35, 3),
-    iconScale: patch.iconScale === undefined ? token.iconScale : tabletopNumber(patch.iconScale, token.iconScale, 0.45, 2.25),
-    label: typeof patch.label === "string" ? patch.label.trim().slice(0, 120) : token.label,
-    icon: typeof patch.icon === "string" ? patch.icon.trim().slice(0, 20) || "✦" : token.icon,
-    color: typeof patch.color === "string" && /^#[0-9a-f]{6}$/i.test(patch.color) ? patch.color : token.color,
-    updatedAt: new Date().toISOString(),
-  }
-  await updateRanges(sheet.spreadsheetId, tokenWrites(columns, index + 2, patch, next))
-  return next
-}
-
-/**
- * Les cases d'un pion que le changement touche, et elles seules : réécrire l'échelle de
- * l'icône avec celle du pion remettait l'autre à sa valeur lue (1 quand « 1,25 » était mal
- * lu). Le nom reste du texte.
- */
-function tokenWrites(columns: SheetColumns, rowNumber: number, patch: Partial<TabletopTokenRecord>, next: TabletopTokenRecord) {
-  const cell = (letter: string, value: SheetCell) => canonicalWrites("Tokens", columns, `${letter}${rowNumber}:${letter}${rowNumber}`, [[value]])
-  return [
-    ...(patch.x !== undefined ? cell("E", next.x) : []),
-    ...(patch.y !== undefined ? cell("F", next.y) : []),
-    ...cell("H", next.updatedAt),
-    ...(patch.label !== undefined ? cell("I", textCell(next.label)) : []),
-    ...(patch.icon !== undefined ? cell("J", textCell(next.icon)) : []),
-    ...(patch.scale !== undefined ? cell("K", next.scale) : []),
-    ...(patch.iconScale !== undefined ? cell("L", next.iconScale) : []),
-    ...(patch.color !== undefined ? cell("M", next.color) : []),
-  ]
-}
-
-export async function updateTabletopTokenStates(mapId: string, patches: Array<{ tokenId: string } & Partial<Pick<TabletopTokenRecord, "x" | "y" | "scale" | "iconScale" | "label" | "icon" | "color">>>) {
-  if (!patches.length) return []
-  const sheet = await ensureJdrSheet("tabletop")
-  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens", { fresh: true })
-  const updates: Array<{ range: string; values: SheetCell[][] }> = []
-  const saved: TabletopTokenRecord[] = []
-  for (const patch of patches) {
-    const index = rows.findIndex((candidate) => candidate[0] === patch.tokenId && candidate[1] === mapId)
-    if (index < 0) continue
-    const token = tabletopTokenFromRow(rows[index])
-    if (!token) continue
-    const next: TabletopTokenRecord = {
-      ...token,
-      x: patch.x === undefined ? token.x : tabletopNumber(patch.x, token.x, -12000, 24000),
-      y: patch.y === undefined ? token.y : tabletopNumber(patch.y, token.y, -12000, 24000),
-      scale: patch.scale === undefined ? token.scale : tabletopNumber(patch.scale, token.scale, 0.35, 3),
-      iconScale: patch.iconScale === undefined ? token.iconScale : tabletopNumber(patch.iconScale, token.iconScale, 0.45, 2.25),
-      label: typeof patch.label === "string" ? patch.label.trim().slice(0, 120) : token.label,
-      icon: typeof patch.icon === "string" ? patch.icon.trim().slice(0, 20) || "✦" : token.icon,
-      color: typeof patch.color === "string" && /^#[0-9a-f]{6}$/i.test(patch.color) ? patch.color : token.color,
-      updatedAt: new Date().toISOString(),
-    }
-    updates.push(...tokenWrites(columns, index + 2, patch, next))
-    saved.push(next)
-  }
-  if (updates.length) await updateRanges(sheet.spreadsheetId, updates)
-  return saved
-}
-
-export async function removeTabletopToken(mapId: string, tokenId: string) {
-  const sheet = await ensureJdrSheet("tabletop")
-  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens", { fresh: true })
-  const index = rows.findIndex((candidate) => candidate[0] === tokenId && candidate[1] === mapId)
-  if (index < 0) return false
-  await updateRanges(sheet.spreadsheetId, canonicalWrites("Tokens", columns, `A${index + 2}:M${index + 2}`, [Array(13).fill("")]))
-  return true
-}
-
-function tabletopActivityFromRow(row: string[]): TabletopActivityRecord | null {
+function chatActivityFromRow(row: string[]): ChatActivityRecord | null {
   if (!row[0] || !row[1] || (row[2] !== "chat" && row[2] !== "dice")) return null
   return {
     id: row[0], mapId: row[1], kind: row[2], authorUid: row[3] || "", authorName: row[4] || "Joueur",
@@ -5390,16 +5003,17 @@ function tabletopActivityFromRow(row: string[]): TabletopActivityRecord | null {
   }
 }
 
-export async function listTabletopActivities(mapId: string, limit = 200) {
+/** Les derniers messages d'un salon du chat (`chat:<canal>`), du plus ancien au plus récent. */
+export async function listChatActivities(roomId: string, limit = 200) {
   const sheet = await ensureJdrSheet("tabletop")
-  const { rows } = await readTabletopTab(sheet.spreadsheetId, "Journal")
-  return rows.map(tabletopActivityFromRow).filter((activity): activity is TabletopActivityRecord => Boolean(activity && activity.mapId === mapId))
+  const { rows } = await readChatJournalTab(sheet.spreadsheetId, "Journal")
+  return rows.map(chatActivityFromRow).filter((activity): activity is ChatActivityRecord => Boolean(activity && activity.mapId === roomId))
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt)).slice(-Math.max(1, Math.min(500, limit)))
 }
 
-export async function saveTabletopActivity(activity: TabletopActivityRecord) {
+export async function saveChatActivity(activity: ChatActivityRecord) {
   const sheet = await ensureJdrSheet("tabletop")
-  await appendTabletopRows(sheet.spreadsheetId, "Journal", [[
+  await appendChatJournalRows(sheet.spreadsheetId, "Journal", [[
     activity.id, activity.mapId, activity.kind, activity.authorUid, activity.authorName,
     activity.text, activity.diceExpression, activity.diceResult, activity.createdAt,
     activity.audience, activity.recipientId, activity.recipientName,
@@ -5433,19 +5047,32 @@ export async function characterSheetSummaries() {
   return summaries
 }
 
-/** Le pion d'une fiche, d'après ses cases lues par leur en-tête. */
-function tabletopCharacterEntityOf(id: string, cell: (name: string) => string, ownerUid: string): TabletopEntityRecord {
+/** Un personnage tel que le pont Roll20 le pose en token : nom, profil, portrait, vie, rapidité, joueur. */
+export type CharacterTokenSummary = {
+  id: string
+  kind: "character"
+  name: string
+  subtitle: string
+  portrait: string
+  currentHp: number
+  totalHp: number
+  speed: number
+  ownerUid: string
+}
+
+/** Le résumé d'une fiche, d'après ses cases lues par leur en-tête. */
+function characterTokenSummaryOf(id: string, cell: (name: string) => string, ownerUid: string): CharacterTokenSummary {
   return {
     id,
     kind: "character",
     name: cell("Nom personnage") || "Personnage sans nom",
-    // Classe et peuple sont parfois des listes (JSON) : lisibles, jamais « ["…"] ». Le pion est
+    // Classe et peuple sont parfois des listes (JSON) : lisibles, jamais « ["…"] ». Le token est
     // partagé avec toute la table : seule la classe publique y figure (cachée : « Aucune classe »).
     subtitle: [publicClassText(cell("Classe"), cell(characterValueHeaders[characterClassChoicesIndex])), displayedMultipleValue(cell("Peuple"), "all")].filter(Boolean).join(" · "),
     portrait: cell("Portrait") || `/api/characters/portrait/${encodeURIComponent(id)}`,
-    currentHp: tabletopNumber(cell("Vie actuelle"), 0, 0, 99999),
-    totalHp: tabletopNumber(cell("Vie totale"), 0, 0, 99999),
-    speed: tabletopNumber(cell("Rapidité"), 0, 0, 99999),
+    currentHp: boundedSheetNumber(cell("Vie actuelle"), 0, 0, 99999),
+    totalHp: boundedSheetNumber(cell("Vie totale"), 0, 0, 99999),
+    speed: boundedSheetNumber(cell("Rapidité"), 0, 0, 99999),
     ownerUid,
   }
 }
@@ -5464,7 +5091,7 @@ export type CharacterGroupStats = {
 /**
  * La vie, les états et la bourse de chaque personnage, pour le tableau du groupe du dossier de
  * campagne. Deux lectures gardées en mémoire et partagées avec le reste d'Eraser (les colonnes
- * que lit le tabletop, l'inventaire), aucune écriture : une partie illisible reste vide.
+ * que lit le pont Roll20, l'inventaire), aucune écriture : une partie illisible reste vide.
  */
 export async function listCharacterGroupStats(ids: string[]): Promise<Record<string, CharacterGroupStats>> {
   const selected = new Set(ids)
@@ -5502,46 +5129,26 @@ export async function listCharacterGroupStats(ids: string[]): Promise<Record<str
   }))
 }
 
-export async function listTabletopCharacterEntitiesByIds(ids: string[]) {
+/** Les personnages demandés, pour le pont Roll20 (une lecture gardée en mémoire de la feuille). */
+export async function listCharacterTokenSummaries(ids: string[]) {
   const selected = new Set(ids)
   if (!selected.size) return []
   const source = await charactersSource()
   if (!source) return []
   const [{ columns, rows }, owners] = await Promise.all([
     readCharacterColumns(source, ["Nom personnage", "Peuple", "Classe", "Vie actuelle", "Vie totale", "Rapidité", "Portrait", characterValueHeaders[characterClassChoicesIndex]]),
-    // Le joueur de chaque pion (qui peut le contrôler) vient de l'index local, relu frais dans
-    // la feuille : une colonne « Joueur » gardée en mémoire à part de la colonne ID pouvait
-    // dater d'avant une ligne supprimée ailleurs, et donner le pion d'un voisin.
+    // Le joueur de chaque personnage vient de l'index local, relu frais dans la feuille : une
+    // colonne « Joueur » gardée en mémoire à part de la colonne ID pouvait dater d'avant une
+    // ligne supprimée ailleurs, et donner le personnage d'un voisin.
     getDb().select({ id: characterIndex.id, ownerUid: characterIndex.ownerUid }).from(characterIndex).where(inArray(characterIndex.id, [...selected])),
   ])
   const ownerOf = new Map(owners.map((owner) => [owner.id, owner.ownerUid]))
-  return rows.flatMap<TabletopEntityRecord>((row) => {
+  return rows.flatMap<CharacterTokenSummary>((row) => {
     const id = columns.get(row, "ID")
-    return selected.has(id) ? [tabletopCharacterEntityOf(id, (name) => columns.get(row, name), ownerOf.get(id) ?? "")] : []
+    return selected.has(id) ? [characterTokenSummaryOf(id, (name) => columns.get(row, name), ownerOf.get(id) ?? "")] : []
   })
 }
 
-/** Le pion d'une fiche relue fraîche (après une écriture) : rien n'y vient d'une colonne gardée en mémoire. */
-export function tabletopCharacterEntity(character: CharacterSheetRecord) {
-  return tabletopCharacterEntityOf(character.id, (name) => character.values[character.headers.indexOf(name)] ?? "", character.ownerUid)
-}
-
-export async function listTabletopNpcEntitiesByIds(ids: string[], pageLinked = "bac-a-sable") {
-  const selected = new Set(ids)
-  if (!selected.size) return []
-  const npcs = await listNpcs(pageLinked)
-  return npcs.filter((npc) => selected.has(npc.id)).map<TabletopEntityRecord>((npc) => ({
-    id: npc.id,
-    kind: "npc",
-    name: npc.name,
-    subtitle: "PNJ",
-    portrait: npc.portrait,
-    currentHp: npc.currentHp,
-    totalHp: npc.totalHp,
-    speed: 0,
-    ownerUid: npc.createdByUid,
-  }))
-}
 
 export type CharacterRelationRecord = {
   id: string

@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server"
 
-import { saveTabletopActivity } from "@/lib/google-sheets"
+import { saveChatActivity } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
 import { chatAuthorName } from "@/lib/chat-accounts"
-import { accountRecipientPrefix, chatRoomId, getChatBootstrapForAccount, listChatCampaignsForAccount, privateRecipientPrefix } from "@/lib/tabletop-access"
-import type { TabletopActivityKind } from "@/lib/tabletop-schema"
+import { accountRecipientPrefix, chatRoomId, getChatBootstrapForAccount, listChatCampaignsForAccount, privateRecipientPrefix } from "@/lib/campaign-chat"
+import type { ChatActivityKind } from "@/lib/chat-activity"
 
 function text(value: unknown, maximum: number) {
   return typeof value === "string" ? value.trim().slice(0, maximum) : ""
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
     if (!pageLinked) throw new Error("INVALID_CAMPAIGN")
     const bootstrap = await getChatBootstrapForAccount(account, pageLinked)
     if (!bootstrap) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
-    const kind: TabletopActivityKind | null = body.kind === "chat" || body.kind === "dice" ? body.kind : null
+    const kind: ChatActivityKind | null = body.kind === "chat" || body.kind === "dice" ? body.kind : null
     if (!kind) throw new Error("INVALID_ACTIVITY")
     // Où qu'on écrive, le chat affiche le nom du compte.
     const authorName = chatAuthorName(account)
@@ -61,7 +61,7 @@ export async function POST(request: Request) {
       recipientName: audience === "character" ? text(body.recipientName, 120) : "",
     }
     if (kind === "chat" && !activity.text) throw new Error("EMPTY_MESSAGE")
-    await saveTabletopActivity(activity)
+    await saveChatActivity(activity)
     return NextResponse.json({ activity })
   } catch {
     return NextResponse.json({ error: "Le message n’a pas pu être envoyé." }, { status: 400 })

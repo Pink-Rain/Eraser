@@ -26,7 +26,6 @@ const vite = await createServer({
 after(async () => { await vite.close(); rmSync(dataDir, { recursive: true, force: true }); });
 const google = await vite.ssrLoadModule(fake);
 const sheets = await vite.ssrLoadModule("/lib/google-sheets.ts");
-const tabletop = await vite.ssrLoadModule("/lib/tabletop-access.ts");
 const { getDb } = await vite.ssrLoadModule("/db/index.ts");
 const schema = await vite.ssrLoadModule("/db/schema.ts");
 const jdr = await vite.ssrLoadModule("/lib/jdr-sheets.ts");
@@ -36,7 +35,6 @@ const { characterSheetHeaders, characterSecondaryCalculationHeaders, characterSe
 let serial = 0;
 const fresh = (name) => `${name}-${++serial}`;
 const headers = [...characterSheetHeaders];
-const admin = { uid: "admin-1", role: "admin", accountRole: "admin", email: "", displayName: "Admin" };
 
 async function link(key, spreadsheetId, tabName) {
   await jdr.saveJdrSheet({ key, spreadsheetId, name: key, tabName, webViewLink: "" });
@@ -80,26 +78,17 @@ beforeEach(async () => {
   await db.delete(schema.campaignCharacters);
 });
 
-test("Tabletop : seule la vie changée est écrite, « 12,5 » reste « 12,5 »", async () => {
+test("Roll20 : un personnage lu avec sa vie en décimales et le joueur de l'index local", async () => {
   const id = fresh("PERSO");
   const characters = await linkCharacters([{ "ID": id, "Joueur": "uid-1", "Nom personnage": "Aldor", "Vie actuelle": "10", "Vie totale": "12,5" }]);
   await sheets.syncExistingIdentityIndexes();
-  const before = copyOf(google.grid(characters, "Personnages"));
-  const entity = await tabletop.updateTabletopEntityHp(admin, "bac-a-sable", "character", id, { currentHp: 9 });
-  // Les colonnes du déplacement (liste d'origine) arrivent une fois, à droite : elles ne comptent pas ici.
-  const movement = new Set(["Action de déplacement gratuite", "Action de déplacement mineure", "Action de déplacement majeure"]);
-  assert.deepEqual(changedCells(before, google.grid(characters, "Personnages")).filter((cell) => !movement.has(cell.slice(2))), ["1:Vie actuelle"]);
-  assert.equal(record(google.grid(characters, "Personnages"), 1)["Vie actuelle"], "9");
-  assert.equal(record(google.grid(characters, "Personnages"), 1)["Vie totale"], "12,5");
-  assert.equal(entity.currentHp, 9);
-  assert.equal(entity.totalHp, 12.5);
-  assert.equal(entity.ownerUid, "uid-1");
-  // Une valeur illisible n'écrit rien.
-  assert.equal(await tabletop.updateTabletopEntityHp(admin, "bac-a-sable", "character", id, { currentHp: "beaucoup" }), null);
-  assert.equal(record(google.grid(characters, "Personnages"), 1)["Vie actuelle"], "9");
-  // Le joueur d'un pion (qui peut le contrôler) vient de l'index local, pas d'une colonne lue à part.
+  const [summary] = await sheets.listCharacterTokenSummaries([id]);
+  assert.equal(summary.name, "Aldor");
+  assert.equal(summary.currentHp, 10);
+  assert.equal(summary.totalHp, 12.5);
+  // Le joueur vient de l'index local, pas d'une colonne lue à part.
   google.grid(characters, "Personnages")[1][headers.indexOf("Joueur")] = "uid-2";
-  assert.equal((await sheets.listTabletopCharacterEntitiesByIds([id]))[0].ownerUid, "uid-1");
+  assert.equal((await sheets.listCharacterTokenSummaries([id]))[0].ownerUid, "uid-1");
 });
 
 test("Fiche ouverte après une ligne supprimée ailleurs : le bon personnage, seules ses formules réparées", async () => {

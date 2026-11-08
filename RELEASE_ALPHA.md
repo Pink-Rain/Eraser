@@ -1,19 +1,17 @@
-# Eraser 0.1.1-alpha.272 — Des extensions qui se posent toutes seules
+# Eraser 0.1.1-alpha.273 — Le tabletop fait ses valises
 
-Cette version arrive **sans réinstallation** (même enveloppe que l'alpha 271) : Eraser la
-télécharge, redémarre son serveur et recharge la page tout seul. Rien ne change dans Google Sheets.
+Cette version arrive **sans réinstallation** (même enveloppe que l'alpha 272) : Eraser la
+télécharge, redémarre son serveur et recharge la page tout seul. Rien n'est effacé dans Google
+Sheets ni dans le Drive.
 
-- **Administration › Extensions** : une nouvelle page liste les extensions liées à Eraser :
-  Eraser Doc (documents de campagne), Eraser Map (tabletop) et Eraser Page (atelier des pages).
-  Chacune vit dans son propre dépôt GitHub. Pour chacune, l'admin coche qui la reçoit
-  automatiquement : joueurs, MJ, admins. Par défaut, personne.
-- **Téléchargement et mises à jour automatiques** : dès qu'une extension publie une version, les
-  ordinateurs des rôles cochés la téléchargent tout seuls (au lancement d'Eraser, quelques
-  minutes après un changement de l'admin, puis toutes les six heures), vérifient qu'elle n'a pas
-  été altérée et la mettent à jour sans réinstaller Eraser. Une version abîmée est refusée et
-  l'ancienne reste en place.
-- **Une adresse par extension** : une extension installée s'ouvre dans Eraser, avec sa barre
-  latérale, à l'adresse `/extension/map` (ou `doc`, `page`) ; le bouton « Ouvrir » de la page
-  d'administration y mène.
-- Les trois extensions n'ont pas encore de version publiée : la page l'indique. Rien n'est
-  téléchargé tant qu'elles n'existent pas.
+- **Le tabletop quitte Eraser** : ses pages (Bac à sable › Tabletop, le tabletop des
+  campagnes), ses liens dans le menu, l'accueil et le bac à sable, et tout son code sont
+  retirés. Il renaîtra dans l'extension **Eraser Map**, sur de nouveaux principes.
+- **Le chat ne change pas** : mêmes canaux (Général, bac à sable des MJ, campagnes), mêmes
+  messages et jets de dés, même historique. Il le gardait déjà dans l'onglet « Journal » du
+  classeur Google « Tabletop » : ce classeur reste donc en place (ne pas le supprimer du
+  Drive). Ses anciens onglets de cartes, de tokens et de dossiers ne sont plus lus, mais rien
+  n'y est effacé.
+- **Roll20 ne change pas** : le pont lit toujours les personnages de la même façon.
+- Eraser est un peu plus léger : la bibliothèque de cartes Leaflet, qui ne servait qu'au
+  tabletop, n'est plus embarquée.

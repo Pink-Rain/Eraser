@@ -36,7 +36,7 @@ test("Menu d'Eraser par défaut : chaque rôle voit ses entrées, comme avant l'
   const mj = menu.resolveMenu(null, { role: "mj", pages: {} });
   // Le créateur de pages (« Pages ») n'est qu'au menu des administrateurs.
   assert.deepEqual(mj.map((item) => item.key), ["accueil", "dossier", "regles", "index-rouges", "index", "bac-a-sable"]);
-  assert.deepEqual(mj.find((item) => item.key === "bac-a-sable").children.map((child) => child.key), ["bac-a-sable/tabletop", "bac-a-sable/magasin", "bac-a-sable/pnjs"]);
+  assert.deepEqual(mj.find((item) => item.key === "bac-a-sable").children.map((child) => child.key), ["bac-a-sable/magasin", "bac-a-sable/pnjs"]);
   const admin = menu.resolveMenu(null, { role: "admin", pages: {} });
   // « Pages » (après le Bac à sable, jamais dedans) : son « + » crée une page.
   assert.deepEqual(admin.find((item) => item.key === "pages").action, { href: "/pages?nouvelle=1", label: "Nouvelle page" });

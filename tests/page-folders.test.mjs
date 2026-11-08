@@ -104,9 +104,9 @@ test("Explorateur : pages d'Eraser et pages créées sous la même forme, une se
   ], [
     eraserEntry("/regles/combat", "Combat", "Règles", { id: "p-combat", title: "Combat", status: "brouillon", mode: "replace", unpublished: true }),
     eraserEntry("/campagne/[id]/journal", "Journal d’une campagne", "Campagnes", { id: "p-journal", title: "Journal", status: "brouillon", mode: "replace", unpublished: true }),
-    eraserEntry("/bac-a-sable/tabletop", "Tabletop", "Bac à sable"),
+    eraserEntry("/bac-a-sable/magasin", "Magasin", "Bac à sable"),
   ]);
-  assert.deepEqual(rows.map((row) => row.key).sort(), ["eraser:/bac-a-sable/tabletop", "eraser:/campagne/[id]/journal", "eraser:/regles/combat", "p-guide"]);
+  assert.deepEqual(rows.map((row) => row.key).sort(), ["eraser:/bac-a-sable/magasin", "eraser:/campagne/[id]/journal", "eraser:/regles/combat", "p-guide"]);
   const combat = rows.find((row) => row.key === "eraser:/regles/combat");
   assert.equal(combat.href, "/regles/combat");
   assert.equal(combat.status, "publiee");
@@ -116,10 +116,10 @@ test("Explorateur : pages d'Eraser et pages créées sous la même forme, une se
   assert.equal(journal.status, "publiee");
   assert.equal(journal.unpublished, true);
   assert.equal(journal.visitable, false);
-  const tabletop = rows.find((row) => row.key === "eraser:/bac-a-sable/tabletop");
-  assert.equal(tabletop.id, "");
-  assert.equal(tabletop.editable, true);
-  assert.equal(tabletop.status, "publiee");
+  const shop = rows.find((row) => row.key === "eraser:/bac-a-sable/magasin");
+  assert.equal(shop.id, "");
+  assert.equal(shop.editable, true);
+  assert.equal(shop.status, "publiee");
 });
 
 test("Explorateur : une reprise mise à la corbeille rend la page d'Eraser, rangée au même endroit", () => {
@@ -133,12 +133,12 @@ test("Explorateur : une reprise mise à la corbeille rend la page d'Eraser, rang
 });
 
 test("Ranger par section : un dossier par groupe, ceux de la racine réutilisés, les pages rangées ne bougent pas", () => {
-  const rows = explorer.explorerPages([summary({ id: "p-guide", title: "Guide", place: "regles" }), summary({ id: "p-note", title: "Note", place: "hors-menu" })], [eraserEntry("/regles/combat", "Combat", "Règles"), eraserEntry("/bac-a-sable/tabletop", "Tabletop", "Bac à sable")]);
+  const rows = explorer.explorerPages([summary({ id: "p-guide", title: "Guide", place: "regles" }), summary({ id: "p-note", title: "Note", place: "hors-menu" })], [eraserEntry("/regles/combat", "Combat", "Règles"), eraserEntry("/bac-a-sable/magasin", "Magasin", "Bac à sable")]);
   const state = folders.applyFolderOps(folders.emptyFolders(), [{ op: "create", id: "d-regles", name: "Règles", parent: "" }, { op: "create", id: "d-perso", name: "Perso", parent: "" }, { op: "place", keys: ["p-note"], folder: "d-perso" }]);
   let next = 0;
   const plan = explorer.sectionFolderPlan(rows, state, () => `d-neuf${next += 1}`);
   assert.deepEqual(plan.create, [{ id: "d-neuf1", name: "Bac à sable" }]);
-  assert.deepEqual(plan.place.map((entry) => [entry.folder, entry.keys.sort()]), [["d-regles", ["eraser:/regles/combat", "p-guide"]], ["d-neuf1", ["eraser:/bac-a-sable/tabletop"]]]);
+  assert.deepEqual(plan.place.map((entry) => [entry.folder, entry.keys.sort()]), [["d-regles", ["eraser:/regles/combat", "p-guide"]], ["d-neuf1", ["eraser:/bac-a-sable/magasin"]]]);
 });
 
 test("Recherche de l'explorateur : titre, adresse et chemin du dossier, sans accents", () => {

@@ -690,9 +690,9 @@ export function isClassRankHeader(header: string, classNames: readonly string[] 
 /** Pourquoi le code d'Eraser lit une colonne d'un index d'entités (son verrou dans « Modifier »). */
 function entityReaders(index: EntityWorldIndexKey, header: string, context: WorldPolicyContext): string[] {
   const among = (headers: readonly string[]) => headers.some((candidate) => foldName(candidate) === foldName(header))
-  if (index === "npcs" && among(npcSheetHeaders)) return ["Les PNJ des campagnes, les sessions, le groupe des joueurs, les tokens du tabletop et le pont Roll20 lisent cette colonne par son nom."]
+  if (index === "npcs" && among(npcSheetHeaders)) return ["Les PNJ des campagnes, les sessions, le groupe des joueurs et le pont Roll20 lisent cette colonne par son nom."]
   if (index === "campaigns" && among(campaignSheetHeaders)) return ["Les campagnes (tableau de bord, accès des joueurs, couleur, bannière) lisent cette colonne par son nom."]
-  if (index === "characters" && among(characterIndexHeaders)) return ["La fiche de personnage, les campagnes et le tabletop lisent cette colonne par son nom."]
+  if (index === "characters" && among(characterIndexHeaders)) return ["La fiche de personnage, les campagnes et le pont Roll20 lisent cette colonne par son nom."]
   if (index === "classes" && among(classSheetHeaders)) return ["Les pages de classes, la création de personnage et les statistiques lisent cette colonne par son nom."]
   if (index === "rank-bonuses" && among(RANK_BONUS_HEADERS)) return ["La fiche de personnage lit cette colonne par son nom au passage de rang (cibles, valeurs, choix, sort sur mesure)."]
   // Une colonne de rang porte l'ID ou le nom de sa classe ; « Compétence » est lue sous plusieurs noms.

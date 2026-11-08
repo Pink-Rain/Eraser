@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm"
 
 import { getDb } from "@/db"
 import { roll20CampaignLinks } from "@/db/schema"
-import { companionNpcIds, getCampaignDashboard, listCampaignMembers, listNpcBackpackSummaries, listNpcs, listSavedShops, listTabletopCharacterEntitiesByIds, saveNpcs } from "@/lib/google-sheets"
+import { companionNpcIds, getCampaignDashboard, listCampaignMembers, listNpcBackpackSummaries, listNpcs, listSavedShops, listCharacterTokenSummaries, saveNpcs } from "@/lib/google-sheets"
 import { readCharacterPortrait } from "@/lib/character-portraits"
 import { sharedMediaVersion } from "@/lib/shared-media"
 import { readToken, readTokenFrames, tokenVersion, type TokenKind } from "@/lib/tokens"
@@ -120,7 +120,7 @@ export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$in
   const characterIds = !withEntities ? [] : session ? session.characterIds : (await listCampaignMembers(link.campaignId)).map((member) => member.id)
   const [inventories, characters, framings, frames, documents, companions] = await Promise.all([
     listNpcBackpackSummaries(npcs.map((npc) => npc.id)),
-    listTabletopCharacterEntitiesByIds(characterIds),
+    listCharacterTokenSummaries(characterIds),
     // Le cadrage et le cadre choisis dans l'éditeur de token : le token par défaut que dessine
     // le compagnon est le même que celui de l'éditeur.
     withEntities ? readPortraitFramings().catch(() => ({})) : Promise.resolve({}),
@@ -263,7 +263,7 @@ export async function roll20Image(campaignId: string, kind: string, id: string, 
   if (kind === "character") {
     if (!(await listCampaignMembers(campaignId)).some((member) => member.id === id)) return null
     if (type === "token") return tokenImage("character", id)
-    const [character] = await listTabletopCharacterEntitiesByIds([id])
+    const [character] = await listCharacterTokenSummaries([id])
     const object = await readCharacterPortrait(id)
     if (object) return { body: object.body, contentType: object.httpMetadata?.contentType || "image/jpeg" }
     if (character && /^https:\/\//i.test(character.portrait)) return { redirect: character.portrait }

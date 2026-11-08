@@ -8,7 +8,7 @@
  * redessinées en blocs : les cartes des classes deviennent un bloc Vue d'index (preset
  * « Classes par famille », carte « Carte de classe » de l'index des classes). Ce qui est de
  * la mécanique d'Eraser (glossaire modifiable, répertoire des index, accueil) devient un bloc
- * Module d'Eraser. Les autres pages (fiche de personnage, tabletop, campagne…) gardent tout
+ * Module d'Eraser. Les autres pages (fiche de personnage, campagne…) gardent tout
  * leur contenu dans le module « Contenu de la page d'origine », autour duquel on ajoute ce
  * qu'on veut.
  *
@@ -111,8 +111,7 @@ const blueprints: Record<string, () => Blueprint> = {
     title: "Index", icon: "library-big", emoji: "", description: "Toutes les bibliothèques d’Eraser, au même endroit. L’étoile d’une carte la met dans la section Index du menu ; l’étoile rouge (clic droit) la met directement dans le menu.",
     sections: [section("1", [eraserModule("pages-section", "ressources"), eraserModule("repertoire-index")])],
   }),
-  "/bac-a-sable": () => menuPage("Bac à sable", "flask-conical", "Un terrain d’essai hors campagne : préparer une carte, un magasin ou des PNJ avant de les amener à la table.", [
-    ["/bac-a-sable/tabletop", "Tabletop", "Une table de jeu libre pour essayer cartes et jetons."],
+  "/bac-a-sable": () => menuPage("Bac à sable", "flask-conical", "Un terrain d’essai hors campagne : préparer un magasin ou des PNJ avant de les amener à la table.", [
     ["/bac-a-sable/magasin", "Magasin", "Générer et régler un magasin sans campagne."],
     ["/bac-a-sable/pnjs", "PNJs", "Les PNJ de la bibliothèque, hors campagne."],
   ], "bac-a-sable"),

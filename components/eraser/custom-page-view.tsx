@@ -249,7 +249,7 @@ export type BlockContext = {
 }
 
 /** Un module d'Eraser là où il n'est pas rendu (atelier, adresse propre d'une page de remplacement). */
-/** `origin` : la page d'Eraser que la page remplace ; son contenu d'origine est le module à son nom (« Module Eraser · Tabletop »). */
+/** `origin` : la page d'Eraser que la page remplace ; son contenu d'origine est le module à son nom (« Module Eraser · Magasin »). */
 export function ModulePlaceholder({ block, origin }: { block: Extract<PageBlock, { type: "module" }>; origin?: string }) {
   const entry = eraserModules.find((item) => item.key === block.module)
   const label = block.module === "origine" && origin ? `Module Eraser · ${replacementLabel(origin)}` : entry?.label ?? "Module d’Eraser"

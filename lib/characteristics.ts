@@ -11,7 +11,7 @@ export function characteristicColor(name: string) {
   return name === "Vitesse" || name === "Vitalité" ? "#e8aa62" : "#397f88"
 }
 
-/** Abréviations pour les petites cases (tabletop, cartes de PNJ). */
+/** Abréviations pour les petites cases (cartes de PNJ). */
 export const characteristicShort: Record<CharacteristicName, string> = {
   Force: "FOR", Dextérité: "DEX", Intelligence: "INT", Sagesse: "SAG", Charisme: "CHA", Vitesse: "VIT", Vitalité: "VIE",
 }

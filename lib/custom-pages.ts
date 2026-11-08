@@ -272,9 +272,9 @@ export function slugify(value: string) {
 export const reservedSlugs: Record<PagePlace, string[]> = {
   "regles": ["classes", "combat", "hors-combat", "vocabulaire"],
   "ressources": ["index", "armes-modificateurs", "sorts-des-classes", "sorts-des-creatures", "index-des-attributs", "index-des-calendriers", "index-des-campagnes", "index-des-caracteristiques", "index-des-classes", "index-des-creatures", "index-des-etats", "index-des-langues", "index-des-lieux", "index-des-materiaux", "index-des-objets", "index-des-personnages", "index-des-peuples", "index-des-pnjs", "index-des-religions", "index-des-runes", "index-des-succes", "index-du-vocabulaire"],
-  "bac-a-sable": ["magasin", "pnjs", "tabletop"],
+  "bac-a-sable": ["magasin", "pnjs"],
   "administration": ["campagnes", "comptes-et-roles", "corbeille", "google-drive", "personnages"],
-  "campagne": ["document", "dossier", "evenements", "fouilles", "journal", "lieux-et-rencontres", "magasin-et-fouille", "pnjs", "roll20", "tabletop"],
+  "campagne": ["document", "dossier", "evenements", "fouilles", "journal", "lieux-et-rencontres", "magasin-et-fouille", "pnjs", "roll20"],
   "hors-menu": [],
 }
 /** Réservés partout : les pages de l'atelier, et ce qui ressemblerait à une adresse technique. */

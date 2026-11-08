@@ -1,8 +1,9 @@
 # Eraser
 
 Eraser est une application Windows de gestion de jeu de rôle : personnages,
-campagnes, classes, inventaires, PNJ, magasins, tabletop partagé et pont
-Roll20.
+campagnes, classes, inventaires, PNJ, magasins, chat et pont Roll20. Des
+extensions publiées à part (documents, tabletop, atelier des pages) s’y ajoutent
+sans réinstallation.
 
 Les MJ et les joueur·euses installent `Eraser-Setup.exe` depuis les Releases
 GitHub. L’application embarque Electron et un serveur Node/Vinext local servi
@@ -21,7 +22,7 @@ outil de développement n’est requise.
 - Google Sheets reste la source principale des données JDR.
 - Google Drive reste la source principale des médias partagés ; le stockage
   local sert de cache et de repli.
-- Trystero assure le temps réel du tabletop.
+- Trystero assure le temps réel du chat.
 - Le compagnon et le Mod Roll20 communiquent avec le serveur local pendant
   qu’Eraser est ouvert.
 

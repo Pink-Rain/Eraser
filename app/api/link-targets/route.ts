@@ -33,7 +33,6 @@ export async function GET() {
     targets.push({ label: "Index", href: indexHomeHref, group: "Index" })
     for (const page of indexPages) targets.push({ label: page.label, href: page.href, group: "Index" })
     targets.push(
-      { label: "Tabletop", href: "/bac-a-sable/tabletop", group: "Bac à sable" },
       { label: "Magasin", href: "/bac-a-sable/magasin", group: "Bac à sable" },
       { label: "PNJs", href: "/bac-a-sable/pnjs", group: "Bac à sable" },
     )
@@ -53,7 +52,7 @@ export async function GET() {
     targets.push({ label: `Campagne - ${name}`, href: base, group: "Campagnes" })
     targets.push({ label: `Journal de ${name}`, href: `${base}/journal`, group: "Campagnes" })
     if (!manager) return
-    for (const [slug, label] of [["dossier", "Dossier (Roll20 compris)"], ["lieux-et-rencontres", "Créateur de session"], ["evenements", "Événements"], ["magasin-et-fouille", "Magasins"], ["fouilles", "Fouilles"], ["pnjs", "PNJs"], ["tabletop", "Tabletop"]]) {
+    for (const [slug, label] of [["dossier", "Dossier (Roll20 compris)"], ["lieux-et-rencontres", "Créateur de session"], ["evenements", "Événements"], ["magasin-et-fouille", "Magasins"], ["fouilles", "Fouilles"], ["pnjs", "PNJs"]]) {
       targets.push({ label: `${label}`, href: `${base}/${slug}`, group: "Campagnes", hint: name })
     }
   }

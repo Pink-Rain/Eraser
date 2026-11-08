@@ -37,7 +37,6 @@ export const replaceableRoutes: Array<{ path: string; label: string; group: stri
   // ne se remplacent pas dans l'atelier. Seule la page de la section reste.
   { path: "/ressources", label: "Index (page de la section)", group: "Index", icon: "library-big" },
   { path: "/bac-a-sable", label: "Bac à sable (page de la section)", group: "Bac à sable", icon: "flask-conical" },
-  { path: "/bac-a-sable/tabletop", label: "Tabletop", group: "Bac à sable", icon: "map" },
   { path: "/bac-a-sable/magasin", label: "Magasin", group: "Bac à sable", icon: "store" },
   { path: "/bac-a-sable/pnjs", label: "PNJs", group: "Bac à sable", icon: "drama" },
   { path: "/campagne", label: "Campagnes", group: "Campagnes", icon: "map" },
@@ -50,7 +49,6 @@ export const replaceableRoutes: Array<{ path: string; label: string; group: stri
   { path: "/campagne/[id]/fouilles", label: "Fouilles", group: "Campagnes", icon: "search" },
   { path: "/campagne/[id]/pnjs", label: "PNJs d’une campagne", group: "Campagnes", icon: "drama" },
   { path: "/campagne/[id]/document", label: "Document d’une campagne", group: "Campagnes", icon: "file-text" },
-  { path: "/campagne/[id]/tabletop", label: "Tabletop d’une campagne", group: "Campagnes", icon: "map" },
   { path: "/personnage/[id]", label: "Fiche de personnage", group: "Personnages", icon: "circle-user-round" },
   { path: "/administration", label: "Administration (page de la section)", group: "Administration", icon: "shield" },
   { path: "/administration/campagnes", label: "Campagnes (administration)", group: "Administration", icon: "map" },

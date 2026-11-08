@@ -5,12 +5,12 @@ import { addCharacterInventoryItem, getCharacterCompanions, listInventoryTransfe
 import type { GiveDestination } from "@/lib/inventory-schema"
 import { notifyItemReceived } from "@/lib/item-notifications"
 import { authorizedAccount } from "@/lib/server-auth"
-import { listTabletopSourcePages } from "@/lib/tabletop-access"
+import { listManagedPages } from "@/lib/managed-campaigns"
 import { isPositionalObjectId, positionalFromShopObjectId } from "@/lib/object-item-id"
 
 /** Les campagnes du compte (toutes pour l'administrateur, les siennes pour un MJ), sans le bac à sable. */
 async function campaignsOf(account: NonNullable<Awaited<ReturnType<typeof authorizedAccount>>>) {
-  return (await listTabletopSourcePages(account)).filter((page) => page.id !== "bac-a-sable")
+  return (await listManagedPages(account)).filter((page) => page.id !== "bac-a-sable")
 }
 
 async function destinations(account: NonNullable<Awaited<ReturnType<typeof authorizedAccount>>>, withCreatures: boolean, onlyCampaign = "") {
