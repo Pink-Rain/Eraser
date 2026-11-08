@@ -224,3 +224,25 @@ test("ce qu'Eraser prête aux extensions se charge dans le navigateur : aucun co
     }
   }
 });
+
+test("Eraser ne prête que ce qu'il utilise lui-même : ce qui ne sert qu'à une extension vit dans son dépôt", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const lending = await readFile(join(root, "components/eraser/extension-modules.ts"), "utf8");
+  const lent = [...lending.matchAll(/^\s*"(@\/[^"]+)": lent\(/gm)].map((match) => match[1]);
+  assert.ok(lent.length > 10);
+  // Tout le code d'Eraser, hors de ce qui prête.
+  const files = [];
+  const walk = async (directory) => {
+    for (const entry of await readdir(join(root, directory), { withFileTypes: true })) {
+      const path = `${directory}/${entry.name}`;
+      if (entry.isDirectory()) await walk(path);
+      else if (/\.(ts|tsx)$/.test(entry.name) && path !== "components/eraser/extension-modules.ts") files.push([path, await readFile(join(root, path), "utf8")]);
+    }
+  };
+  for (const directory of ["app", "components", "lib"]) await walk(directory);
+  const orphans = lent.filter((id) => {
+    const own = id.slice(2);
+    return !files.some(([path, source]) => !path.startsWith(`${own}.`) && (source.includes(`from "${id}"`) || source.includes(`import("${id}")`)));
+  });
+  assert.deepEqual(orphans, [], `Prêtés mais inutilisés par Eraser (à déplacer dans l'extension) : ${orphans.join(", ")}`);
+});

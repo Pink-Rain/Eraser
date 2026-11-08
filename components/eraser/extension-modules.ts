@@ -31,12 +31,10 @@ import * as eraserEditorDock from "@/components/eraser/editor-dock"
 import * as eraserIndexCard from "@/components/eraser/index-card"
 import * as eraserIndexCardEditor from "@/components/eraser/index-card-editor"
 import * as eraserIndexCells from "@/components/eraser/index-cells"
-import * as eraserIndexEditor from "@/components/eraser/index-editor"
 import * as eraserIndexFormView from "@/components/eraser/index-form-view"
 import * as eraserIndexGauge from "@/components/eraser/index-gauge"
 import * as eraserIndexLayoutEditor from "@/components/eraser/index-layout-editor"
 import * as eraserIndexPresentation from "@/components/eraser/index-presentation"
-import * as eraserIndexPresentationsEditor from "@/components/eraser/index-presentations-editor"
 import * as eraserIndexPresetsUi from "@/components/eraser/index-presets-ui"
 import * as eraserIndexReferences from "@/components/eraser/index-references"
 import * as eraserIndexRowSheet from "@/components/eraser/index-row-sheet"
@@ -44,7 +42,6 @@ import * as eraserIndexStats from "@/components/eraser/index-stats"
 import * as eraserIndexVariantsPanel from "@/components/eraser/index-variants-panel"
 import * as eraserIndexWindows from "@/components/eraser/index-windows"
 import * as eraserPageIndexBlock from "@/components/eraser/page-index-block"
-import * as eraserPageSectionGrid from "@/components/eraser/page-section-grid"
 import * as eraserRichText from "@/components/eraser/rich-text"
 import * as eraserViewRoles from "@/components/eraser/view-roles"
 import * as uiAlert from "@/components/ui/alert"
@@ -87,7 +84,6 @@ import * as libIndexSavedViews from "@/lib/index-saved-views"
 import * as libIndexSchemaShared from "@/lib/index-schema-shared"
 import * as libIndexStats from "@/lib/index-stats"
 import * as libIndexWindows from "@/lib/index-windows"
-import * as libPageExplorer from "@/lib/page-explorer"
 import * as libPageFolders from "@/lib/page-folders"
 import * as libPageReplacements from "@/lib/page-replacements"
 import * as libPagesIndexShared from "@/lib/pages-index-shared"
@@ -119,12 +115,10 @@ const modules: Record<string, Readonly<Record<string, unknown>>> = {
   "@/components/eraser/index-card": lent(eraserIndexCard),
   "@/components/eraser/index-card-editor": lent(eraserIndexCardEditor),
   "@/components/eraser/index-cells": lent(eraserIndexCells),
-  "@/components/eraser/index-editor": lent(eraserIndexEditor),
   "@/components/eraser/index-form-view": lent(eraserIndexFormView),
   "@/components/eraser/index-gauge": lent(eraserIndexGauge),
   "@/components/eraser/index-layout-editor": lent(eraserIndexLayoutEditor),
   "@/components/eraser/index-presentation": lent(eraserIndexPresentation),
-  "@/components/eraser/index-presentations-editor": lent(eraserIndexPresentationsEditor),
   "@/components/eraser/index-presets-ui": lent(eraserIndexPresetsUi),
   "@/components/eraser/index-references": lent(eraserIndexReferences),
   "@/components/eraser/index-row-sheet": lent(eraserIndexRowSheet),
@@ -132,7 +126,6 @@ const modules: Record<string, Readonly<Record<string, unknown>>> = {
   "@/components/eraser/index-variants-panel": lent(eraserIndexVariantsPanel),
   "@/components/eraser/index-windows": lent(eraserIndexWindows),
   "@/components/eraser/page-index-block": lent(eraserPageIndexBlock),
-  "@/components/eraser/page-section-grid": lent(eraserPageSectionGrid),
   "@/components/eraser/rich-text": lent(eraserRichText),
   "@/components/eraser/view-roles": lent(eraserViewRoles),
   "@/components/ui/alert": lent(uiAlert),
@@ -175,7 +168,6 @@ const modules: Record<string, Readonly<Record<string, unknown>>> = {
   "@/lib/index-schema-shared": lent(libIndexSchemaShared),
   "@/lib/index-stats": lent(libIndexStats),
   "@/lib/index-windows": lent(libIndexWindows),
-  "@/lib/page-explorer": lent(libPageExplorer),
   "@/lib/page-folders": lent(libPageFolders),
   "@/lib/page-replacements": lent(libPageReplacements),
   "@/lib/pages-index-shared": lent(libPagesIndexShared),

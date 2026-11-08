@@ -1785,7 +1785,6 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   const itemDisplayRows = useMemo(() => !itemsEditor || !editorSamples ? [] : Object.values(editorSamples.preview).flat(), [editorSamples, itemsEditor])
   const editorNode = editor ? <IndexEditor
         model={editor}
-        scope="moteur"
         sampleRows={editorSamples?.sample}
         open
         pending={pending === "schema"}
@@ -1803,15 +1802,10 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         onSaveLocks={settings.saveLocks}
         presentations={settings.presentations}
         onSavePresentations={settings.savePresentations}
-        viewPresets={settings.viewPresets}
-        onSaveViewPreset={settings.saveViewPreset}
-        onDeleteViewPreset={settings.deleteViewPreset}
         previewRows={editorSamples?.preview}
         // « Onglet ouvert d'abord » propose les valeurs de toutes les lignes, pas seulement celles des aperçus.
         valuesOf={(tabName, header) => { const table = tables.find((item) => item.tabName === tabName); const at = table ? table.headers.findIndex((item) => foldName(item) === foldName(header)) : -1; return table && at >= 0 ? [...new Set(table.rows.map((row) => row.values[at] ?? "").filter(Boolean))].slice(0, 2000) : [] }}
-        optionsOf={(tabName, header) => (specOf(tabName, header).options ?? []).map((option) => ({ value: option.value, color: option.color }))}
         linkedSourcesOf={linkedSourcesOf}
-        stats={indexStats}
         statsPanel={<IndexStats stats={indexStats} groups={settings.statGroups} rows={statRowKeys} columns={statHeaders} tabs={statTabs} valueOf={statValueOf} tabOf={statTabOf} nameOf={layoutNameOf} optionsOf={statOptionsOf} separatorOf={statSeparatorOf} rarityColumns={statRarityColumns} onOpen={(rowKey, list) => { setSheetError(""); setStatSheetRows(list ?? null); setDetails(rowKey) }} canEdit={!busy} onSave={saveStats} />}
         itemsPanel={itemsEditor ? <ItemDisplayEditor columns={itemDisplayColumns} rows={itemDisplayRows} initialPlace={itemsPlace} canEdit={!busy} /> : undefined}
         initialMode={editorMode}

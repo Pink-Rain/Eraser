@@ -125,8 +125,7 @@ test("sections : la lettre en marge et le menu des sections se relisent", () => 
   assert.equal(views.cleanPresentation({ kind: "list", look: { sectionStyle: "huge" } }).look?.sectionStyle, undefined);
 });
 
-test("lot B : élément, au clic, détail, formule par groupe, jauge, onglets, zigzag se relisent et se bornent", async () => {
-  const starters = await vite.ssrLoadModule("/lib/index-presentation-starters.ts");
+test("lot B : élément, au clic, détail, formule par groupe, jauge, onglets, zigzag se relisent et se bornent", () => {
   const layout = views.cleanPresentation({ kind: "list", itemForm: "principal", click: "side", detail: { kind: "form", form: "court", width: "wide", nav: true }, groupFormula: { op: "sum", column: "Prix", target: 100, label: "Σ", style: "bar" }, gauge: { column: "Vie", style: "charges", max: 5, maxColumn: "Vie totale", label: "PV" }, menu: "tabs", look: { zigzag: true } });
   assert.deepEqual(layout, { kind: "list", menu: "tabs", itemForm: "principal", click: "side", detail: { kind: "form", form: "court", width: "wide", nav: true }, groupFormula: { op: "sum", column: "Prix", target: 100, label: "Σ", style: "bar" }, gauge: { column: "Vie", style: "charges", max: 5, maxColumn: "Vie totale", label: "PV" }, look: { zigzag: true } });
   // « Ouvrir la fiche » choisi se garde : il l'emporte sur le clic de la carte de l'élément (absent :
@@ -148,27 +147,9 @@ test("lot B : élément, au clic, détail, formule par groupe, jauge, onglets, z
   assert.equal(views.groupFormulaValue({ op: "max", column: "Prix" }, rows, valueOf), 25.5);
   assert.equal(views.groupFormulaValue({ op: "avg", column: "Prix" }, rows, valueOf), 17.75);
   assert.equal(views.formatPresentationNumber(17.75), "17,75");
-  // Les formes de base de 4, 5 et 6, bâties sur les colonnes, passent telles quelles le nettoyage.
-  const columns = [{ header: "Nom", spec: { kind: "name" } }, { header: "Portrait", spec: { kind: "file", file: { accept: "image" } } }, { header: "Type", spec: { kind: "choice", options: [{ value: "Arme" }] } }, { header: "Prix", spec: { kind: "number" } }, { header: "Vie", spec: { kind: "number" } }, { header: "Description", spec: { kind: "rich" } }, { header: "Lieu", spec: { kind: "linked-choice" } }];
-  for (const kind of ["list", "kanban", "master-detail"]) {
-    const forms = starters.presentationStartersFor(kind, columns);
-    assert.ok(forms.length >= 6, kind);
-    for (const form of forms) {
-      const clean = views.cleanPresentation(form.layout);
-      assert.ok(clean, form.key);
-      assert.equal(clean.kind, kind, form.key);
-      assert.deepEqual(views.cleanPresentation(clean), clean, form.key);
-    }
-  }
-  const linked = starters.presentationStartersFor("kanban", columns).find((form) => form.key === "kanban-linked");
-  assert.equal(linked.layout.kanbanColumn, "Lieu");
-  assert.deepEqual(linked.layout.groupFormula, { op: "sum", column: "Prix" });
-  const gauge = starters.presentationStartersFor("list", columns).find((form) => form.key === "list-gauge");
-  assert.deepEqual(gauge.layout.gauge, { column: "Prix", style: "bar", maxColumn: "Vie" });
-  assert.equal(starters.presentationStartersFor("list", columns).find((form) => form.key === "list-zigzag").layout.imageColumn, "Portrait");
 });
 
-test("lot C : calendrier (échelles, formes, bannière) et tableau de bord (tuiles mixtes, sections) se relisent et se bornent", async () => {
+test("lot C : calendrier (échelles, formes, bannière) et tableau de bord (tuiles mixtes, sections) se relisent et se bornent", () => {
   const calendar = views.cleanPresentation({ kind: "calendar", dateColumn: "Date", calendarScale: "week", calendarForms: { week: "table", month: "grid", day: "paragraphs", agenda: "bidon" }, calendarSwitcher: true, calendarStay: true, calendarBanner: "season", bannerImage: "https://x/y.png", bannerHeight: 900, hideEmptyDays: true });
   assert.deepEqual(calendar, { kind: "calendar", dateColumn: "Date", calendarScale: "week", calendarForms: { week: "table", day: "paragraphs" }, calendarSwitcher: true, calendarStay: true, calendarBanner: "season", bannerImage: "https://x/y.png", bannerHeight: 400, hideEmptyDays: true });
   // L'ancien « Agenda » (apparence) reste une échelle ; une échelle réglée prend le pas.
@@ -220,21 +201,6 @@ test("lot C : calendrier (échelles, formes, bannière) et tableau de bord (tuil
   assert.equal(segments[0].value, "3");
   assert.equal(segments[1].text, " membres, ");
 
-  // Les formes de départ du lot C : dix-huit pour le calendrier, huit pour le tableau de bord, toutes propres.
-  const starters = await vite.ssrLoadModule("/lib/index-presentation-starters.ts");
-  const columns = [{ header: "Nom" }, { header: "Date" }, { header: "Type", spec: { kind: "choice", options: [{ value: "A" }] } }, { header: "Or", spec: { kind: "number" } }, { header: "Personnage", spec: { kind: "linked" } }, { header: "Description" }];
-  const calendars = starters.presentationStartersFor("calendar", columns);
-  const dashboards = starters.presentationStartersFor("dashboard", columns);
-  assert.equal(calendars.length, 18);
-  assert.equal(dashboards.length, 8);
-  for (const starter of [...calendars, ...dashboards]) {
-    const clean = views.cleanPresentation(starter.layout);
-    assert.ok(clean, starter.key);
-    assert.deepEqual(views.cleanPresentation(clean), clean, starter.key);
-  }
-  assert.ok(calendars.every((starter) => starter.layout.dateColumn === "Date"));
-  assert.ok(new Set(calendars.map((starter) => starter.layout.calendarScale ?? "month")).size === 6, "toutes les échelles sont proposées");
-  assert.ok(dashboards.some((starter) => starter.layout.tiles.some((tile) => tile.kind === "linked" && tile.column === "Personnage")));
 });
 
 test("calendriers : jours comptés, semaines et images des mois (monde et réel)", () => {
@@ -265,7 +231,7 @@ test("calendriers : jours comptés, semaines et images des mois (monde et réel)
   assert.equal(parsed.seasons[0].image, "/api/files/hiver.jpg");
 });
 
-test("lot D : galerie, chronologie, arborescence et codex — réglages nouveaux relus et bornés, formes de base propres", async () => {
+test("lot D : galerie, chronologie, arborescence et codex — réglages nouveaux relus et bornés", () => {
   const gallery = views.cleanPresentation({ kind: "gallery", imageColumn: "Portrait", galleryStyle: "cabinet", gallerySizeColumn: "Taille", gauge: { column: "Vie", style: "charges", max: 3 } });
   assert.deepEqual(gallery, { kind: "gallery", imageColumn: "Portrait", gauge: { column: "Vie", style: "charges", max: 3 }, galleryStyle: "cabinet", gallerySizeColumn: "Taille" });
   assert.equal(views.cleanPresentation({ kind: "gallery", galleryStyle: "plain" }).galleryStyle, undefined);
@@ -280,27 +246,6 @@ test("lot D : galerie, chronologie, arborescence et codex — réglages nouveaux
   const fitted = views.fitLayoutToColumns({ ...timeline, ...codex, kind: "timeline" }, ["Nom", "Date", "Ère", "PV"]);
   assert.deepEqual([fitted.endColumn, fitted.laneColumn, fitted.codexTiles, fitted.codexLinks, fitted.groupBy], [undefined, undefined, ["PV"], undefined, "Ère"]);
 
-  const starters = await vite.ssrLoadModule("/lib/index-presentation-starters.ts");
-  const columns = [{ header: "Nom" }, { header: "Portrait", spec: { kind: "file", file: { accept: "image" } } }, { header: "Date" }, { header: "Date de fin" }, { header: "Type", spec: { kind: "choice", options: [{ value: "A" }] } }, { header: "Or", spec: { kind: "number" } }, { header: "Vie", spec: { kind: "number" } }, { header: "Personnage", spec: { kind: "linked" } }, { header: "Description" }];
-  const counts = { gallery: 6, timeline: 11, tree: 9, codex: 10 };
-  for (const [kind, expected] of Object.entries(counts)) {
-    const list = starters.presentationStartersFor(kind, columns);
-    assert.equal(list.length, expected, kind);
-    for (const starter of list) {
-      const clean = views.cleanPresentation(starter.layout);
-      assert.ok(clean, starter.key);
-      assert.deepEqual(views.cleanPresentation(clean), clean, starter.key);
-      assert.equal(clean.kind, kind, starter.key);
-    }
-  }
-  const timelines = starters.presentationStartersFor("timeline", columns);
-  assert.ok(timelines.every((starter) => starter.layout.dateColumn === "Date"));
-  assert.equal(timelines.find((starter) => starter.key === "chr-bars").layout.endColumn, "Date de fin");
-  assert.equal(timelines.find((starter) => starter.key === "chr-lanes").layout.laneColumn, "Personnage");
-  assert.ok(starters.presentationStartersFor("tree", columns).every((starter) => starter.layout.parentColumn === "Personnage"));
-  assert.deepEqual(starters.presentationStartersFor("codex", columns).find((starter) => starter.key === "cdx-bestiary").layout.codexTiles, ["Or", "Vie"]);
-  // Toutes les formes de départ des douze vues, sur un onglet réduit au nom : jamais une forme cassée.
-  for (const kind of ["list", "kanban", "master-detail", "calendar", "dashboard", "gallery", "timeline", "tree", "codex"]) for (const starter of starters.presentationStartersFor(kind, [{ header: "Nom" }])) assert.ok(views.cleanPresentation(starter.layout), `${kind} ${starter.key}`);
 });
 
 test("le survol au passage de la souris se garde dans la présentation (absent : l'étoilé ; « - » : aucun)", () => {

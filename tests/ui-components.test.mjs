@@ -1517,14 +1517,11 @@ test("Modifier › Vues : réglages par onglet, presets adaptés aux colonnes, t
   assert.ok(views.builtinPresentationPresets.every((preset) => views.cleanPresentationPreset(preset)));
 });
 
-test("« Modifier » d'un index et Apparences de l'atelier : chacun ses onglets, le moteur garde seulement l'étoilé", async () => {
-  const { editorModeAllowed } = await vite.ssrLoadModule("/components/eraser/index-editor.tsx");
-  const modes = ["columns", "form", "hover", "cards", "view:list", "view:calendar", "stats", "items"];
-  // Le moteur : colonnes, formulaire principal, carte officielle, stats, affichage des items.
-  assert.deepEqual(modes.filter((mode) => editorModeAllowed("moteur", mode)), ["columns", "form", "cards", "stats", "items"]);
-  // L'atelier des pages : survols, cartes, formulaires, présentations.
-  assert.deepEqual(modes.filter((mode) => editorModeAllowed("atelier", mode)), ["form", "hover", "cards", "view:list", "view:calendar"]);
-  assert.deepEqual(modes.filter((mode) => editorModeAllowed("tout", mode)), modes);
+test("« Modifier » d'un index : le moteur seulement (l'atelier est dans Eraser Page), l'étoilé seulement", async () => {
+  const editor = await vite.ssrLoadModule("/components/eraser/index-editor.tsx");
+  // Colonnes, formulaire principal, carte officielle, stats, affichage des items : ni survol ni présentation.
+  assert.deepEqual([...editor.EDITOR_MODES], ["columns", "form", "cards", "stats", "items"]);
+  assert.equal(editor.editorModeAllowed, undefined);
 
   const { VariantsPanel } = await vite.ssrLoadModule("/components/eraser/index-variants-panel.tsx");
   const { Square } = await import("lucide-react");

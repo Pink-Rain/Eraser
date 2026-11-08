@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useRef, useState, type DragEvent, type ReactNode } from "react"
-import { ArrowDown, PackageSearch, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X, PanelLeftClose, PanelLeftOpen, MapPinned, ScrollText, LibraryBig } from "lucide-react"
+import { ArrowDown, PackageSearch, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X, PanelLeftClose, PanelLeftOpen, MapPinned, ScrollText, LibraryBig } from "lucide-react"
 
 import { useContainedWheel, useDockArea } from "@/components/eraser/editor-dock"
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
@@ -12,9 +12,7 @@ import { CardsPanel, IndexCardEditor, duplicateCard } from "@/components/eraser/
 import { ColumnDescriptionButton, ColumnLockButton, ColumnTypeMenu } from "@/components/eraser/index-column-toolbar"
 import { AutoFillSettingsEditor } from "@/components/eraser/index-autofill-editor"
 import { autoFillProblem, cleanAutoFill } from "@/lib/index-autofill"
-import { IndexPresentationsEditor, PresentationsPanel } from "@/components/eraser/index-presentations-editor"
-import { LIST_FAMILY, MAIN_PRESENTATION_ID } from "@/lib/index-presentations"
-import { cardColumnsFor, layoutColumnsFor, viewColumnsFor } from "@/lib/index-appearance"
+import { cardColumnsFor, layoutColumnsFor } from "@/lib/index-appearance"
 import { appearancesHref } from "@/lib/custom-pages"
 import { columnStyleCss, pillStyle, stylePalette } from "@/components/eraser/index-style"
 import { creatableKinds } from "@/lib/index-schema-shared"
@@ -63,21 +61,19 @@ import { renameCardColumns, serializeTabCards, tabCardsOf, type CardColumn, type
 import { lockOverrideFor, sameTabLocks, type TabLocks } from "@/lib/index-locks"
 import { tabLocksOf } from "@/lib/index-locks"
 import { unitFamilies, type UnitFamily } from "@/lib/index-numbers"
-import type { StatDefinition } from "@/lib/index-stats"
-import { fitLayoutToColumns, isPresentationKind, namedPresentationsOf, presentationEntries, presentationKinds, type PresentationKind, type TabPresentations, type Presentation, type PresentationPreset } from "@/lib/index-presentations"
+import { presentationEntries, type TabPresentations, type Presentation } from "@/lib/index-presentations"
 import { layoutIcons } from "@/components/eraser/index-windows"
 
-/** Ce que montre l'éditeur : les colonnes, le formulaire, le survol, les cartes ou une vue. */
-export type EditorMode = "columns" | LayoutKind | "cards" | `view:${PresentationKind}` | "stats" | "items"
+/**
+ * Les onglets du « Modifier » d'un index : le moteur. Colonnes, formulaire principal (celui
+ * qu'ouvre le nom d'une ligne), carte officielle (celle à l'étoile), stats, affichage des items.
+ * Les survols, les autres cartes et formulaires et les présentations se créent dans l'atelier des
+ * pages (extension Eraser Page) : ne pas les remettre ici. Les renommages de colonnes faits ici
+ * les font suivre (mises en page, cartes, présentations).
+ */
+export const EDITOR_MODES = ["columns", "form", "cards", "stats", "items"] as const
+export type EditorMode = (typeof EDITOR_MODES)[number]
 
-export type EditorScope = "moteur" | "atelier" | "tout"
-
-/** Les onglets de « Modifier » selon ce qu'il règle (voir `scope` d'`IndexEditor`). */
-export function editorModeAllowed(scope: EditorScope, mode: EditorMode) {
-  if (scope === "moteur") return mode === "columns" || mode === "form" || mode === "cards" || mode === "stats" || mode === "items"
-  if (scope === "atelier") return mode === "form" || mode === "hover" || mode === "cards" || mode.startsWith("view:")
-  return true
-}
 import {
   alignColumns,
   canonicalObjectHeader,
@@ -827,16 +823,9 @@ function useDragList<T extends { id: string }>(items: T[], onMove: (next: T[]) =
  * milieu, les réglages de la colonne choisie à droite, tous visibles. Rien n'est écrit
  * tant qu'on n'a pas enregistré ; le résumé dit exactement ce qui va changer.
  */
-export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {}, layouts = {}, onSaveLayouts, cardsIndex, cards = {}, onSaveCards, initialMode = "columns", initialTab, locks = {}, onSaveLocks, presentations = {}, onSavePresentations, viewPresets = [], onSaveViewPreset, onDeleteViewPreset, previewRows = {}, valuesOf, optionsOf, linkedSourcesOf, statsPanel, itemsPanel, stats = [], onFillAutoColumn, scope = "tout" }: {
+export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {}, layouts = {}, onSaveLayouts, cardsIndex, cards = {}, onSaveCards, initialMode = "columns", initialTab, locks = {}, onSaveLocks, presentations = {}, onSavePresentations, previewRows = {}, valuesOf, linkedSourcesOf, statsPanel, itemsPanel, onFillAutoColumn }: {
   model: IndexEditorModel
   open: boolean
-  /**
-   * Ce que cet éditeur règle. « moteur » (le « Modifier » d'un index) : colonnes, formulaire
-   * principal (celui qu'ouvre le nom d'une ligne), carte officielle (celle à l'étoile), stats,
-   * affichage des items. « atelier » (Apparences, dans l'atelier des pages) : survols, cartes,
-   * formulaires et présentations. « tout » : l'ensemble.
-   */
-  scope?: EditorScope
   pending?: boolean
   error?: string
   title?: string
@@ -868,17 +857,14 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   onSaveCards?: (changes: Array<{ tab: string; cards: TabCards | null }>) => Promise<void>
   /** Ce que l'éditeur ouvre d'abord (« Cartes » depuis la vue en cartes). */
   initialMode?: EditorMode
-  /** Les vues réglées (liste, kanban…), par onglet ; `onSavePresentations` absent : pas d'onglet « Vues ». */
+  /**
+   * Les présentations réglées (liste, kanban…), par onglet : elles se créent dans l'atelier des
+   * pages ; ici, seulement suivre les colonnes et onglets renommés.
+   */
   presentations?: Record<string, TabPresentations>
   onSavePresentations?: (changes: Array<{ tab: string; presentations: TabPresentations | null }>) => Promise<void>
-  /** Les presets de vues, communs à tous les index. */
-  viewPresets?: PresentationPreset[]
-  onSaveViewPreset?: (preset: { id?: string; name: string; layout: Presentation }) => Promise<unknown>
-  onDeleteViewPreset?: (id: string) => Promise<unknown>
-  /** Des lignes de chaque onglet (en-tête → valeur) pour l'aperçu des vues. */
+  /** Des lignes de chaque onglet (en-tête → valeur) pour l'aperçu du formulaire. */
   previewRows?: Record<string, Array<Record<string, string>>>
-  /** Les choix d'une colonne liste d'un onglet (couleurs des sections, du kanban). */
-  optionsOf?: (tab: string, header: string) => Array<{ value: string; color?: string }>
   /** Colonne liée ↔ enregistrée : les onglets d'en face, d'où viennent les noms proposés (remplissage automatique). */
   linkedSourcesOf?: (tab: string, header: string) => ChoiceSource[]
   /** Les valeurs d'une colonne dans toutes les lignes de l'onglet (une par case), pas seulement celles des aperçus. */
@@ -887,8 +873,6 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   statsPanel?: ReactNode
   /** « Affichage des items » (Index des items) : les colonnes dans l'inventaire, le magasin, la fouille ; absent : pas d'onglet. */
   itemsPanel?: ReactNode
-  /** Les statistiques de l'index : une tuile du tableau de bord en dessine une. */
-  stats?: StatDefinition[]
   /** L'onglet ouvert d'abord (son nom). */
   initialTab?: string
   /** Les cadenas réglés (posés, retirés, usages ajoutés), par onglet. */
@@ -942,16 +926,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   ].filter(Boolean).map((problem) => `${candidate.name} : ${problem}`)).concat(linkedColumnProblems(model.key, operations)), [model.key, operations, tabs])
 
   // « Colonnes », ou la mise en page de la fiche ou du survol de l'onglet choisi.
-  const [mode, setMode] = useState<EditorMode>(() => {
-    const wanted = (initialMode === "cards" && !onSaveCards) || (initialMode.startsWith("view:") && !onSavePresentations) || (initialMode === "stats" && !statsPanel) || (initialMode === "items" && !itemsPanel) ? "columns" : initialMode
-    if (editorModeAllowed(scope, wanted)) return wanted
-    // Hors de ce que règle cet éditeur : son premier onglet.
-    return scope === "atelier" ? (onSaveCards ? "cards" : "hover") : "columns"
-  })
-  // La Liste réunit liste, kanban et maître-détail sous un seul onglet (« view:list ») : sa version choisie dit sa forme (« forme|id »).
-  const openedKind = mode.startsWith("view:") ? mode.slice(5) as PresentationKind : null
-  const listFamily = openedKind !== null && LIST_FAMILY.includes(openedKind)
-  const viewKind = listFamily ? "list" as PresentationKind : openedKind
+  const [mode, setMode] = useState<EditorMode>(() => (initialMode === "cards" && !onSaveCards) || (initialMode === "form" && !onSaveLayouts) || (initialMode === "stats" && !statsPanel) || (initialMode === "items" && !itemsPanel) || !(EDITOR_MODES as readonly string[]).includes(initialMode) ? "columns" : initialMode)
   /**
    * Les mises en page touchées, par onglet (identifiant du brouillon) : le formulaire étoilé
    * (`null` : retour à celui d'Eraser ou à l'automatique), le survol, les autres formulaires.
@@ -959,8 +934,6 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   const [layoutDrafts, setLayoutDrafts] = useState<Record<string, LayoutDraft>>({})
   // Le formulaire ou le survol ouvert dans l'éditeur, par genre et par onglet (« principal » : l'étoilé).
   const [editedLayout, setEditedLayout] = useState<Record<string, string>>({})
-  // La version de chaque vue ouverte dans l'éditeur, par genre et par onglet (« principal » : l'étoilée).
-  const [editedView, setEditedView] = useState<Record<string, string>>({})
   const [layoutSaving, setLayoutSaving] = useState(false)
   const [layoutError, setLayoutError] = useState("")
   const layoutsEnabled = Boolean(onSaveLayouts) && !readOnly
@@ -1067,23 +1040,19 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
     return [...retired, { tab: name, cards: next }]
   }), [cardDrafts, cards, cardsIndex, model.key, tabs])
 
-  // Les vues touchées, par onglet (identifiant du brouillon).
-  const [presentationDrafts, setPresentationDrafts] = useState<Record<string, TabPresentations>>({})
-  const presentationsEnabled = Boolean(onSavePresentations) && !readOnly
+  // Les présentations ne se modifient pas ici (atelier des pages) : elles suivent seulement les renommages.
   const savedPresentationsOf = (name: string) => Object.entries(presentations).find(([tabName]) => foldName(tabName) === foldName(name))?.[1] ?? {}
-  const presentationsOf = (draft: DraftTab) => presentationDrafts[draft.id] ?? savedPresentationsOf(draft.original ?? draft.name.trim())
-  /** Ce qu'il faut écrire : les vues touchées, et celles qui suivent un onglet ou des colonnes renommés. */
+  /** Ce qu'il faut écrire : les présentations qui suivent un onglet ou des colonnes renommés. */
   const presentationChanges = useMemo(() => tabs.flatMap((draft): Array<{ tab: string; presentations: TabPresentations | null }> => {
     const name = draft.name.trim()
     if (draft.removed || !name) return []
     const saved = draft.original ? savedPresentationsOf(draft.original) : {}
-    const touched = draft.id in presentationDrafts
     const renamed = Boolean(draft.original) && name !== draft.original
     const renames = new Map(draft.columns.filter((item) => item.original && !item.removed && item.header.trim() && item.header.trim() !== item.original).map((item) => [foldName(item.original!), item.header.trim()]))
-    if (!touched && !renamed && !renames.size) return []
+    if (!renamed && !renames.size) return []
     const rename = (value?: string) => value ? renames.get(foldName(value)) ?? value : value
     const renamedLayout = <T extends Presentation>(layout: T): T => ({ ...layout, groupBy: rename(layout.groupBy), kanbanColumn: rename(layout.kanbanColumn), dateColumn: rename(layout.dateColumn), sortBy: rename(layout.sortBy), colorBy: rename(layout.colorBy), imageColumn: rename(layout.imageColumn), fields: layout.fields?.map((field) => rename(field)!), detailFields: layout.detailFields?.map((field) => rename(field)!), tiles: layout.tiles?.map((tile) => ({ ...tile, column: rename(tile.column) })), ...(layout.itemTemplate ? { itemTemplate: renameCardColumns(layout.itemTemplate, renames) } : {}) })
-    const base = touched ? presentationDrafts[draft.id] : saved
+    const base = saved
     // Chaque vue étoilée, et les autres versions (`named`), suivent les colonnes renommées.
     const next: TabPresentations = Object.fromEntries(presentationEntries(base).map(([kind, layout]) => [kind, renamedLayout(layout)]))
     if (base.named?.length) next.named = base.named.map((item) => ({ ...item, layout: renamedLayout(item.layout) }))
@@ -1091,7 +1060,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
     const retired = renamed && Object.keys(saved).length ? [{ tab: draft.original!, presentations: null }] : []
     return [...retired, { tab: name, presentations: Object.keys(next).length ? next : null }]
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `presentations` est lu par savedPresentationsOf
-  }), [presentationDrafts, presentations, tabs])
+  }), [presentations, tabs])
 
   /**
    * Les cadenas à écrire : pour chaque onglet dont un cadenas a changé, tous les réglages de
@@ -1245,8 +1214,6 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
 
   /** Les autres onglets (pas à la corbeille), pour « Copier vers… ». */
   const otherTabsOf = (draft: DraftTab) => tabs.filter((candidate) => candidate.id !== draft.id && !candidate.removed).map((candidate) => ({ id: candidate.id, name: candidate.name }))
-  /** Les colonnes qu'une vue peut lire (sans l'identifiant). */
-  const viewColumnsOf = (draft: DraftTab) => viewColumnsFor(draft.columns)
 
   const policy = column?.policy ?? freePolicy
   const columnDisabled = readOnly || Boolean(column?.removed) || Boolean(tab?.removed)
@@ -1299,8 +1266,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             <DialogDescription>{intro ?? (readOnly ? model.readOnlyReason : "Onglets à gauche, colonnes au milieu, réglages de la colonne choisie à droite. Rien n’est écrit dans Google Sheets avant « Enregistrer » ; ce qui est supprimé part dans la corbeille.")}</DialogDescription>
           </div>
           <span className="flex flex-wrap items-center gap-2">
-            {(layoutsEnabled || cardsEnabled || presentationsEnabled || (itemsPanel && !readOnly)) && <span className="inline-flex flex-wrap rounded-lg border bg-muted/30 p-0.5" role="tablist" aria-label="Que modifier">
-              {([["columns", Columns3, "Colonnes"], ...(layoutsEnabled ? [["form", LayoutTemplate, "Formulaire"], ["hover", MessageSquareQuote, "Survol"]] as const : []), ...(cardsEnabled ? [["cards", LayoutGrid, "Cartes"]] as const : []), ...(presentationsEnabled ? presentationKinds.filter((kind) => kind.value === "list" || !LIST_FAMILY.includes(kind.value)).map((kind) => [`view:${kind.value}`, layoutIcons[kind.value], kind.label] as const) : []), ...(statsPanel && !readOnly ? [["stats", layoutIcons.stats, "Stats"] as const] : []), ...(itemsPanel && !readOnly ? [["items", PackageSearch, "Affichage des items"] as const] : [])] as Array<readonly [EditorMode, LucideIcon, string]>).filter(([key]) => editorModeAllowed(scope, key)).map(([key, Icon, label]) => <Button key={key} type="button" role="tab" aria-selected={mode === key || (key === "view:list" && listFamily)} size="sm" variant={mode === key || (key === "view:list" && listFamily) ? "default" : "ghost"} className="h-7" onClick={() => setMode(key)}><Icon />{label}</Button>)}
+            {(layoutsEnabled || cardsEnabled || (itemsPanel && !readOnly)) && <span className="inline-flex flex-wrap rounded-lg border bg-muted/30 p-0.5" role="tablist" aria-label="Que modifier">
+              {([["columns", Columns3, "Colonnes"], ...(layoutsEnabled ? [["form", LayoutTemplate, "Formulaire"]] as const : []), ...(cardsEnabled ? [["cards", LayoutGrid, "Cartes"]] as const : []), ...(statsPanel && !readOnly ? [["stats", layoutIcons.stats, "Stats"] as const] : []), ...(itemsPanel && !readOnly ? [["items", PackageSearch, "Affichage des items"] as const] : [])] as Array<readonly [EditorMode, LucideIcon, string]>).map(([key, Icon, label]) => <Button key={key} type="button" role="tab" aria-selected={mode === key} size="sm" variant={mode === key ? "default" : "ghost"} className="h-7" onClick={() => setMode(key)}><Icon />{label}</Button>)}
             </span>}
           </span>
         </div>
@@ -1352,7 +1319,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
           </section>
 
           {/* La vue modifiée de l'onglet choisi : le même menu partout (versions, presets) */}
-          {(mode === "form" || mode === "hover") && layoutsEnabled && tab && !tab.removed && (() => {
+          {mode === "form" && layoutsEnabled && tab && !tab.removed && (() => {
             const kind: LayoutKind = mode
             const named = namedLayoutsOf(tab, kind)
             const editKey = `${kind}:${tab.id}`
@@ -1369,7 +1336,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             return <LayoutViewsPanel
               key={editKey}
               kind={kind}
-              starredOnly={scope === "moteur" ? <>Le formulaire qu’ouvre le nom d’une ligne. Les autres formulaires, les survols, les cartes et les présentations se créent dans l’<a className="font-semibold text-primary underline underline-offset-2" href={appearancesHref(model.key)}>atelier des pages</a>.</> : undefined}
+              starredOnly={<>Le formulaire qu’ouvre le nom d’une ligne. Les autres formulaires, les survols, les cartes et les présentations se créent dans l’<a className="font-semibold text-primary underline underline-offset-2" href={appearancesHref(model.key)}>atelier des pages</a>.</>}
               tabName={tab.name}
               items={[{ id: DEFAULT_FORM_ID, name: mainName }, ...named.map((item) => ({ id: item.id, name: item.name }))]}
               selectedId={chosen?.id ?? DEFAULT_FORM_ID}
@@ -1433,7 +1400,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             return <CardsPanel
               key={tab.id}
               tabName={tab.name}
-              starredOnly={scope === "moteur" ? <>La carte officielle de cet onglet. Les autres cartes se créent dans l’<a className="font-semibold text-primary underline underline-offset-2" href={appearancesHref(model.key)}>atelier des pages</a>.</> : undefined}
+              starredOnly={<>La carte officielle de cet onglet. Les autres cartes se créent dans l’<a className="font-semibold text-primary underline underline-offset-2" href={appearancesHref(model.key)}>atelier des pages</a>.</>}
               columns={cardColumnsOf(tab)}
               value={entry}
               builtin={entry.builtin}
@@ -1455,39 +1422,6 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               onReset={() => setCardDrafts((current) => ({ ...current, [tab.id]: null }))}
             />
           })()}
-          {viewKind && presentationsEnabled && tab && !tab.removed && (() => {
-            const editKey = `${viewKind}:${tab.id}`
-            return <PresentationsPanel
-              key={editKey}
-              kind={viewKind}
-              family={listFamily ? LIST_FAMILY : undefined}
-              tabName={tab.name}
-              columns={viewColumnsOf(tab)}
-              value={presentationsOf(tab)}
-              selectedId={editedView[editKey] ?? (listFamily ? `${openedKind}|${MAIN_PRESENTATION_ID}` : MAIN_PRESENTATION_ID)}
-              onSelect={(id) => setEditedView((state) => ({ ...state, [editKey]: id }))}
-              onChange={(next) => setPresentationDrafts((state) => ({ ...state, [tab.id]: next }))}
-              presets={viewPresets}
-              onSavePreset={onSaveViewPreset}
-              onDeletePreset={onDeleteViewPreset}
-              otherTabs={otherTabsOf(tab).map((other) => { const target = tabs.find((candidate) => candidate.id === other.id); return target && namedPresentationsOf(presentationsOf(target), viewKind).length >= 11 ? { ...other, disabled: true, hint: "12 versions au plus" } : other })}
-              onCopyTo={(ids, layout, star, name) => setPresentationDrafts((state) => ({ ...state, ...Object.fromEntries(ids.flatMap((id) => {
-                // La vue s'ajoute aux versions de l'onglet, sans rien remplacer ; à l'étoile, l'ancienne étoilée garde une place nommée.
-                // Sa forme est la sienne (une version kanban de la Liste reste un kanban).
-                const form = isPresentationKind(layout.kind) ? layout.kind : viewKind
-                const target = tabs.find((candidate) => candidate.id === id)
-                if (!target) return []
-                const value = state[id] ?? presentationsOf(target)
-                if (namedPresentationsOf(value, form).length >= 11) return []
-                const fitted = { ...fitLayoutToColumns(layout, viewColumnsOf(target)), kind: form }
-                const copyId = () => Math.random().toString(36).slice(2, 10)
-                if (!star) return [[id, { ...value, named: [...(value.named ?? []), { id: copyId(), name: `${name} (de « ${tab.name} »)`, layout: fitted }] }]]
-                const previous = value[form] ? [{ id: copyId(), name: "Ancienne vue principale", layout: { ...value[form]!, kind: form } }] : []
-                return [[id, { ...value, [form]: fitted, named: [...(value.named ?? []), ...previous] }]]
-              })) }))}
-              disabled={pending || layoutSaving}
-            />
-          })()}
         </aside>
 
         {mode === "stats" && statsPanel && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
@@ -1503,30 +1437,6 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
           </div>
           {itemsPanel}
         </section>}
-
-        {viewKind && tab && (() => {
-          // La version ouverte : « forme|id » pour la Liste (la liste principale d'office), sinon son identifiant.
-          const chosen = editedView[`${viewKind}:${tab.id}`] ?? (listFamily ? `${openedKind}|${MAIN_PRESENTATION_ID}` : MAIN_PRESENTATION_ID)
-          const [editedKind, versionId] = listFamily && chosen.includes("|") ? [chosen.split("|")[0] as PresentationKind, chosen.split("|")[1]] : [viewKind, chosen]
-          return <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1 lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden lg:pr-0">
-          <IndexPresentationsEditor
-            key={`${tab.id}:${editedKind}:${versionId}`}
-            kind={editedKind}
-            versionId={versionId}
-            tabName={tab.name}
-            columns={tab.columns.filter((item) => !item.removed && item.header.trim() && !/^id$/i.test(item.header.trim())).map((item) => item.header.trim())}
-            rows={previewRows[tab.original ?? tab.name.trim()] ?? sampleRows[tab.original ?? tab.name.trim()] ?? []}
-            value={presentationsOf(tab)}
-            onChange={(next) => setPresentationDrafts((current) => ({ ...current, [tab.id]: next }))}
-            optionsOf={optionsOf ? (header) => optionsOf(tab.original ?? tab.name.trim(), header) : undefined}
-            cards={cardsEnabled ? cardsOf(tab).cards : []}
-            cardColumns={cardsEnabled ? cardColumnsOf(tab) : []}
-            forms={[{ id: DEFAULT_FORM_ID, name: "Formulaire principal", layout: layoutOf(tab, "form").layout }, ...namedFormsOf(tab)]}
-            hovers={namedLayoutsOf(tab, "hover").map((hover) => ({ id: hover.id, name: hover.name }))}
-            stats={stats}
-          />
-        </section>
-        })()}
 
         {mode === "cards" && tab && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1 lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden lg:pr-0">
           {(() => {
@@ -1548,7 +1458,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
           })()}
         </section>}
 
-        {(mode === "form" || mode === "hover") && tab && (() => {
+        {mode === "form" && tab && (() => {
           const formId = editedLayout[`${mode}:${tab.id}`] ?? DEFAULT_FORM_ID
           const list = namedLayoutsOf(tab, mode)
           const named = formId !== DEFAULT_FORM_ID ? list.find((item) => item.id === formId) : undefined

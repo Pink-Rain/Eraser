@@ -147,10 +147,9 @@ Vocabulaire du code (chaque mot ne désigne qu’une chose) :
 - **Présentation** : la forme donnée aux lignes d’un onglet (liste, kanban,
   maître-détail, calendrier, tableau de bord, galerie, chronologie,
   arborescence, codex ; tableau et cartes pour les blocs de page). Modèle
-  `lib/index-presentations.ts` (`Presentation`, `PresentationKind`), éditeur
-  `components/eraser/index-presentations-editor.tsx`, affichage
-  `components/eraser/index-presentation.tsx`, formes de départ
-  `lib/index-presentation-starters.ts`. Enregistrées sur le Worker (portées
+  `lib/index-presentations.ts` (`Presentation`, `PresentationKind`), affichage
+  `components/eraser/index-presentation.tsx` ; l'éditeur et les formes de départ sont dans
+  l'extension Eraser Page. Enregistrées sur le Worker (portées
   `index-presentations` et `index-view-presets`, `lib/index-presentations-store.ts`).
 - **Filtre** : des conditions sur les lignes (`FilterCondition`,
   `filterOperators`, `matchesFilter`, dans `lib/index-windows.ts`).
@@ -186,19 +185,25 @@ noms et ne se renomment jamais : actions `save-view`, `delete-view`,
 `save-view-preset`, clés `views` et `viewPresets` de l’API des réglages, portées
 du Worker, colonnes de la feuille, préfixe de version `vue:`, élément `@vue`.
 
-### Où se règle l'apparence d'un index (alpha 276)
+### Où se règle l'apparence d'un index (alphas 276 à 279)
 
-- Le « Modifier » d'un index (`IndexEditor`, `scope="moteur"`) ne règle plus que ce qui reste au
-  moteur : les colonnes, le **formulaire principal** (celui qu'ouvre le nom d'une ligne), la
-  **carte officielle** (celle à l'étoile, `defaultId`), les stats et l'affichage des items. Les
-  listes de versions n'y montrent que l'étoilée (`starredOnly` de `VariantsPanel`).
+- Le « Modifier » d'un index (`IndexEditor`, `EDITOR_MODES`) ne règle que ce qui reste au moteur :
+  les colonnes, le **formulaire principal** (celui qu'ouvre le nom d'une ligne), la **carte
+  officielle** (celle à l'étoile, `defaultId`), les stats et l'affichage des items. Les listes de
+  versions n'y montrent que l'étoilée (`starredOnly` de `VariantsPanel`). Quand une colonne ou un
+  onglet y est renommé, les mises en page (formulaires, survols), les cartes et les présentations
+  le suivent : ce suivi reste ici, même sans leur éditeur.
 - Les **Apparences** d'un index, dans l'atelier des pages (extension Eraser Page,
-  `/extension/page/apparences/<index>`, `scope="atelier"`) : survols, cartes, formulaires et
-  présentations (liste, kanban, maître-détail, calendrier, chronologie, galerie, arborescence,
-  codex, tableau de bord). Le bouton « Apparences » de l'écran d'un index y mène.
-- Les réglages et leurs clés sur le Worker ne changent pas ; l'affichage reste dans Eraser. Le code
-  des éditeurs (cartes, formulaires et survols, présentations) est encore dans Eraser, prêté à
-  l'atelier : le séparer du « Modifier » est l'étape suivante.
+  `/extension/page/apparences/<index>`) : survols, cartes, formulaires et présentations (liste,
+  kanban, maître-détail, calendrier, chronologie, galerie, arborescence, codex, tableau de bord),
+  avec l'éditeur de l'extension (`AppearancesEditor`, éditeur des présentations et formes de
+  départ compris, tests avec). Le bouton « Apparences » de l'écran d'un index y mène.
+- Partagés par les deux (prêtés à l'extension) : l'éditeur de mise en page
+  (`index-layout-editor.tsx`, aussi pour le formulaire principal), l'éditeur des cartes
+  (`index-card-editor.tsx`, aussi pour la carte officielle), le panneau des versions
+  (`index-presets-ui.tsx`, `index-variants-panel.tsx`) et les colonnes d'une apparence
+  (`lib/index-appearance.ts`). Les réglages et leurs clés sur le Worker ne changent pas ;
+  l'affichage reste dans Eraser.
 
 ## Colonnes liées ↔
 
@@ -367,7 +372,7 @@ d’Eraser, reproduit à l’identique par `defaultItemPlaceDisplay`.
   dossier remonte son contenu, jamais une page. Le serveur refait chaque geste sur le rangement
   relu ; l’explorateur l’affiche avant (retour en arrière si refus). La coque n’en lit que la
   copie en mémoire (`knownPageFolders`).
-- **Explorateur des pages** (`components/eraser/page-directory.tsx`, `lib/page-explorer.ts`) :
+- **Explorateur des pages** (extension Eraser Page : `src/page-directory.tsx`, `src/page-explorer.ts`) :
   pages d’Eraser et pages de l’atelier sous une seule forme ; « Ouvrir » reprend une page
   d’Eraser en coulisses. `?dossier=` et `?vue=` (toutes, corbeille, modeles) gardent la vue ;
   l’atelier y revient. Onglets communs Pages · Menu · Modèles (`page-creator-nav.tsx`).

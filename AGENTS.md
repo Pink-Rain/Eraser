@@ -99,10 +99,11 @@
 - Les éditeurs enregistrent la valeur « par défaut » comme absente : vérifier que
   l’affichage a bien le même défaut.
 - **Survols, cartes, formulaires et présentations se créent dans l'atelier des pages**
-  (Apparences d'un index, extension Eraser Page). Le « Modifier » d'un index (`scope="moteur"`)
-  ne garde que les colonnes, le formulaire principal, la carte officielle, les stats et
-  l'affichage des items : ne pas y remettre le reste.
-- « Liste » réunit dans « Modifier » les formes `list`, `kanban` et `master-detail` : leurs
+  (Apparences d'un index, extension Eraser Page, avec leur éditeur). Le « Modifier » d'un index
+  (`EDITOR_MODES`) ne garde que les colonnes, le formulaire principal, la carte officielle, les
+  stats et l'affichage des items : ne pas y remettre le reste. Il fait toujours suivre aux
+  apparences les colonnes et onglets renommés.
+- « Liste » réunit dans l'éditeur des apparences (Eraser Page) les formes `list`, `kanban` et `master-detail` : leurs
   clés d'enregistrement restent séparées (une version désignée « forme|id » dans l'éditeur).
 - Les rôles d'un lecteur pour une ligne (joueur, joueur de la campagne, joueur propriétaire,
   MJ, MJ de la campagne, admin) sont dans `lib/view-roles.ts` ; ils règlent l'affichage
