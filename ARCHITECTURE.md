@@ -428,9 +428,14 @@ n'est pas compilé et garde son comportement.
   la réponse lue ; une réponse qu'on ne lit pas passe par `discardResponse`.
 - Pied de la barre latérale › jauge « Fluidité de cet ordinateur », pour chaque compte
   (`lib/fluidity-journal.ts`, `components/eraser/fluidity-panel.tsx`) : clics lents, gels de
-  l'écran, temps de chaque page et attentes du serveur, gardés dans le navigateur. « Copier le
+  l'écran, temps de chaque page et attentes du serveur, gardés dans le navigateur. L'image qui
+  met la fenêtre à l'écran (commencée avant son premier affichage) compte comme « ouverture de la
+  fenêtre » avec les pages, détaillée par les temps du document (premier octet, document lu,
+  premier affichage) : ce n'est pas un gel d'un écran déjà là. Une extension qui s'ouvre est
+  comptée à part (« Extensions » : du chargement à son contenu prêt, avec sa version ;
+  `noteExtensionShown`, appelé par `components/eraser/extension-host.tsx`). « Copier le
   relevé » y joint le relevé du serveur local (`/api/fluidity` : Google, serveur partagé,
-  refus de quota). Un gel de plus de 0,4 s garde son profil (JS Self-Profiling, autorisé par
+  refus de quota, versions des extensions installées). Un gel de plus de 0,4 s garde son profil (JS Self-Profiling, autorisé par
   l'en-tête `Document-Policy: js-profiling` de `next.config.ts`) : les fonctions qui tournaient,
   et dans le relevé copié quelques caractères de leur code pour les retrouver dans les sources.
   Le panneau ne se redessine pas à chaque mesure (il gelait l'écran, ce qui faisait une mesure).
@@ -498,6 +503,14 @@ il renaîtra dans l'extension Eraser Map, sur d'autres principes. Ce qu'il parta
   onglets (Cartes, Tokens, Dossiers) restent dans le Drive, ni relus ni effacés. Le salon en
   direct est un salon Trystero par canal ; un message garde ses noms de champs (`mapId` : le
   salon), échangés avec les autres installations.
+- **Rejoindre le salon gèle la fenêtre** : la première connexion pair à pair initialise WebRTC
+  (1,2 à 2,1 s sous Windows, relevés de novembre 2026). Le chat lit son historique au premier
+  temps mort (`warm`), mais ne rejoint le salon (`live`) que si on ouvre le chat, si Eraser passe
+  à l'arrière-plan, ou après un moment sans souris ni clavier : 4 s sur une page de campagne
+  (son journal se met à jour en direct par ce salon), 20 s ailleurs. La connexion qui met WebRTC
+  en route est créée à ce moment-là (`startWebRtc`), pas laissée à trystero, qui attend un temps
+  mort du navigateur parfois long ; les suivantes, peu coûteuses, se préparent une à une au repos
+  (retouche de trystero dans `vite.config.ts`).
 - **Les personnages pour Roll20** : `listCharacterTokenSummaries` (nom, profil, portrait, vie,
   rapidité, joueur de l'index local).
 
@@ -558,7 +571,9 @@ documents de campagne, encore vide), `map` (Pink-Rain/Eraser_map, tabletop, enco
   `/api/extensions/<id>/fichiers/<version>/…` (fichiers immuables) et ses `styles`. **API 2** : le
   module exporte `Page`, un composant rendu dans l'arbre d'Eraser (ses contextes : routeur,
   coque, titre de page) qui reçoit `eraser` (compte, `path`, `navigate`, `server`, `eraser` pour
-  les API `/api/…`, `require`). API 1 : `mount(élément, eraser)` et `update(eraser)`.
+  les API `/api/…`, `require`). API 1 : `mount(élément, eraser)` et `update(eraser)`. Ce qu'une
+  extension charge encore porte `aria-busy="true"`, comme les pages d'Eraser : l'hôte mesure son
+  ouverture jusqu'à ce qu'il n'y en ait plus (relevé de fluidité, « Extensions »).
 - **Ce qu'Eraser prête** (`components/eraser/extension-modules.ts`, `window.EraserExtensions.require`) :
   React, `react/jsx-runtime`, `react/compiler-runtime`, `next/link`, `next/navigation`, les
   composants `components/ui/*`, et les pièces dont l'atelier a besoin (affichage des pages,

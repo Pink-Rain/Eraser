@@ -9,9 +9,10 @@ import { clearFluidity, FLUIDITY_EVENT, fluidityEntries, fluiditySummary, profil
 import { effectsAreLight } from "@/lib/visual-effects"
 import { version as appVersion } from "@/package.json"
 
-const kindLabels: Record<FluidityKind, string> = { page: "Changements de page", clic: "Clics lents", gel: "Gels de l'écran", appel: "Attentes du serveur" }
+const kindLabels: Record<FluidityKind, string> = { page: "Changements de page", extension: "Extensions", clic: "Clics lents", gel: "Gels de l'écran", appel: "Attentes du serveur" }
 const kindHints: Record<FluidityKind, string> = {
   page: "Du clic à la page complète",
+  extension: "De son chargement à son contenu prêt",
   clic: "Du clic à l'image suivante (plus de 0,1 s)",
   gel: "Images de l'écran retenues plus de 0,15 s",
   appel: "Requêtes de plus de 0,3 s",
@@ -56,10 +57,12 @@ export function FluidityPanel({ inDialog = false }: { inDialog?: boolean }) {
   async function copy() {
     const nav = navigator as Navigator & { deviceMemory?: number }
     // Ce qu'a attendu le serveur local (Google, serveur partagé) : d'où vient chaque attente.
-    const server = await fetch("/api/fluidity", { cache: "no-store" }).then((response) => response.ok ? response.json() : null).catch(() => null) as unknown
+    const server = await fetch("/api/fluidity", { cache: "no-store" }).then((response) => response.ok ? response.json() : null).catch(() => null) as { extensions?: unknown } | null
     const report = {
       copiedAt: new Date().toISOString(),
       version: appVersion,
+      // Les extensions installées sur cet ordinateur, et leur version.
+      extensions: server?.extensions ?? null,
       computer: { cores: nav.hardwareConcurrency, memoryGb: nav.deviceMemory, lightEffects: effectsAreLight(), screen: `${window.screen.width}×${window.screen.height}@${window.devicePixelRatio}`, userAgent: nav.userAgent },
       // Tout le relevé, y compris ce qui est arrivé depuis l'ouverture du panneau.
       summary: fluiditySummary(fluidityEntries()),
@@ -86,7 +89,7 @@ export function FluidityPanel({ inDialog = false }: { inDialog?: boolean }) {
       <Button type="button" variant="outline" size="sm" onClick={() => void copy()} disabled={!entries.length && !waiting}>{copied ? <Check /> : <ClipboardCopy />}{copied ? "Copié" : "Copier le relevé"}</Button>
       <Button type="button" variant="ghost" size="sm" onClick={() => { clearFluidity(); refresh() }} disabled={!entries.length && !waiting}><Trash2 />Vider</Button>
     </div>
-    <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
       {summary.map((total) => <button key={total.kind} type="button" onClick={() => setKind((current) => current === total.kind ? "all" : total.kind)} aria-pressed={kind === total.kind} className={`rounded-xl border px-4 py-3 text-left text-sm transition-colors ${kind === total.kind ? "border-primary/50 bg-primary/8" : "bg-background/50 hover:bg-muted/50"}`}>
         <p className="font-semibold">{kindLabels[total.kind]}</p>
         <p className="text-xs text-muted-foreground">{kindHints[total.kind]}</p>

@@ -6,13 +6,16 @@
  * - « gel » : une image de l'écran qui a mis plus de FREEZE_MS à venir, avec le code qui
  *   l'a retenue (Long Animation Frames) ;
  * - « page » : un changement de page, de son départ à la page affichée, puis à son contenu
- *   complet (plus aucun squelette `aria-busy`), avec l'attente du serveur ;
+ *   complet (plus aucun squelette `aria-busy`), avec l'attente du serveur ; et l'ouverture de
+ *   la fenêtre, jusqu'à son premier affichage ;
+ * - « extension » : une extension qui s'ouvre, de son chargement à son contenu prêt (plus aucun
+ *   `aria-busy` dans son écran), avec sa version (`noteExtensionShown`) ;
  * - « appel » : une requête vers le serveur local de plus de CALL_MS.
  *
  * Gardé dans ce navigateur seulement (les dernières entrées), affiché depuis le pied de la barre latérale (chaque compte),
  * copiable pour être envoyé. Rien ne part ailleurs.
  */
-export type FluidityKind = "clic" | "gel" | "page" | "appel"
+export type FluidityKind = "clic" | "gel" | "page" | "extension" | "appel"
 export type FluidityEntry = {
   kind: FluidityKind
   at: string
@@ -137,6 +140,33 @@ function watchContent() {
   check()
 }
 
+/**
+ * Appelé par l'hôte des extensions (components/eraser/extension-host.tsx) : du chargement de
+ * l'extension (pièces prêtées, son code, ses styles) à son contenu prêt.
+ */
+export function noteExtensionShown({ id, version, ms, codeMs, complete }: { id: string; version: string; ms: number; codeMs: number; complete: boolean }) {
+  if (typeof window === "undefined") return
+  record({ kind: "extension", label: `${id} ${version}`, ms, detail: [`code chargé en ${Math.round(codeMs)} ms`, complete ? "contenu prêt" : "contenu encore en chargement après 20 s"].join(" · ") })
+}
+
+/**
+ * L'image qui a mis la fenêtre à l'écran (commencée avant son premier affichage) : le temps de
+ * l'ouverture, pas un gel d'un écran déjà là. Comptée avec les pages, détaillée par les temps du
+ * chargement du document.
+ */
+function openingOf(entry: Loaf) {
+  const paint = performance.getEntriesByName("first-paint")[0]?.startTime
+  const loading = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined
+  const firstShown = paint ?? loading?.domContentLoadedEventStart
+  if (firstShown === undefined || !(entry.startTime < firstShown)) return null
+  const parts = [
+    loading ? `premier octet du serveur à ${Math.round(loading.responseStart)} ms` : "",
+    loading?.domInteractive ? `document lu à ${Math.round(loading.domInteractive)} ms` : "",
+    paint !== undefined ? `premier affichage à ${Math.round(paint)} ms` : "",
+  ].filter(Boolean)
+  return { ms: entry.startTime + entry.duration, detail: parts.join(" · ") }
+}
+
 /** Appelé par la coque quand l'adresse affichée change. */
 export function notePageShown(pathname: string) {
   if (!navigation || navigation.to !== pathname) return
@@ -178,7 +208,13 @@ export function installFluidityJournal() {
     if (entry.duration < FREEZE_MS) return
     const scripts = [...(entry.scripts ?? [])].sort((left, right) => (right.duration ?? 0) - (left.duration ?? 0)).slice(0, 2)
     const label = scripts.map((script) => [script.sourceFunctionName, shortSource(script.sourceURL), script.invoker].filter(Boolean).join(" · ")).join(" | ") || "rendu et mise en page"
-    const recorded = record({ kind: "gel", label, ms: entry.duration, detail: `bloqué ${Math.round(entry.blockingDuration ?? 0)} ms${scripts.length ? ` · scripts ${scripts.map((script) => `${Math.round(script.duration ?? 0)} ms`).join(", ")}` : ""}` })
+    const detail = `bloqué ${Math.round(entry.blockingDuration ?? 0)} ms${scripts.length ? ` · scripts ${scripts.map((script) => `${Math.round(script.duration ?? 0)} ms`).join(", ")}` : ""}`
+    const opening = openingOf(entry)
+    if (opening) {
+      record({ kind: "page", label: `ouverture de la fenêtre · ${window.location.pathname}`, ms: opening.ms, detail: [opening.detail, detail].filter(Boolean).join(" · ") })
+      return
+    }
+    const recorded = record({ kind: "gel", label, ms: entry.duration, detail })
     if (entry.duration >= PROFILE_FREEZE_MS) profiledFreezes.push({ start: entry.startTime, end: entry.startTime + entry.duration, entry: recorded })
   })
   startSampling()
@@ -323,7 +359,7 @@ export function fluiditySummary(list: FluidityEntry[]) {
     const sorted = [...values].sort((left, right) => left - right)
     return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))]
   }
-  const kinds: FluidityKind[] = ["page", "clic", "gel", "appel"]
+  const kinds: FluidityKind[] = ["page", "extension", "clic", "gel", "appel"]
   return kinds.map((kind) => {
     const values = list.filter((entry) => entry.kind === kind).map((entry) => entry.ms)
     return { kind, count: values.length, median: quantile(values, 0.5), p90: quantile(values, 0.9), worst: values.length ? Math.max(...values) : 0 }

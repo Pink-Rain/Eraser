@@ -9,6 +9,7 @@ import { Puzzle } from "lucide-react"
 
 import type { SiteRole } from "@/lib/auth-types"
 import { EXTENSION_API_VERSION } from "@/lib/extensions"
+import { noteExtensionShown } from "@/lib/fluidity-journal"
 
 /**
  * Ce qu'Eraser prête aux extensions dans le navigateur (version `EXTENSION_API_VERSION`). Une
@@ -59,6 +60,10 @@ type ExtensionModule = {
  * polices, thème). Le module exporte `Page`, un composant qui reçoit `eraser` et se rend dans
  * l'arbre d'Eraser ; ou bien `mount(élément, eraser)` (qui peut rendre une fonction de
  * démontage) et `update(eraser)`, appelée quand l'adresse change sans quitter l'extension.
+ *
+ * Le relevé de fluidité compte son ouverture (`noteExtensionShown`) : du chargement à son contenu
+ * prêt, quand plus rien n'est marqué `aria-busy="true"` dans son écran — la même règle que les
+ * pages d'Eraser. Une extension met donc `aria-busy` sur ce qu'elle charge encore.
  */
 export function ExtensionHost({ id, version, entry, styles, path, account }: {
   id: string
@@ -69,6 +74,8 @@ export function ExtensionHost({ id, version, entry, styles, path, account }: {
   account: ExtensionAccount
 }) {
   const container = useRef<HTMLDivElement>(null)
+  const screen = useRef<HTMLDivElement>(null)
+  const opening = useRef<{ startedAt: number; codeMs: number } | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const [requireLent, setRequireLent] = useState<ExtensionGlobals["require"] | null>(null)
   const [loaded, setLoaded] = useState<ExtensionModule | null>(null)
@@ -102,6 +109,8 @@ export function ExtensionHost({ id, version, entry, styles, path, account }: {
   // Les pièces prêtées d'abord (chargées seulement quand une extension s'ouvre), puis l'extension et ses styles.
   useEffect(() => {
     let alive = true
+    const startedAt = performance.now()
+    opening.current = null
     const links = (stylesKey ? stylesKey.split("\n") : []).map((style) => {
       const link = document.createElement("link")
       link.rel = "stylesheet"
@@ -119,6 +128,7 @@ export function ExtensionHost({ id, version, entry, styles, path, account }: {
       .then((extension) => {
         if (!alive) return
         if (typeof extension.Page !== "function" && typeof extension.mount !== "function") throw new Error("Son module n'exporte ni « Page » ni « mount ».")
+        opening.current = { startedAt, codeMs: performance.now() - startedAt }
         setLoaded(extension)
       })
       .catch((error: unknown) => {
@@ -150,13 +160,44 @@ export function ExtensionHost({ id, version, entry, styles, path, account }: {
     }
   }, [loaded, id])
 
+  // Le contenu est prêt quand l'écran de l'extension n'a plus rien d'`aria-busy` : une seule
+  // mesure par ouverture (les changements d'adresse ensuite sont des changements de page).
+  useEffect(() => {
+    const element = screen.current
+    const started = opening.current
+    if (!element || !loaded || !started) return
+    let frame = 0
+    let done = false
+    const finish = (complete: boolean) => {
+      if (done) return
+      done = true
+      observer.disconnect()
+      window.clearTimeout(timer)
+      if (opening.current === started) opening.current = null
+      noteExtensionShown({ id, version, ms: performance.now() - started.startedAt, codeMs: started.codeMs, complete })
+    }
+    const check = () => {
+      if (element.querySelector("[aria-busy='true']")) return
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => { if (!element.querySelector("[aria-busy='true']")) finish(true) })
+    }
+    const observer = new MutationObserver(check)
+    observer.observe(element, { childList: true, subtree: true, attributes: true, attributeFilter: ["aria-busy"] })
+    const timer = window.setTimeout(() => finish(false), 20_000)
+    check()
+    return () => { done = true; observer.disconnect(); window.clearTimeout(timer); cancelAnimationFrame(frame) }
+  }, [loaded, id, version])
+
   const Page = loaded && typeof loaded.Page === "function" ? loaded.Page : null
 
-  return <>
+  // `contents` : l'enveloppe ne compte pas dans la mise en page de la coque, elle sert à la mesure.
+  // Pendant le chargement, une place `aria-busy` : le changement de page attend l'extension.
+  return <div ref={screen} className="contents">
     {failure && <ExtensionUnavailable title="L'extension n'a pas pu s'ouvrir" detail={failure} />}
+    {!failure && !loaded && <div aria-busy="true" className="w-full flex-1"><span className="sr-only">Chargement de l’extension…</span></div>}
     {Page && context && <Page eraser={context} />}
     <div ref={container} data-eraser-extension={id} className={Page ? "hidden" : "flex w-full min-w-0 flex-1 flex-col"} />
-  </>
+  </div>
 }
 
 export function ExtensionUnavailable({ title, detail }: { title: string; detail: string }) {

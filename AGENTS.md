@@ -134,6 +134,9 @@
 - Pas de `:has()` sur `body` ni sur un grand conteneur (coque, barre latérale), et pas de style
   posé sur `<body>` à l'ouverture d'une fenêtre : chacun refait le style de toute la page. Les
   retouches de Radix et de trystero dans `vite.config.ts` sont à vérifier à toute montée de version.
+- Le salon en direct du chat (Trystero, WebRTC) gèle la fenêtre 1 à 2 s quand il se rejoint : il
+  n'attend pas un simple temps mort, mais qu'on ouvre le chat, qu'Eraser passe à l'arrière-plan ou
+  que personne n'y touche (`live` dans `global-table-chat.tsx`). Ne pas le rejoindre plus tôt.
 
 ## Polices
 
@@ -209,6 +212,8 @@
   `EXTENSION_API_VERSION` forment le contrat : ne jamais retirer ni renommer un module prêté, ni
   changer ses exports, sans mettre à jour les extensions ; jamais de module qui tire du code
   serveur. Détail dans `ARCHITECTURE.md` (« Extensions »).
+- Ce qu'une extension charge encore porte `aria-busy="true"` : le relevé de fluidité mesure son
+  ouverture (et le changement de page) jusqu'à ce qu'il n'y en ait plus.
 - Une extension n'appelle jamais Google elle-même : elle passe par une API d'Eraser (porte du quota,
   lectures partagées). Elle garde ses données sur le Worker (`store`, portée `extension:<id>`).
 - Publier : Eraser d'abord quand l'extension en dépend, puis l'extension (construite contre

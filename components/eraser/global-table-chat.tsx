@@ -50,6 +50,10 @@ const LAST_CAMPAIGN_KEY = "eraser:chat-campaign"
 const GENERAL_CHANNEL = "general"
 // Dernier message vu, par salon : au-delà, le bouton du chat porte une pastille.
 const SEEN_KEY = "eraser:chat-seen:"
+// Le salon en direct se rejoint après ce temps sans souris ni clavier (voir `live`).
+const QUIET_CAMPAIGN_MS = 4_000
+const QUIET_ELSEWHERE_MS = 20_000
+const QUIET_INPUTS = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"] as const
 
 function readSeen(campaignId: string) {
   try { return window.localStorage.getItem(SEEN_KEY + campaignId) || "" } catch { return "" }
@@ -57,6 +61,19 @@ function readSeen(campaignId: string) {
 
 function latestActivityAt(activities: ChatActivityRecord[]) {
   return activities.reduce((latest, activity) => activity.createdAt > latest ? activity.createdAt : latest, "")
+}
+
+/**
+ * La première connexion pair à pair d'une fenêtre met WebRTC en route : c'est elle, le gel de 1 à
+ * 2 s. Elle est payée ici, quand le salon se rejoint (au repos, voir `live`), et non quand trystero
+ * prépare ses connexions : il attend pour cela un temps mort du navigateur, qui peut tarder (jusqu'à
+ * TRYSTERO_IDLE_TIMEOUT_MS de vite.config.ts) et tomber alors sous les doigts.
+ */
+let webRtcStarted = false
+function startWebRtc() {
+  if (webRtcStarted || typeof RTCPeerConnection !== "function") return
+  webRtcStarted = true
+  try { new RTCPeerConnection().close() } catch { /* sans WebRTC, le salon le dira (« Hors ligne ») */ }
 }
 
 function dataRecord(value: unknown) {
@@ -119,8 +136,8 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
   }, [])
 
   const roomId = campaignId ? `chat:${campaignId}` : ""
-  // Le salon en direct coûte cher à rejoindre (une vingtaine de connexions pair à pair, des
-  // relais) : il attend que l'application soit au repos, ou qu'on ouvre le chat.
+  // L'historique et la liste des canaux (des lectures) attendent que la page affichée soit
+  // chargée, ou qu'on ouvre le chat.
   const [warm, setWarm] = useState(false)
   useEffect(() => {
     if (warm) return
@@ -130,6 +147,41 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
       : { id: window.setTimeout(() => setWarm(true), 6_000), cancel: (id: number) => window.clearTimeout(id) }
     return () => idle.cancel(idle.id)
   }, [open, warm])
+
+  // Le salon en direct, lui, gèle la fenêtre : sa première connexion pair à pair initialise
+  // WebRTC, 1,2 à 2,1 s sous Windows (relevés de novembre 2026), et un temps mort de la page
+  // ne suffit pas, l'écran se figeait sous les doigts. Il attend qu'on ouvre le chat, qu'Eraser
+  // passe à l'arrière-plan, ou que personne n'y touche (souris, clavier, molette) un moment :
+  // QUIET_CAMPAIGN_MS sur une page de campagne, dont le journal se met à jour en direct,
+  // QUIET_ELSEWHERE_MS ailleurs.
+  const [live, setLive] = useState(false)
+  const lastInputRef = useRef(0)
+  const onCampaignPage = /^\/campagne\/[^/]+/.test(pathname) || pathname.startsWith("/bac-a-sable")
+  useEffect(() => {
+    if (live) return
+    if (open || document.visibilityState === "hidden") { queueMicrotask(() => setLive(true)); return }
+    const quietMs = onCampaignPage ? QUIET_CAMPAIGN_MS : QUIET_ELSEWHERE_MS
+    if (!lastInputRef.current) lastInputRef.current = performance.now()
+    let timer = 0
+    // Un seul minuteur, réarmé à son échéance pour le temps qui manque : pas un par mouvement de souris.
+    function schedule() { timer = window.setTimeout(check, Math.max(0, quietMs - (performance.now() - lastInputRef.current))) }
+    function check() {
+      if (performance.now() - lastInputRef.current >= quietMs) setLive(true)
+      else schedule()
+    }
+    const touched = () => { lastInputRef.current = performance.now() }
+    const away = () => { if (document.visibilityState === "hidden" || !document.hasFocus()) setLive(true) }
+    for (const type of QUIET_INPUTS) window.addEventListener(type, touched, { capture: true, passive: true })
+    window.addEventListener("blur", away)
+    document.addEventListener("visibilitychange", away)
+    schedule()
+    return () => {
+      window.clearTimeout(timer)
+      for (const type of QUIET_INPUTS) window.removeEventListener(type, touched, { capture: true })
+      window.removeEventListener("blur", away)
+      document.removeEventListener("visibilitychange", away)
+    }
+  }, [live, open, onCampaignPage])
 
   useEffect(() => { membersRef.current = members }, [members])
   useEffect(() => { activityEndRef.current?.scrollIntoView({ block: "nearest" }) }, [activities.length, open])
@@ -200,7 +252,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
   }, [campaignId, markSeen, showNotice, warm])
 
   useEffect(() => {
-    if (!roomId || !warm) return
+    if (!roomId || !live) return
     let cancelled = false
     let room: Room | null = null
     let onLiveOut: ((event: Event) => void) | null = null
@@ -210,6 +262,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
     const refreshOnline = () => setOnline([...new Map([...presence.values()].filter((peer) => peer.name).map((peer) => [peer.uid, { uid: peer.uid, name: peer.name }])).values()])
     void import("trystero").then(({ joinRoom }) => {
       if (cancelled) return
+      startWebRtc()
       room = joinRoom({ appId: "com-eraser-jdr-chat-v1", password: campaignId }, roomId, { onJoinError: () => setConnection("error") })
       const activityAction = room.makeAction("activity")
       const presenceAction = room.makeAction("presence")
@@ -262,7 +315,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
       if (onLiveOut) window.removeEventListener(CAMPAIGN_LIVE_OUT_EVENT, onLiveOut)
       if (room) void room.leave()
     }
-  }, [roomId, campaignId, markSeen, user.role, user.uid, warm])
+  }, [roomId, campaignId, markSeen, user.role, user.uid, live])
 
   // Le nom du compte, partout : plus de « MJ » ni de nom de personnage.
   const speakerName = me?.name || "Joueur"

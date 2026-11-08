@@ -69,8 +69,12 @@ const radixLayerPatches: Array<{ file: RegExp; find: string; replace: string }> 
  * créait vingt d'un coup en rejoignant un salon. Chacune coûte des dizaines de millisecondes sous
  * Windows : l'écran gelait 1,5 à 2 s au lancement d'Eraser, et encore à chaque changement de
  * salon. Elles sont maintenant préparées une à une, quand la page est au repos, et six suffisent
- * (une par joueur ; au-delà, trystero en crée une à l'arrivée du pair, comme avant).
+ * (une par joueur ; au-delà, trystero en crée une à l'arrivée du pair, comme avant). Le délai de
+ * secours de chacune est long (TRYSTERO_IDLE_TIMEOUT_MS) : elles attendent un vrai temps mort.
+ * Le salon lui-même n'est rejoint qu'au repos (`live`, components/eraser/global-table-chat.tsx).
  */
+const TRYSTERO_IDLE_TIMEOUT_MS = 15_000
+
 const trysteroPoolPatches: Array<{ file: RegExp; find: string; replace: string }> = [
   {
     file: /@trystero-p2p[\\/]core[\\/]dist[\\/]offer-pool\.mjs$/,
@@ -82,12 +86,13 @@ const trysteroPoolPatches: Array<{ file: RegExp; find: string; replace: string }
       "\t\t\tif (!this.active || this.eraserRound !== eraserRound || left <= 0) return;",
       "\t\t\tif (this.pool.length < 6) this.push(this.makeOffer());",
       "\t\t\tconst next = () => eraserFill(left - 1);",
-      "\t\t\tif (typeof requestIdleCallback === \"function\") requestIdleCallback(next, { timeout: 3000 });",
+      `\t\t\tif (typeof requestIdleCallback === "function") requestIdleCallback(next, { timeout: ${TRYSTERO_IDLE_TIMEOUT_MS} });`,
       "\t\t\telse setTimeout(next, 60);",
       "\t\t};",
       // La première connexion aussi attend un temps mort : c'est elle qui initialise WebRTC
-      // (0,5 à 0,7 s de calcul), qui sinon s'ajoutait à la tâche qui rejoint le salon.
-      "\t\tif (typeof requestIdleCallback === \"function\") requestIdleCallback(() => eraserFill(6), { timeout: 3000 });",
+      // (1,2 à 2,1 s sous Windows d'après les relevés), qui sinon s'ajoutait à la tâche qui
+      // rejoint le salon.
+      `\t\tif (typeof requestIdleCallback === "function") requestIdleCallback(() => eraserFill(6), { timeout: ${TRYSTERO_IDLE_TIMEOUT_MS} });`,
       "\t\telse setTimeout(() => eraserFill(6), 60);",
     ].join("\n"),
   },

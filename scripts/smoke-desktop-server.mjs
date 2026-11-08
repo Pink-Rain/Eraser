@@ -179,6 +179,11 @@ try {
   const extensionsCheck = await fetch(`${origin}/api/extensions/verifier`, { method: "POST", headers: { cookie: loginCookie } })
   const extensionsCheckBody = extensionsCheck.ok ? await extensionsCheck.json() : null
   if (!Array.isArray(extensionsCheckBody?.extensions)) throw new Error(`La vérification des extensions ne répond pas (${extensionsCheck.status}).`)
+  // Le relevé de fluidité donne les versions des extensions installées.
+  const fluidity = await fetch(`${origin}/api/fluidity`, { headers: { cookie: loginCookie } })
+  const fluidityBody = fluidity.ok ? await fluidity.json() : null
+  const fluidityMap = fluidityBody?.extensions?.find?.((extension) => extension.id === "map")
+  if (fluidityMap?.version !== "0.1.0" || fluidityBody.extensions.length !== 3) throw new Error(`Le relevé de fluidité ne donne pas les versions des extensions (${fluidity.status} ${JSON.stringify(fluidityBody?.extensions)}).`)
   console.log(`Serveur local Eraser vérifié (HTTP ${status}), formulaires, mot de passe, compte administrateur, flux OAuth et extensions opérationnels.`)
 } catch (error) {
   if (logs.trim()) console.error(logs.trim())
