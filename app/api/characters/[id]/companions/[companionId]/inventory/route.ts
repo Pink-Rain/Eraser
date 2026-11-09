@@ -6,8 +6,9 @@ import {
   addCharacterInventoryItem, createCharacterInventoryItem, getCharacterCompanions, getNpcBackpackInventory,
   listCharacterRelations, listInventoryTransferTargets,
   setCharacterInventoryItemQuantity, transferCharacterInventoryItem, updateCharacterInventoryItem,
+  recycleCharacterInventoryItem,
 } from "@/lib/google-sheets"
-import { INVENTORY_CHANGED_MESSAGE, inventorySlotExpectation, type InventoryTransferTarget } from "@/lib/inventory-schema"
+import { INVENTORY_CHANGED_MESSAGE, inventoryRecycleErrorMessage, inventoryRecycleRequest, inventorySlotExpectation, type InventoryTransferTarget } from "@/lib/inventory-schema"
 import { transferWithNotification } from "@/lib/item-notifications"
 
 /**
@@ -66,6 +67,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     let inventory
     if (body.action === "add-item" && typeof body.itemId === "string") inventory = await addCharacterInventoryItem(owner, body.itemId, undefined, "npc")
     else if (body.action === "create-item" && typeof body.name === "string" && typeof body.description === "string" && typeof body.type === "string" && typeof body.subtype === "string" && typeof body.effect === "string") inventory = await createCharacterInventoryItem(owner, "", { name: body.name, description: body.description, type: body.type, subtype: body.subtype, effect: body.effect }, "npc")
+    else if (body.action === "recycle-item") {
+      const recycle = inventoryRecycleRequest(body)
+      if (!recycle) throw new Error("INVALID_INVENTORY_RECYCLE")
+      inventory = await recycleCharacterInventoryItem(owner, recycle.slotId, recycle.count, recycle.products, "npc", inventorySlotExpectation(body))
+    }
     else if (body.action === "set-quantity" && typeof body.slotId === "string" && typeof body.quantity === "number" && Number.isFinite(body.quantity)) inventory = await setCharacterInventoryItemQuantity(owner, body.slotId, body.quantity, "npc", inventorySlotExpectation(body))
     else if (body.action === "update-item" && typeof body.slotId === "string" && typeof body.name === "string" && typeof body.description === "string" && typeof body.type === "string" && typeof body.subtype === "string" && typeof body.effect === "string") inventory = await updateCharacterInventoryItem(owner, body.slotId, { name: body.name, description: body.description, type: body.type, subtype: body.subtype, effect: body.effect, nameHtml: typeof body.nameHtml === "string" ? body.nameHtml : undefined, descriptionHtml: typeof body.descriptionHtml === "string" ? body.descriptionHtml : undefined, effectHtml: typeof body.effectHtml === "string" ? body.effectHtml : undefined }, "npc")
     else if (body.action === "transfer-item" && typeof body.slotId === "string" && typeof body.targetId === "string") {
@@ -78,13 +84,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   } catch (error) {
     const code = error instanceof Error ? error.message : ""
     if (code === "INVENTORY_CHANGED") return NextResponse.json({ error: INVENTORY_CHANGED_MESSAGE }, { status: 409 })
-    const message = code === "INVENTORY_FULL" ? "Il n’y a plus d’emplacement compatible disponible."
+    const message = inventoryRecycleErrorMessage(code) ?? (code === "INVENTORY_FULL" ? "Il n’y a plus d’emplacement compatible disponible."
       : code === "INVENTORY_NO_COMPATIBLE_CONTAINER" ? "Ajoute d’abord un contenant compatible avec cet item."
         : code === "INVENTORY_ITEM_NOT_FOUND" ? "Cet item n’existe plus dans l’Index des items."
           : code === "INVENTORY_ITEM_WRONG_CATEGORY" ? "Ce type d’item n’est pas compatible avec ce contenant."
             : code === "INVALID_INVENTORY_ITEM" ? "Vérifie le nom et les informations de l’item."
               : code === "INVENTORY_TRANSFER_FORBIDDEN" ? "Cet item ne peut pas être donné à ce destinataire."
-                : "La modification de l’inventaire n’a pas pu être enregistrée."
+                : "La modification de l’inventaire n’a pas pu être enregistrée.")
     return NextResponse.json({ error: message }, { status: 400 })
   }
 }

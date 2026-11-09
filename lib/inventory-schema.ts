@@ -54,6 +54,11 @@ export type InventoryItemRecord = {
   prerequisites: string
   edition: string
   active: boolean
+  /**
+   * Ce en quoi l'item se recycle (colonne « Se recycle en » de l'Index des items) : les items
+   * nommés, retrouvés dans le catalogue. Absent : pas de bouton de recyclage.
+   */
+  recycle?: InventoryRecycleProduct[]
 } & ObjectCombatFields // Compétence, Distance, Action, Valeur… de l'index des objets (absentes sinon).
 
 /**
@@ -272,6 +277,40 @@ export function inventorySlotExpectation(body: Record<string, unknown>): Invento
   return itemId === undefined && quantity === undefined ? undefined : { itemId, quantity }
 }
 
+/** Un item obtenu en recyclant un autre. */
+export type InventoryRecycleProduct = { id: string; name: string }
+
+/**
+ * Les en-têtes de « Se recycle en » dans l'Index des items. Jamais « Recyclage de », la colonne
+ * qui lui répond : elle nomme ce dont l'item est le produit, pas ce qu'il donne.
+ */
+export const objectRecycleHeaders = ["Se recycle en", "Recyclage", "Recycle en", "Recyclé en", "Recycle", "Recyclable en"]
+
+/** Les plus grands nombres d'un recyclage : exemplaires recyclés d'un coup, et de chaque produit. */
+export const RECYCLE_MAX_PRODUCT = 99
+
+/** Ce qu'une page demande en recyclant : combien d'exemplaires, et quels produits en quel nombre. */
+export type InventoryRecycleRequest = { slotId: string; count: number; products: Array<{ itemId: string; quantity: number }> }
+
+/** La demande de recyclage d'une requête (`action: "recycle-item"`), ou `null` si elle est mal formée. */
+export function inventoryRecycleRequest(body: Record<string, unknown>): InventoryRecycleRequest | null {
+  if (body.action !== "recycle-item" || typeof body.slotId !== "string" || typeof body.count !== "number" || !Number.isFinite(body.count) || !Array.isArray(body.products)) return null
+  const products = body.products.flatMap((product): InventoryRecycleRequest["products"] => {
+    if (!product || typeof product !== "object") return []
+    const { itemId, quantity } = product as Record<string, unknown>
+    return typeof itemId === "string" && itemId && typeof quantity === "number" && Number.isFinite(quantity) ? [{ itemId, quantity: Math.trunc(quantity) }] : []
+  })
+  return { slotId: body.slotId, count: Math.trunc(body.count), products }
+}
+
+/** Le message d'un refus propre au recyclage, ou `undefined` pour un autre code. */
+export function inventoryRecycleErrorMessage(code: string) {
+  return code === "INVENTORY_NOT_RECYCLABLE" ? "Cet item ne se recycle plus en ce que tu as choisi : actualise puis recommence."
+    : code === "INVALID_INVENTORY_RECYCLE" ? "Choisis au moins un item à obtenir, et des nombres valides."
+      : code === "INVENTORY_RECYCLE_PARTIAL" ? "Le recyclage n’est allé qu’à moitié : une partie des items obtenus n’a pas trouvé de place. Vérifie l’inventaire."
+        : undefined
+}
+
 export const baseInventoryContainerTypes: InventoryContainerTypeRecord[] = [
   { id: "TYPE-ARMES-BASE", name: "Armes de base", category: "Armes", capacity: 6, columns: [], active: true },
   { id: "TYPE-EQUIPEMENT-BASE", name: "Équipement de base", category: "Équipement", capacity: 8, columns: [], active: true },
@@ -383,7 +422,7 @@ export function emptyCharacterInventory(): CharacterInventoryRecord {
   return { containerTypes: baseInventoryContainerTypes, containers: [], items: [] }
 }
 
-const catalogExtras = ["skill", "distance", "action", "reload", "value", "attributes", "materials", "runes", "looks"] as const
+const catalogExtras = ["skill", "distance", "action", "reload", "value", "attributes", "materials", "runes", "looks", "recycle"] as const
 
 /**
  * Un inventaire « résumé » (lu sans le catalogue des objets, pour aller vite) n'a pas les

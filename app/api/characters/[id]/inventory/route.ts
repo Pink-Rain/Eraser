@@ -24,8 +24,9 @@ import {
   transferCharacterInventoryItem,
   updateCharacterInventoryContainer,
   updateCharacterInventoryItem,
+  recycleCharacterInventoryItem,
 } from "@/lib/google-sheets"
-import { INVENTORY_CHANGED_MESSAGE, inventorySlotExpectation } from "@/lib/inventory-schema"
+import { INVENTORY_CHANGED_MESSAGE, inventoryRecycleErrorMessage, inventoryRecycleRequest, inventorySlotExpectation } from "@/lib/inventory-schema"
 import { transferWithNotification } from "@/lib/item-notifications"
 import { companionInventoryOwnerId } from "@/lib/companions"
 import { authorizedAccount } from "@/lib/server-auth"
@@ -110,6 +111,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       inventory = await addCharacterInventoryItem(id, body.itemId, typeof body.containerId === "string" ? body.containerId : undefined)
     } else if (body.action === "create-item" && typeof body.containerId === "string" && typeof body.name === "string" && typeof body.description === "string" && typeof body.type === "string" && typeof body.subtype === "string" && typeof body.effect === "string") {
       inventory = await createCharacterInventoryItem(id, body.containerId, { name: body.name, description: body.description, type: body.type, subtype: body.subtype, effect: body.effect })
+    } else if (body.action === "recycle-item") {
+      const recycle = inventoryRecycleRequest(body)
+      if (!recycle) throw new Error("INVALID_INVENTORY_RECYCLE")
+      inventory = await recycleCharacterInventoryItem(id, recycle.slotId, recycle.count, recycle.products, "character", inventorySlotExpectation(body))
     } else if (body.action === "set-quantity" && typeof body.slotId === "string" && typeof body.quantity === "number" && Number.isFinite(body.quantity)) {
       inventory = await setCharacterInventoryItemQuantity(id, body.slotId, body.quantity, "character", inventorySlotExpectation(body))
     } else if (body.action === "set-equipped" && typeof body.slotId === "string" && typeof body.equipped === "boolean") {
@@ -134,7 +139,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const code = error instanceof Error ? error.message : ""
     // La case n'est plus celle que la page montrait : rien n'a été écrit, la page se relit.
     if (code === "INVENTORY_CHANGED") return NextResponse.json({ error: INVENTORY_CHANGED_MESSAGE }, { status: 409 })
-    const message = code === "INVENTORY_FULL" ? "Il n’y a plus d’emplacement compatible disponible."
+    const message = inventoryRecycleErrorMessage(code) ?? (code === "INVENTORY_FULL" ? "Il n’y a plus d’emplacement compatible disponible."
       : code === "INVENTORY_NO_COMPATIBLE_CONTAINER" ? "Ajoute d’abord un contenant compatible avec cet item."
         : code === "INVALID_INVENTORY_MODIFIERS" ? "Ces liens vers des caractéristiques sont trop nombreux."
         : code === "INVENTORY_SLOT_NOT_FOUND" ? "Cet item n’est plus dans cet inventaire."
@@ -146,7 +151,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
                 : code === "INVENTORY_GROUND_PERMANENT" ? "« Au sol » reste toujours là : il ne se supprime pas."
                   : code === "INVENTORY_ITEM_WRONG_CATEGORY" ? "Ce type d’item n’est pas compatible avec ce contenant."
                     : code === "INVALID_INVENTORY_ITEM" ? "Vérifie le nom et les informations de l’item."
-            : "La modification de l’inventaire n’a pas pu être enregistrée."
+            : "La modification de l’inventaire n’a pas pu être enregistrée.")
     return NextResponse.json({ error: message }, { status: 400 })
   }
 }

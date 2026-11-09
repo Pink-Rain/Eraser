@@ -310,6 +310,14 @@ pour tout index. Sa page est `WorldIndexPage`. Il n’a **pas d’autre lecteur*
   vide = tout sauf la monnaie (`canItemGoInCustomInventory`). On n’y range qu’exprès : le
   rangement automatique (achat, don, ajout sans contenant) ne le vise jamais
   (`itemAutoFitsInventoryContainer`).
+- le **recyclage** (♻️, juste avant la corbeille d'un item de l'inventaire, partout où elle est) :
+  la colonne « Se recycle en » de l'Index des items (`objectRecycleHeaders`, jamais « Recyclage
+  de », qui lui répond) donne `recycle` à l'item, ses noms retrouvés dans le catalogue
+  (`withRecycleProducts`) ; sans produit retrouvé, pas de bouton. La fenêtre choisit combien
+  d'exemplaires de la pile, quels produits et combien de chacun (le MJ décide) ; l'action
+  `recycle-item` (`recycleCharacterInventoryItem`) revérifie tout dans le catalogue à jour, retire
+  d'abord les exemplaires puis ajoute les produits comme un ajout à la main, sous le même verrou.
+  Si le premier produit n'a pas de place, la case est remise telle qu'elle était.
 Les vues d’avant désignaient un onglet par « fichier:sheetId » : la page les lit sous son nom.
 
 ### Affichage des items (inventaire, magasin, fouille)

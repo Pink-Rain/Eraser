@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent, type ReactNode, type SetStateAction } from "react"
-import { Anvil, ArrowDownToLine, ArrowLeft, Backpack, BookOpen, Check, ChevronDown, ChevronRight, Coins, Eye, EyeOff, Gem, LoaderCircle, Minus, MoveRight, PackageOpen, Pencil, Plus, Search, Shield, Sword, Trash2, UserRound, Users, X } from "lucide-react"
+import { Anvil, ArrowDownToLine, ArrowLeft, Backpack, BookOpen, Check, ChevronDown, ChevronRight, Coins, Eye, EyeOff, Gem, LoaderCircle, Minus, MoveRight, PackageOpen, Pencil, Plus, Recycle, Search, Shield, Sword, Trash2, UserRound, Users, X } from "lucide-react"
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { useInventoryReceived } from "@/components/eraser/item-notifications"
@@ -19,7 +19,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { ItemModifierDialog, ItemModifierSummary } from "@/components/eraser/item-modifier-editor"
 import { ObjectIcon } from "@/components/eraser/object-icon"
 import { escapeRichText, richTextPlainText, RichTextField, sanitizeRichText } from "@/components/eraser/rich-text"
-import { canItemGoInContainer, describeCustomInventoryAccepts, emptyCharacterInventory, GROUND_CATEGORY, isUnlimitedInventoryCategory, parseCustomInventoryAccepts, type CharacterInventoryRecord, type CustomInventoryLook, type CustomInventorySide, type InventoryCategory, type InventoryContainerRecord, type InventorySlotRecord, type InventoryTransferTarget, type ObjectCombatFields, keepCatalogFields } from "@/lib/inventory-schema"
+import { canItemGoInContainer, describeCustomInventoryAccepts, emptyCharacterInventory, GROUND_CATEGORY, isUnlimitedInventoryCategory, parseCustomInventoryAccepts, type CharacterInventoryRecord, type CustomInventoryLook, type CustomInventorySide, type InventoryCategory, type InventoryContainerRecord, type InventorySlotRecord, type InventoryTransferTarget, type InventoryRecycleProduct, type ObjectCombatFields, RECYCLE_MAX_PRODUCT, keepCatalogFields } from "@/lib/inventory-schema"
 import { CraftCorner, CustomInventoryDialog, CustomInventoryIconGlyph, type CustomInventoryDraft } from "@/components/eraser/custom-inventories"
 import { effectiveItemFields, itemChargeKey, keepItemCharges, parseItemAttachments, parseItemCharges, parseItemModifiers, parseItemOverrides, withItemCharge, type ItemAttachmentKind } from "@/lib/item-modifiers"
 import { useWeaponModifiers } from "@/components/eraser/index-references"
@@ -66,6 +66,7 @@ type MutationBody =
   | ({ action: "update-item"; slotId: string; descriptionHtml?: string; effectHtml?: string } & ItemFields)
   | ({ action: "move-item"; slotId: string; containerId: string } & SlotExpectation)
   | ({ action: "transfer-item"; slotId: string; targetId: string } & SlotExpectation)
+  | ({ action: "recycle-item"; slotId: string; count: number; products: Array<{ itemId: string; quantity: number }> } & SlotExpectation)
   | { action: "set-currency"; containerId: string; currency: string; amount: number; expectedAmount: number }
 
 type Mutate = (body: MutationBody, pendingKey: string) => Promise<boolean>
@@ -268,6 +269,62 @@ function ItemEffectReveal({ slotId, itemName, parts }: { slotId: string; itemNam
   </div>
 }
 
+/** Un nombre réglé par − et + (le recyclage : exemplaires recyclés, produits obtenus). */
+function CountStepper({ value, min, max, label, disabled, onChange }: { value: number; min: number; max: number; label: string; disabled?: boolean; onChange: (value: number) => void }) {
+  return <div className={`inline-flex shrink-0 items-center gap-0.5 rounded-lg border border-border/60 bg-background/60 p-0.5 ${disabled ? "opacity-40" : ""}`}>
+    <button type="button" disabled={disabled || value <= min} onClick={() => onChange(value - 1)} className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted disabled:opacity-30" aria-label={`Un de moins : ${label}`}><Minus className="size-3.5" /></button>
+    <span className="min-w-8 text-center text-sm font-semibold tabular-nums" aria-live="polite">{value}</span>
+    <button type="button" disabled={disabled || value >= max} onClick={() => onChange(value + 1)} className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted disabled:opacity-30" aria-label={`Un de plus : ${label}`}><Plus className="size-3.5" /></button>
+  </div>
+}
+
+/**
+ * La fenêtre du recyclage : combien d'exemplaires (une pile), et ce qu'ils donnent, parmi « Se
+ * recycle en ». Le MJ décide : le joueur coche ce qui lui est accordé, et en quel nombre. Un
+ * produit suit le nombre d'exemplaires recyclés tant qu'on n'a pas réglé le sien.
+ * Monté seulement fenêtre ouverte : chaque ouverture repart des réglages par défaut.
+ */
+function RecycleDialogBody({ itemName, quantity, products, customized, onConfirm }: { itemName: string; quantity: number; products: InventoryRecycleProduct[]; customized: boolean; onConfirm: (count: number, chosen: Array<{ itemId: string; quantity: number }>) => void }) {
+  const [count, setCount] = useState(1)
+  // Un seul produit possible : déjà coché. Plusieurs : rien, le MJ dit lesquels.
+  const [checked, setChecked] = useState<string[]>(() => products.length === 1 ? [products[0].id] : [])
+  const [amounts, setAmounts] = useState<Record<string, number>>({})
+  const amountOf = (id: string) => amounts[id] ?? Math.min(count, RECYCLE_MAX_PRODUCT)
+  const chosen = products.filter((product) => checked.includes(product.id)).map((product) => ({ itemId: product.id, name: product.name, quantity: amountOf(product.id) }))
+  return <>
+    <AlertDialogHeader>
+      <AlertDialogTitle className="flex items-center gap-2"><Recycle className="size-4.5 text-emerald-600" />Recycler « {itemName} » ?</AlertDialogTitle>
+      <AlertDialogDescription>{quantity > 1 ? "Les exemplaires recyclés quittent l’inventaire et laissent" : "L’item quitte l’inventaire et laisse"} place à ce que tu coches.{products.length > 1 ? " Demande au MJ ce que tu obtiens." : ""}</AlertDialogDescription>
+    </AlertDialogHeader>
+    <div className="grid gap-4">
+      {quantity > 1 && <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/55 bg-muted/25 px-3 py-2">
+        <div className="min-w-0"><p className="text-sm font-semibold">Combien en recycler ?</p><p className="text-[11px] text-muted-foreground">Tu en as {quantity}.</p></div>
+        <div className="flex items-center gap-1.5"><CountStepper value={count} min={1} max={quantity} label={`exemplaires de ${itemName} à recycler`} onChange={setCount} /><Button type="button" size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={count === quantity} onClick={() => setCount(quantity)}>Tout</Button></div>
+      </div>}
+      <div className="grid gap-1.5">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{products.length > 1 ? "Tu obtiens (un ou plusieurs)" : "Tu obtiens"}</p>
+        {products.map((product) => {
+          const on = checked.includes(product.id)
+          const toggle = (next: boolean) => setChecked((current) => next ? [...current.filter((id) => id !== product.id), product.id] : current.filter((id) => id !== product.id))
+          return <div key={product.id} className={`flex items-center gap-2.5 rounded-xl border px-3 py-2 transition-colors ${on ? "border-primary/35 bg-primary/6" : "border-border/55"}`}>
+            <Checkbox id={`recycle-${product.id}`} checked={on} onCheckedChange={(value) => toggle(value === true)} aria-label={`Obtenir ${product.name}`} />
+            <label htmlFor={`recycle-${product.id}`} className="min-w-0 flex-1 cursor-pointer truncate text-sm font-medium" title={product.name}>{product.name}</label>
+            <CountStepper value={amountOf(product.id)} min={1} max={RECYCLE_MAX_PRODUCT} label={product.name} disabled={!on} onChange={(value) => setAmounts((current) => ({ ...current, [product.id]: value }))} />
+          </div>
+        })}
+      </div>
+      {customized && <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-700">Ce qui est propre à cet exemplaire (runes, matériaux, compétences liées…) disparaît avec lui.</p>}
+      <p className="text-xs text-muted-foreground">{chosen.length
+        ? <><b className="text-foreground">{count} × {itemName}</b> → {chosen.map((product) => `${product.quantity} × ${product.name}`).join(", ")}</>
+        : "Coche au moins un item à obtenir."}</p>
+    </div>
+    <AlertDialogFooter>
+      <AlertDialogCancel>Annuler</AlertDialogCancel>
+      <AlertDialogAction disabled={!chosen.length} onClick={() => onConfirm(count, chosen.map(({ itemId, quantity: amount }) => ({ itemId, quantity: amount })))}><Recycle />Recycler</AlertDialogAction>
+    </AlertDialogFooter>
+  </>
+}
+
 function InventoryItemLine({ slot, container, compatibleContainers, transferTargets, targetsLoading, pending, readOnly, flat, ensureTargets, mutate }: { slot: InventorySlotRecord; container: InventoryContainerRecord; compatibleContainers: InventoryContainerRecord[]; transferTargets: InventoryTransferTarget[]; targetsLoading: boolean; pending: boolean; readOnly: boolean; flat: boolean; ensureTargets: () => Promise<void>; mutate: Mutate }) {
   const item = slot.item
   const fresh = useNewSlot(slot.id)
@@ -329,6 +386,8 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
   const effectParts = itemZoneParts(placeZone(placed, "effect"), zone)
   const withDescription = zoneHas(descriptionFields, "description")
   const expected: SlotExpectation = { expectedItemId: slot.itemId, expectedQuantity: slot.quantity }
+  // « Se recycle en » de l'Index des items : un item de l'index qui donne au moins un autre item.
+  const recyclable = slot.itemId && slot.quantity > 0 && container.category !== "Bourse" && item.recycle?.length ? item.recycle : null
   return <article className="relative rounded-xl border border-border/55 bg-background/40 p-3 shadow-sm" onPointerMove={fresh.isNew ? fresh.seen : undefined} onFocusCapture={fresh.isNew ? fresh.seen : undefined}>
     {fresh.isNew && <span className="absolute -left-1 -top-1 size-2.5 rounded-full bg-rose-400 ring-2 ring-card" title="Item reçu — disparaît au survol" aria-label="Nouvel item reçu" />}
     <div className="flex items-start gap-3">
@@ -347,6 +406,7 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
           {readOnly && <span className="shrink-0 text-sm font-semibold tabular-nums">×{slot.quantity}</span>}
           {equippable && <button type="button" disabled={pending} onClick={() => setLinking(true)} className={`flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-muted ${modifiers.length || customized ? "text-primary" : "text-muted-foreground"}`} aria-label={`Modifier cet exemplaire de ${item.name} : compétence, valeur, distance, actions, attributs, matériaux, runes, compétences liées`} title="Cet exemplaire : compétence, valeur, distance, actions, attributs, matériaux, runes, compétences liées"><Anvil className="size-3.5" /></button>}
           {!readOnly && <Popover open={moving} onOpenChange={(open) => { setMoving(open); if (open) void ensureTargets() }}><PopoverTrigger asChild><button type="button" disabled={pending} className={`flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted ${moving ? "bg-muted text-foreground" : ""}`} aria-label={`Transférer ${item.name}`} title="Transférer"><MoveRight className="size-3.5" /></button></PopoverTrigger><PopoverContent align="end" side="bottom" className="w-80 p-3"><InventoryTransferPicker itemName={item.name} slotId={slot.id} expected={expected} internalTargets={internalTargets} transferTargets={transferTargets} loading={targetsLoading} pending={pending} mutate={mutate} onDone={() => setMoving(false)} /></PopoverContent></Popover>}
+          {!readOnly && recyclable && <AlertDialog><AlertDialogTrigger asChild><button type="button" disabled={pending} className="flex size-7 shrink-0 items-center justify-center rounded-md text-emerald-600/80 hover:bg-emerald-500/10" aria-label={`Recycler ${item.name}`} title={`Recycler en ${recyclable.map((product) => product.name).join(", ")}`}><Recycle className="size-3.5" /></button></AlertDialogTrigger><AlertDialogContent><RecycleDialogBody itemName={item.name} quantity={slot.quantity} products={recyclable} customized={customized} onConfirm={(count, products) => void mutate({ action: "recycle-item", slotId: slot.id, count, products, ...expected }, `slot:${slot.id}`)} /></AlertDialogContent></AlertDialog>}
           {!readOnly && <AlertDialog><AlertDialogTrigger asChild><button type="button" disabled={pending} className="flex size-7 shrink-0 items-center justify-center rounded-md text-destructive/75 hover:bg-destructive/10" aria-label={`Retirer complètement ${item.name}`}><Trash2 className="size-3.5" /></button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Retirer « {item.name} » ?</AlertDialogTitle><AlertDialogDescription>Cet item sera retiré de cet inventaire.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: 0, ...expected }, `slot:${slot.id}`)}>Retirer</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>}
         </div>
         <div className="mt-2 grid gap-1 text-xs leading-5 text-muted-foreground empty:hidden"><ItemDescription readOnly={readOnly} item={item} template={shown} withDescription={withDescription} extras={descriptionParts} onCommit={(description) => update({ description }).then(() => undefined)} onRichCommit={(descriptionHtml) => void update({ description: richTextPlainText(descriptionHtml), descriptionHtml })} />{effectBehindEye && effectParts.length > 0 ? <ItemEffectReveal slotId={slot.id} itemName={item.name} parts={effectParts} /> : effectParts}</div>

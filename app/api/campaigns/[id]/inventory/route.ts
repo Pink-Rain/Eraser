@@ -15,8 +15,9 @@ import {
   transferCharacterInventoryItem,
   updateCharacterInventoryContainer,
   updateCharacterInventoryItem,
+  recycleCharacterInventoryItem,
 } from "@/lib/google-sheets"
-import { INVENTORY_CHANGED_MESSAGE, inventorySlotExpectation } from "@/lib/inventory-schema"
+import { INVENTORY_CHANGED_MESSAGE, inventoryRecycleErrorMessage, inventoryRecycleRequest, inventorySlotExpectation } from "@/lib/inventory-schema"
 import { transferWithNotification } from "@/lib/item-notifications"
 import { authorizedAccount } from "@/lib/server-auth"
 
@@ -71,6 +72,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       inventory = await addCharacterInventoryItem(ownerId, body.itemId, typeof body.containerId === "string" ? body.containerId : undefined)
     } else if (body.action === "create-item" && typeof body.containerId === "string" && typeof body.name === "string" && typeof body.description === "string" && typeof body.type === "string" && typeof body.subtype === "string" && typeof body.effect === "string") {
       inventory = await createCharacterInventoryItem(ownerId, body.containerId, { name: body.name, description: body.description, type: body.type, subtype: body.subtype, effect: body.effect })
+    } else if (body.action === "recycle-item") {
+      const recycle = inventoryRecycleRequest(body)
+      if (!recycle) throw new Error("INVALID_INVENTORY_RECYCLE")
+      inventory = await recycleCharacterInventoryItem(ownerId, recycle.slotId, recycle.count, recycle.products, "character", inventorySlotExpectation(body))
     } else if (body.action === "set-quantity" && typeof body.slotId === "string" && typeof body.quantity === "number" && Number.isFinite(body.quantity)) {
       inventory = await setCharacterInventoryItemQuantity(ownerId, body.slotId, body.quantity, "character", inventorySlotExpectation(body))
     } else if (body.action === "update-item" && typeof body.slotId === "string" && typeof body.name === "string" && typeof body.description === "string" && typeof body.type === "string" && typeof body.subtype === "string" && typeof body.effect === "string") {
@@ -87,11 +92,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   } catch (error) {
     const code = error instanceof Error ? error.message : ""
     if (code === "INVENTORY_CHANGED") return NextResponse.json({ error: INVENTORY_CHANGED_MESSAGE }, { status: 409 })
-    const message = code === "INVENTORY_FULL" ? "Il n’y a plus d’emplacement disponible dans cet inventaire."
+    const message = inventoryRecycleErrorMessage(code) ?? (code === "INVENTORY_FULL" ? "Il n’y a plus d’emplacement disponible dans cet inventaire."
       : code === "INVENTORY_NO_COMPATIBLE_CONTAINER" ? "Le destinataire n’a pas de contenant compatible disponible."
         : code === "INVALID_INVENTORY_CONTAINER" ? "Donne un nom et une limite comprise entre 1 et 10 000."
           : code === "INVALID_INVENTORY_ITEM" ? "Vérifie le nom et les informations de l’item."
-            : "La modification de l’inventaire de campagne n’a pas pu être enregistrée."
+            : "La modification de l’inventaire de campagne n’a pas pu être enregistrée.")
     return NextResponse.json({ error: message }, { status: 400 })
   }
 }

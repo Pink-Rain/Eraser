@@ -30,7 +30,7 @@ import { runInBackground } from "@/lib/background-work"
 import { withAsyncLock } from "@/lib/async-lock"
 import type { ObjectIndexRowRef } from "@/lib/object-index-refs"
 import { objectCombatColumn, objectPriceColumn, objectTraitLooks, planObjectCombatHeaders } from "@/lib/object-combat"
-import { isEntityWorldIndexKey, worldIndexDefinitions, type BuiltinWorldIndexKey, type EntityWorldIndexKey } from "@/lib/world-index-definitions"
+import { isEntityWorldIndexKey, splitNames, worldIndexDefinitions, type BuiltinWorldIndexKey, type EntityWorldIndexKey } from "@/lib/world-index-definitions"
 import { foldName, isImageSource, type IndexColumnSpec } from "@/lib/index-columns"
 import { forgetJdrSheet, getJdrSheet, saveJdrSheet, type JdrSheetKey, type JdrSheetRecord } from "@/lib/jdr-sheets"
 import { forgetGoogleAccessToken, googleOAuthAuthorizedFetch, warmGoogleOAuthAccessToken } from "@/lib/google-oauth"
@@ -85,6 +85,8 @@ import {
   isUnlimitedInventoryCategory,
   inventoryWorkbookTabs,
   objectCombatColumns,
+  objectRecycleHeaders,
+  RECYCLE_MAX_PRODUCT,
   type ObjectCombatFields,
   parseInventoryCategory,
   type CharacterInventoryRecord,
@@ -6359,9 +6361,34 @@ function parseObjectIndexItems(tables: ObjectIndexTable[]): InventoryItemRecord[
       prerequisites: objectIndexCell(table, row, ["Prérequis", "Prerequis"]),
       edition: objectIndexCell(table, row, ["Édition", "Edition"]),
       active: sheetValueIsActive(objectIndexCell(table, row, ["Actif", "Active", "Disponible"])),
+      ...objectRecycleNames(table, row),
       ...objectCombatFields(table, row),
     }]
   }))
+}
+
+/** Les noms de « Se recycle en », pas encore retrouvés dans le catalogue (`withRecycleProducts`). */
+function objectRecycleNames(table: ObjectIndexTable, row: ObjectIndexRow): Pick<InventoryItemRecord, "recycle"> {
+  const names = splitNames(objectIndexCell(table, row, objectRecycleHeaders)).filter((name) => !isSheetErrorValue(name))
+  return names.length ? { recycle: names.map((name) => ({ id: "", name })) } : {}
+}
+
+/**
+ * Les produits de recyclage retrouvés par leur nom parmi les items actifs (le premier du nom,
+ * comme les colonnes liées). Un nom introuvable, ou l'item lui-même, est laissé de côté.
+ */
+function withRecycleProducts(items: InventoryItemRecord[]) {
+  if (!items.some((item) => item.recycle?.length)) return items
+  const byName = new Map<string, InventoryItemRecord>()
+  for (const item of items) if (item.active && !byName.has(foldName(item.name))) byName.set(foldName(item.name), item)
+  return items.map((item) => {
+    if (!item.recycle?.length) return item
+    const recycle = item.recycle.flatMap((product) => {
+      const found = byName.get(foldName(product.name))
+      return found && found.id !== item.id ? [{ id: found.id, name: found.name }] : []
+    })
+    return { ...item, recycle: recycle.length ? recycle : undefined }
+  })
 }
 
 /** Compétence, Distance, Action, Valeur, Attributs d'un objet (les cases vides sont omises). */
@@ -6451,7 +6478,7 @@ async function readInventoryWorkbook(includeCatalog = true, options: InventoryRe
     })
   }
   const mergedItems = [...parseInventoryItemRows(itemRows), ...parseObjectIndexItems(objectIndexTables)]
-  const items = [...new Map(mergedItems.map((item) => [item.id, item])).values()]
+  const items = withRecycleProducts([...new Map(mergedItems.map((item) => [item.id, item])).values()])
   const configuredTypes = parseContainerTypeRows(typeRows)
   const containerTypes = [...new Map([...baseInventoryContainerTypes, ...configuredTypes].map((type) => [type.id, type])).values()]
   const workbook: InventoryWorkbook = {
@@ -7444,6 +7471,57 @@ export async function setCharacterInventoryItemQuantity(characterId: string, slo
     const now = new Date().toISOString()
     const updated: StoredInventoryContent = nextQuantity === 0 ? emptiedInventorySlot(content, now) : { ...content, quantity: nextQuantity, updatedAt: now }
     return buildCharacterInventory(characterId, await writeInventoryChanges(workbook, { contents: [[content, updated]] }))
+  })
+}
+
+/**
+ * Recycle `count` exemplaires d'une case : ils sont retirés, et les produits choisis (parmi ceux
+ * de « Se recycle en », relus dans le catalogue à jour) arrivent comme un item ajouté à la main.
+ * Le tout sous le même verrou. Si le premier produit ne trouve pas de place, la case est remise
+ * comme avant et rien n'a changé ; si c'est un suivant, ce qui est arrivé reste (refus partiel).
+ */
+export async function recycleCharacterInventoryItem(ownerId: string, slotId: string, count: number, products: Array<{ itemId: string; quantity: number }>, mode: InventoryOwnerMode = "character", expected?: InventorySlotExpectation): Promise<InventoryChangeResult> {
+  return withInventoryLock(async () => {
+    const workbook = await inventoryStorageFor(ownerId, true, mode, { fresh: true, currentCatalog: true })
+    const content = workbook.contents.find((candidate) => candidate.id === slotId && candidate.characterId === ownerId)
+    assertExpectedSlot(content, expected)
+    if (!content || !content.itemId || content.quantity < 1) throw new Error("INVENTORY_SLOT_NOT_FOUND")
+    const container = workbook.containers.find((candidate) => candidate.id === content.containerId && !candidate.deletedAt)
+    const typeById = new Map(workbook.containerTypes.map((type) => [type.id, type]))
+    if (!container || inventoryContainerCategory(container, typeById) === "Bourse") throw new Error("INVENTORY_SLOT_NOT_FOUND")
+    const recycle = workbook.items.find((candidate) => candidate.id === content.itemId)?.recycle ?? []
+    const allowed = new Set(recycle.map((product) => product.id))
+    const wanted = new Map<string, number>()
+    for (const product of products) wanted.set(product.itemId, (wanted.get(product.itemId) ?? 0) + product.quantity)
+    if (!recycle.length || [...wanted.keys()].some((itemId) => !allowed.has(itemId))) throw new Error("INVENTORY_NOT_RECYCLABLE")
+    const recycled = Math.trunc(count)
+    if (!wanted.size || recycled < 1 || recycled > content.quantity || [...wanted.values()].some((quantity) => quantity < 1 || quantity > RECYCLE_MAX_PRODUCT)) throw new Error("INVALID_INVENTORY_RECYCLE")
+
+    // D'abord la case libérée : un produit peut prendre la place de l'item recyclé.
+    const now = new Date().toISOString()
+    const left = content.quantity - recycled
+    await writeInventoryChanges(workbook, { contents: [[content, left > 0 ? { ...content, quantity: left, updatedAt: now } : emptiedInventorySlot(content, now)]] })
+    let result: InventoryChangeResult | null = null
+    let landedOnGround = false
+    let added = 0
+    for (const [itemId, quantity] of wanted) {
+      try {
+        result = await addCharacterInventoryItem(ownerId, itemId, undefined, mode, quantity)
+      } catch (error) {
+        if (added) throw new Error("INVENTORY_RECYCLE_PARTIAL")
+        // Rien n'est arrivé : la case reprend l'item recyclé, telle qu'elle était.
+        const reread = await inventoryStorageFor(ownerId, true, mode, { fresh: true })
+        const current = reread.contents.find((candidate) => candidate.id === content.id)
+        if (current && current.itemId === (left > 0 ? content.itemId : "") && current.quantity === Math.max(0, left)) {
+          await writeInventoryChanges(reread, { contents: [[current, { ...content, rowNumber: current.rowNumber, updatedAt: new Date().toISOString() }]] })
+        }
+        throw error
+      }
+      added += 1
+      landedOnGround ||= Boolean(result.landedOnGround)
+    }
+    if (!result) throw new Error("INVALID_INVENTORY_RECYCLE")
+    return landedOnGround ? { ...result, landedOnGround } : result
   })
 }
 

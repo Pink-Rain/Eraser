@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
-import { addCharacterInventoryItem, createCharacterInventoryItem, getRowInventory, setCharacterInventoryItemQuantity, updateCharacterInventoryItem, type InventoryOwnerMode } from "@/lib/google-sheets"
-import { INVENTORY_CHANGED_MESSAGE, inventoryCategories, inventorySlotExpectation, type InventoryCategory } from "@/lib/inventory-schema"
+import { addCharacterInventoryItem, createCharacterInventoryItem, getRowInventory, recycleCharacterInventoryItem, setCharacterInventoryItemQuantity, updateCharacterInventoryItem, type InventoryOwnerMode } from "@/lib/google-sheets"
+import { INVENTORY_CHANGED_MESSAGE, inventoryRecycleErrorMessage, inventoryRecycleRequest, inventoryCategories, inventorySlotExpectation, type InventoryCategory } from "@/lib/inventory-schema"
 import { authorizedAccount } from "@/lib/server-auth"
 import { knownWorldIndexKey } from "@/lib/world-indexes"
 
@@ -51,6 +51,11 @@ export async function POST(request: Request) {
     let inventory
     if (body.action === "add-item" && typeof body.itemId === "string") inventory = await addCharacterInventoryItem(id, body.itemId, undefined, mode)
     else if (body.action === "create-item" && typeof body.name === "string" && typeof body.description === "string" && typeof body.type === "string" && typeof body.subtype === "string" && typeof body.effect === "string") inventory = await createCharacterInventoryItem(id, "", { name: body.name, description: body.description, type: body.type, subtype: body.subtype, effect: body.effect }, mode)
+    else if (body.action === "recycle-item") {
+      const recycle = inventoryRecycleRequest(body)
+      if (!recycle) throw new Error("INVALID_INVENTORY_RECYCLE")
+      inventory = await recycleCharacterInventoryItem(id, recycle.slotId, recycle.count, recycle.products, mode, inventorySlotExpectation(body))
+    }
     else if (body.action === "set-quantity" && typeof body.slotId === "string" && typeof body.quantity === "number" && Number.isFinite(body.quantity)) inventory = await setCharacterInventoryItemQuantity(id, body.slotId, body.quantity, mode, inventorySlotExpectation(body))
     else if (body.action === "update-item" && typeof body.slotId === "string" && typeof body.name === "string" && typeof body.description === "string" && typeof body.type === "string" && typeof body.subtype === "string" && typeof body.effect === "string") inventory = await updateCharacterInventoryItem(id, body.slotId, { name: body.name, description: body.description, type: body.type, subtype: body.subtype, effect: body.effect, nameHtml: typeof body.nameHtml === "string" ? body.nameHtml : undefined, descriptionHtml: typeof body.descriptionHtml === "string" ? body.descriptionHtml : undefined, effectHtml: typeof body.effectHtml === "string" ? body.effectHtml : undefined }, mode)
     else throw new Error("INVALID_INVENTORY_ACTION")
@@ -58,11 +63,11 @@ export async function POST(request: Request) {
   } catch (error) {
     const code = error instanceof Error ? error.message : ""
     if (code === "INVENTORY_CHANGED") return NextResponse.json({ error: INVENTORY_CHANGED_MESSAGE }, { status: 409 })
-    const message = code === "INVENTORY_FULL" ? "Il n’y a plus d’emplacement disponible."
+    const message = inventoryRecycleErrorMessage(code) ?? (code === "INVENTORY_FULL" ? "Il n’y a plus d’emplacement disponible."
       : code === "INVENTORY_ITEM_WRONG_CATEGORY" ? "Cet item n’est pas de la famille acceptée par cet inventaire."
       : code === "INVENTORY_NO_COMPATIBLE_CONTAINER" ? "Cet item n’est pas de la famille acceptée par cet inventaire."
       : code === "INVENTORY_ITEM_NOT_FOUND" ? "Cet item n’existe plus dans l’Index des items."
-      : "L’inventaire n’a pas pu être modifié."
+      : "L’inventaire n’a pas pu être modifié.")
     return NextResponse.json({ error: message }, { status: 400 })
   }
 }
