@@ -93,6 +93,10 @@ test("la Liste : le maître-détail montre la ligne cliquée, « Ouvrir la fiche
   const sized = renderToStaticMarkup(React.createElement(IndexPresentation, { ...props, layout: { kind: "list", look: { maxHeight: 20, maxWidth: 40 } } }));
   assert.match(sized, /max-width:40rem/);
   assert.match(sized, /max-height:20rem/);
+  // Les morceaux d'une liste sont repérés (l'éditeur d'apparence de l'atelier les rend cliquables).
+  const parts = renderToStaticMarkup(React.createElement(IndexPresentation, { ...props, layout: views.cleanPresentation({ kind: "list", header: { title: "Sorts" }, toolbar: { tools: [{ type: "search" }] }, footer: { count: true }, groupBy: "Type" }) }));
+  for (const part of ["vue-en-tete", "vue-outils", "vue-section", "vue-pied"]) assert.match(parts, new RegExp(`data-eraser-part="${part}"`));
+  assert.match(parts, /data-row-key=/);
 });
 
 test("une page : les largeurs réglées d'une section, l'allure d'une image, l'image du Drive par Eraser", async () => {

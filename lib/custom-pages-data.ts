@@ -6,7 +6,7 @@
  *
  * Règles pures : la route /api/pages/block-data et les tests s'en servent.
  */
-import { tabCardsOf, type TabCards } from "@/lib/index-cards"
+import { tabCardsOf, type CardTemplate, type TabCards } from "@/lib/index-cards"
 import { automaticLayoutFor, tabFormOrBuiltin } from "@/lib/index-layout-defaults"
 import { DEFAULT_FORM_ID, type IndexLayout, type TabLayouts } from "@/lib/index-layouts"
 import { foldName, isComputedSpec, isIdHeader, isRichSpec, type IndexColumnSpec } from "@/lib/index-columns"
@@ -165,6 +165,8 @@ export type ViewBlockInput = {
   preset?: Presentation | null
   /** Les cartes : laquelle montrer. */
   cardId?: string
+  /** Les cartes : la carte propre au bloc (faite dans l'atelier), montrée avant celles de l'onglet. */
+  card?: CardTemplate
   where?: ViewWhere
   sort?: { column: string; desc: boolean }
   /** Les identifiants du lecteur (son compte, et l'ancien s'il en a un) : « {Moi} » dans une condition. */
@@ -218,6 +220,7 @@ export function viewBlockData(source: IndexSource, input: ViewBlockInput, settin
   const base: ViewBlockData = { kind: "view", index: source.key, title: source.title, tab: table.tabName, view: input.kind, headers, specs, rows: all.slice(0, limit), total: all.length }
   const cards = () => {
     const entry = tabCardsOf(settings.cards, source.key, table.tabName)
+    if (input.card) return { ...entry, cards: [input.card, ...entry.cards.filter((card) => card.id !== input.card!.id)], defaultId: input.card.id }
     return input.cardId && entry.cards.some((card) => card.id === input.cardId) ? { ...entry, defaultId: input.cardId } : entry
   }
   if (input.kind === "cards") return { ...base, cards: cards() }

@@ -375,7 +375,7 @@ function Section({ title, count, collapsible, startCollapsed, color, hideCount, 
   const glyph = <Glyph value={icon} className={heading ? "size-6" : "size-3.5"} color={color ?? accent} />
   const anchor = sectionAnchor(title)
   // La lettre (ou le nom) en marge, grande et qui reste visible en défilant : le glossaire.
-  if (letter) return <section id={anchor} className="grid gap-x-6 gap-y-3 sm:grid-cols-[minmax(5rem,8rem)_minmax(0,1fr)]">
+  if (letter) return <section id={anchor} data-eraser-part="vue-section" className="grid gap-x-6 gap-y-3 sm:grid-cols-[minmax(5rem,8rem)_minmax(0,1fr)]">
     <div className="sm:sticky sm:top-20 sm:self-start">
       {collapsible
         ? <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex items-center gap-2 font-display text-6xl font-semibold leading-none hover:text-primary sm:text-[7.5rem]" style={{ color: color ?? accent }}>{title || "—"}</button>
@@ -385,7 +385,7 @@ function Section({ title, count, collapsible, startCollapsed, color, hideCount, 
     {open && <div className="min-w-0">{children}</div>}
   </section>
   // Un grand titre centré, au-dessus d'un trait (les familles de la page des classes).
-  if (heading) return <section id={anchor} className="space-y-5">
+  if (heading) return <section id={anchor} data-eraser-part="vue-section" className="space-y-5">
     {collapsible
       ? <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex w-full items-center justify-center gap-2 border-b pb-3 text-center font-display text-3xl font-semibold hover:text-primary sm:text-4xl"><ChevronDown className={`size-5 transition-transform ${open ? "" : "-rotate-90"}`} />{glyph}{title || "Sans valeur"}{!hideCount && <span className="text-base font-normal text-muted-foreground">{count}</span>}{extra && <span className="text-sm font-normal">{extra}</span>}</button>
       : <h2 className="flex items-center justify-center gap-2 border-b pb-3 text-center font-display text-3xl font-semibold sm:text-4xl">{color && !icon && <span className="size-3 rounded-full" style={{ backgroundColor: color }} />}{glyph}{title || "Sans valeur"}{!hideCount && <span className="text-base font-normal text-muted-foreground">{count}</span>}{extra && <span className="text-sm font-normal">{extra}</span>}</h2>}
@@ -393,7 +393,7 @@ function Section({ title, count, collapsible, startCollapsed, color, hideCount, 
   </section>
   const label = <><span className="flex items-center gap-2">{color && !icon && <span className="size-2.5 rounded-full" style={{ backgroundColor: color }} />}{glyph}{title || "Sans valeur"}</span><span className="flex items-center gap-2">{extra}{!hideCount && <span className="text-muted-foreground">{count}</span>}</span></>
   const tone: CSSProperties = { color: accent ?? "var(--primary)" }
-  return <section id={anchor} className="space-y-2">
+  return <section id={anchor} data-eraser-part="vue-section" className="space-y-2">
     {collapsible
       ? <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex w-full items-center gap-2 border-b pb-1.5 text-left text-xs font-semibold uppercase tracking-[0.14em] opacity-80 hover:opacity-100" style={tone}><ChevronDown className={`size-3.5 transition-transform ${open ? "" : "-rotate-90"}`} /><span className="flex flex-1 items-center justify-between gap-2">{label}</span></button>
       : <p className="flex items-center justify-between gap-2 border-b pb-1.5 text-xs font-semibold uppercase tracking-[0.14em] opacity-80" style={tone}>{label}</p>}
@@ -675,7 +675,7 @@ function KanbanLayout(props: PresentationProps) {
         : <p className="flex items-center justify-between gap-2 px-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground"><span className="flex items-center gap-1.5">{lane.color && !lane.icon && <span className="size-2.5 rounded-full" style={{ backgroundColor: lane.color }} />}<Glyph value={lane.icon} color={tint} />{lane.label || "Sans valeur"}</span>{count}</p>
       const target = `${group}::${lane.name}`
       const accepts = (row: string) => movable(row) && (!swimlane || inGroup.has(row))
-      return <section key={lane.name || "*"}
+      return <section key={lane.name || "*"} data-eraser-part="vue-section"
         onDragOver={(event) => { if (dragged && accepts(dragged)) { event.preventDefault(); setOver(target) } }}
         onDragLeave={() => setOver((current) => current === target ? null : current)}
         onDrop={(event) => { event.preventDefault(); setOver(null); if (onCommit && dragged && accepts(dragged) && fold(draggedFrom) !== fold(lane.name)) onCommit(dragged, column, each ? movedValue(plain(valueOf(dragged, column)), draggedFrom, lane.name) : lane.name); setDragged("") }}
@@ -1829,7 +1829,7 @@ function ListHeaderView({ layout, count }: { layout: Presentation; count: number
   const header = layout.header
   if (!header || header.hidden || (!header.title && !header.text && !header.count)) return null
   const accent = accentOf(layout.look ?? {})
-  return <header className="grid min-w-0 gap-1">
+  return <header data-eraser-part="vue-en-tete" className="grid min-w-0 gap-1">
     {(header.title || header.icon || header.count) && <h2 className="flex min-w-0 flex-wrap items-center gap-2 font-display text-2xl font-semibold tracking-[-0.01em]">
       <Glyph value={header.icon} className="size-6" color={accent} />
       {header.title && <span className="min-w-0">{header.title}</span>}
@@ -1856,7 +1856,7 @@ function ListToolbarView({ layout, base, rows, count, valueOf, optionsOf, header
   const accent = accentOf(layout.look ?? {})
   const tools = layout.toolbar?.tools ?? []
   const known = (column: string) => headers.some((header) => fold(header) === fold(column))
-  return <div role="toolbar" aria-label="Outils de la liste" className="flex min-w-0 flex-wrap items-center gap-2 rounded-xl border bg-card/70 px-2 py-1.5">
+  return <div role="toolbar" aria-label="Outils de la liste" data-eraser-part="vue-outils" className="flex min-w-0 flex-wrap items-center gap-2 rounded-xl border bg-card/70 px-2 py-1.5">
     {tools.map((tool, index) => {
       switch (tool.type) {
         case "search": return <label key={index} className="flex h-8 min-w-40 flex-1 items-center gap-1.5 rounded-lg border bg-background px-2 focus-within:ring-2 focus-within:ring-ring/30">
@@ -1927,7 +1927,7 @@ function ListFooterView({ layout, rows, shown, valueOf, onMore }: { layout: Pres
   if (!footer) return null
   const hasMore = Boolean(footer.limit) && shown < rows.length
   if (!footer.count && !footer.totals?.length && !hasMore) return null
-  return <footer className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 border-t px-1 pt-2 text-xs text-muted-foreground">
+  return <footer data-eraser-part="vue-pied" className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 border-t px-1 pt-2 text-xs text-muted-foreground">
     {footer.count && <span className="font-semibold tabular-nums">{rows.length} {footer.word || (rows.length > 1 ? "lignes" : "ligne")}</span>}
     {footer.totals?.map((total, index) => <span key={index} className="tabular-nums"><b className="text-foreground">{formatPresentationNumber(groupFormulaValue(total, rows, valueOf))}{total.unit ? ` ${total.unit}` : ""}</b> {total.label ?? (total.op === "count" ? "lignes" : total.column ?? "")}</span>)}
     {hasMore && <button type="button" onClick={onMore} className="ml-auto font-semibold text-primary hover:underline">Charger plus ({shown} / {rows.length})</button>}

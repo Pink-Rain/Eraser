@@ -169,6 +169,13 @@ Vocabulaire du code (chaque mot ne désigne qu’une chose) :
   serveur des pages lit la vue sur le Worker, jamais dans Google
   (`linkedBlock`, `app/api/pages/block-data/route.ts`). L’ancien champ `viewId`
   (onglet-fenêtre, alpha 206) n’est jamais relu d’office.
+  Son apparence se règle **depuis la page** (alpha 282, « Modifier l'apparence » de l'atelier,
+  extension Eraser Page) : une seule rangée de formes (tableau, cartes et chaque présentation), une
+  forme propre à la page (`layout`) et, pour les cartes, une **carte propre au bloc** (`card`, qui
+  passe avant `cardId` et les cartes de l'onglet). L'index n'y sert que de raccourci (partir d'une
+  de ses apparences, enregistrer en preset). L'affichage des présentations repère ses morceaux pour
+  cet éditeur (`data-eraser-part` : `vue-en-tete`, `vue-outils`, `vue-section`, `vue-pied` ; un
+  élément : `data-row-key`).
 - **Vue enregistrée** (`SavedView`, `lib/index-saved-views.ts`) : un filtre, un
   tri et une présentation sous un nom. Gardée sur le Worker (portée
   `index-saved-views`, une entrée par vue, `lib/index-saved-views-store.ts`) ;
@@ -374,7 +381,9 @@ d’Eraser, reproduit à l’identique par `defaultItemPlaceDisplay`.
   une ligne d'exemple. `pageSummary` donne son `rowOf` à l'Index des pages. Une carte ou une
   présentation y mène par son clic `page`, nommé « Ouvrir sa fiche-page » (`cardClicks`,
   `presentationClicks`) ; une ligne sans fiche-page ouvre la page qu'Eraser lui donne (une classe,
-  un personnage), sinon sa fiche.
+  un personnage), sinon sa fiche. Son bloc « Valeurs de la ligne » disposé comme une fiche peut
+  garder sa propre disposition (`form`, faite dans l'atelier avec l'éditeur des formulaires), qui
+  passe avant le formulaire `formId` de l'index.
 - **Créateur de pages** : réservé aux administrateurs (`canBuildPages`,
   `lib/custom-pages.ts`) — créer, modifier, brouillons, menu. `canManagePages` (MJ
   et administrateurs) garde ce que le MJ fait d’une page qu’il lit (secrets, notes),
@@ -617,7 +626,8 @@ tabletop, encore vide), `page` (Pink-Rain/Eraser_page, **l'atelier des pages**, 
     affichée et le rôle de vue), `eraser.page()`, `eraser.go(adresse)`, `eraser.file(chemin)`, et
     comme avant `server`, `eraser` (API d'Eraser), `require`, `account`.
   - Repères stables pour le CSS des extensions : `data-eraser-part` (`barre-laterale`, `en-tete`,
-    `page`, `messages`) et `data-eraser-slot` ; jamais les classes Tailwind d'Eraser, qui changent.
+    `page`, `messages` ; dans une présentation : `vue-en-tete`, `vue-outils`, `vue-section`,
+    `vue-pied`) et `data-eraser-slot` ; jamais les classes Tailwind d'Eraser, qui changent.
   - **Protégé** : chaque ajout est dans une barrière d'erreur (une extension qui plante disparaît,
     la page reste) ; tout ce qui passe par `eraser` est défait quand l'extension change de version
     (son `activate` peut rendre de quoi défaire le reste). Le démarrage va au relevé de fluidité

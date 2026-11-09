@@ -99,7 +99,10 @@
 - Les éditeurs enregistrent la valeur « par défaut » comme absente : vérifier que
   l’affichage a bien le même défaut.
 - **Survols, cartes, formulaires et présentations se créent dans l'atelier des pages**
-  (Apparences d'un index, extension Eraser Page, avec leur éditeur). Le « Modifier » d'un index
+  (Apparences d'un index, extension Eraser Page, avec leur éditeur). **Dans une page, ils se règlent
+  depuis la page** (« Modifier l'apparence » d'un bloc : une seule rangée de formes, carte et
+  disposition propres au bloc) ; les Apparences d'un index ne sont qu'un raccourci et une réserve de
+  presets (choix du propriétaire). Le « Modifier » d'un index
   (`EDITOR_MODES`) ne garde que les colonnes, le formulaire principal, la carte officielle, les
   stats et l'affichage des items : ne pas y remettre le reste. Il fait toujours suivre aux
   apparences les colonnes et onglets renommés.

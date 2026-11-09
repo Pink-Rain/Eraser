@@ -108,7 +108,7 @@ async function viewData(key: WorldIndexKey, raw: ViewBlock, match: Parameters<ty
     block.kind === "calendar" ? calendarTables() : Promise.resolve(undefined),
   ])
   const variant = block.presetId?.startsWith(PRESENTATION_VARIANT_PREFIX) ? presentationVariant(presentations, block.tab, block.presetId.slice(PRESENTATION_VARIANT_PREFIX.length)) : null
-  const input = { tab: block.tab, kind: block.kind, limit: block.limit, match, layout: block.layout, preset: variant ?? preset, cardId: block.cardId, where: block.where, sort: block.sort, me, click: block.click }
+  const input = { tab: block.tab, kind: block.kind, limit: block.limit, match, layout: block.layout, preset: variant ?? preset, cardId: block.cardId, card: block.card, where: block.where, sort: block.sort, me, click: block.click }
   const data = viewBlockData(source, input, { presentations, cards, layouts, stats }, readOptions(key, player, rowPageOf))
   if (!data) return null
   return { ...data, ...(calendars !== undefined ? { calendars } : {}) }

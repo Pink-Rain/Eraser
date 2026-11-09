@@ -383,6 +383,17 @@ test("Bloc Vue : preset, carte choisie, conditions et tri gardés à l'enregistr
   assert.equal(own.presetId, undefined);
   assert.equal(own.where, undefined);
   assert.equal(own.sort, undefined);
+  // Des cartes : la carte propre à la page (faite dans l'atelier) est gardée ; une présentation ne la garde pas.
+  const card = { id: "carte-page", name: "Carte de la page", blocks: [{ id: "b1", type: "title", column: "Nom" }] };
+  const cards = pages.cleanBlock({ id: "b-vue5", type: "view", index: "npcs", tab: "Bibliothèque", kind: "cards", card });
+  assert.equal(cards.card.id, "carte-page");
+  assert.equal(cards.card.blocks[0].column, "Nom");
+  assert.equal(pages.cleanBlock({ id: "b-vue6", type: "view", index: "npcs", tab: "Bibliothèque", kind: "list", card }).card, undefined);
+  assert.equal(pages.cleanBlock({ id: "b-vue7", type: "view", index: "npcs", tab: "Bibliothèque", kind: "cards", card: { name: "illisible" } }).card, undefined);
+  // « Valeurs de la ligne » comme la fiche : la disposition propre à la page est gardée (seulement « comme la fiche »).
+  const form = { sections: [{ id: "s1", title: "Général", rows: [{ id: "r1", fields: [{ column: "Nom" }] }] }], aside: [] };
+  assert.equal(pages.cleanBlock({ id: "b-val", type: "rowfields", columns: [], heading: "", style: "form", form }).form.sections[0].rows[0].fields[0].column, "Nom");
+  assert.equal(pages.cleanBlock({ id: "b-val2", type: "rowfields", columns: [], heading: "", style: "grid", form }).form, undefined);
 });
 
 test("Données d'un bloc Vue : conditions (colonnes masquées comprises), tri avant la limite, preset et carte choisis", () => {
@@ -423,6 +434,10 @@ test("Données d'un bloc Vue : conditions (colonnes masquées comprises), tri av
   // La carte choisie devient celle par défaut ; une carte inconnue laisse celle à l'étoile.
   assert.equal(blockData.viewBlockData(source, { tab: "Bestiaire", kind: "cards", limit: 0, cardId: "carte-b" }, settings, options).cards.defaultId, "carte-b");
   assert.equal(blockData.viewBlockData(source, { tab: "Bestiaire", kind: "cards", limit: 0, cardId: "carte-z" }, settings, options).cards.defaultId, "carte-a");
+  // La carte propre au bloc passe devant celles de l'onglet (qui restent pour ses boutons).
+  const ownCards = blockData.viewBlockData(source, { tab: "Bestiaire", kind: "cards", limit: 0, cardId: "carte-b", card: { id: "carte-page", name: "Page", blocks: [] } }, settings, options).cards;
+  assert.equal(ownCards.defaultId, "carte-page");
+  assert.deepEqual(ownCards.cards.map((entry) => entry.id), ["carte-page", "carte-a", "carte-b"]);
 });
 
 test("Pages d'Eraser : chaque page modifiable a un contenu de départ propre, redessiné ou dans un module", () => {

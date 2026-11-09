@@ -35,8 +35,9 @@ export type RowContext = {
 export const rowPageHref = (index: string, id: string) => `/fiche/${encodeURIComponent(index)}/${encodeURIComponent(id)}`
 
 /** Les formulaires que les blocs « Valeurs de la ligne » disposés « comme la fiche » demandent ; `null` : aucun. */
-export function rowFormIdsOf(view: { sections: Array<{ cols: Array<Array<{ type: string; style?: string; formId?: string }>> }> }): string[] | null {
-  const blocks = view.sections.flatMap((section) => section.cols.flat()).filter((block) => block.type === "rowfields" && block.style === "form")
+export function rowFormIdsOf(view: { sections: Array<{ cols: Array<Array<{ type: string; style?: string; formId?: string; form?: unknown }>> }> }): string[] | null {
+  // Un bloc qui a sa propre disposition (faite dans l'atelier) n'a pas besoin des formulaires de l'index.
+  const blocks = view.sections.flatMap((section) => section.cols.flat()).filter((block) => block.type === "rowfields" && block.style === "form" && !block.form)
   if (!blocks.length) return null
   return [...new Set(blocks.map((block) => block.formId || ""))]
 }

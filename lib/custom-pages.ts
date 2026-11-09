@@ -19,6 +19,8 @@ import { internalAppPath } from "@/lib/app-links"
 import { sanitizeRichText } from "@/lib/rich-text-sanitize"
 import { cleanReplaceMode, isReplaceablePath, type ReplaceMode } from "@/lib/page-replacements"
 import { cleanPresentation, isPresentationKind, type Presentation } from "@/lib/index-presentations"
+import { parseCardTemplate, type CardTemplate } from "@/lib/index-cards"
+import { parseIndexLayout, type IndexLayout } from "@/lib/index-layouts"
 import { parseFilterConditions, filterOperators, type Filter } from "@/lib/index-windows"
 import { eraserModuleKeys, moduleSections, type EraserModuleKey } from "@/lib/eraser-modules"
 
@@ -97,6 +99,8 @@ export type ViewBlock = Common & {
   presetId?: string
   /** Les cartes : laquelle des cartes de l'onglet (sinon celle à l'étoile). */
   cardId?: string
+  /** Les cartes : la carte propre à cette page, faite dans l'atelier (elle passe avant `cardId`). */
+  card?: CardTemplate
   /** Seulement les lignes qui remplissent ces conditions (« Type est Boss »). */
   where?: ViewWhere
   /** L'ordre des lignes (avant « Au plus ») ; une présentation peut avoir son propre tri. */
@@ -115,7 +119,7 @@ export type StatBlock = Common & { type: "stat"; index: string; statId: string; 
 /** Page de ligne : les valeurs de la ligne (toutes, ou les colonnes choisies). */
 /** « form » : disposées comme la fiche de l'index (Modifier › Formulaire). */
 /** `formId` : lequel des formulaires de l'onglet (Modifier › Formulaire) ; vide : le formulaire étoilé. */
-export type RowFieldsBlock = Common & { type: "rowfields"; columns: string[]; heading: string; style: "list" | "grid" | "form"; formId?: string }
+export type RowFieldsBlock = Common & { type: "rowfields"; columns: string[]; heading: string; style: "list" | "grid" | "form"; formId?: string; /** « Comme la fiche » : la disposition propre à cette page, faite dans l'atelier (elle passe avant `formId`). */ form?: IndexLayout }
 /** Page de ligne : les lignes des autres index qui citent celle-ci (« Cité dans »). */
 export type BacklinksBlock = Common & { type: "backlinks"; heading: string }
 /** Un champ de recherche : il filtre les lignes des blocs Vue de la page (ceux qui le suivent). */
@@ -508,13 +512,16 @@ export function cleanBlock(input: unknown): PageBlock | null {
       const savedViewId = text(raw.savedViewId, 80)
       const presetId = ownLayout ? "" : text(raw.presetId, 80)
       const cardId = text(raw.cardId, 60)
+      const kind: ViewBlockKind = ownLayout ? ownLayout.kind as ViewBlockKind : oneOf(raw.kind, viewKindValues, "table")
+      // La carte propre au bloc : seulement pour les cartes (une présentation garde son élément dans sa forme).
+      const card = kind === "cards" && raw.card ? parseCardTemplate(raw.card) : null
       const where = cleanViewWhere(raw.where)
       const sortRaw = raw.sort && typeof raw.sort === "object" ? raw.sort as Record<string, unknown> : null
       const sortColumn = sortRaw ? text(sortRaw.column, 120) : ""
-      return { ...common, type, index: text(raw.index, 90), tab: text(raw.tab, 120), kind: ownLayout ? ownLayout.kind as ViewBlockKind : oneOf(raw.kind, viewKindValues, "table"), limit: Number.isFinite(limit) ? Math.max(0, Math.min(500, Math.round(limit))) : 0, height: oneOf(raw.height, ["auto", "sm", "md", "lg"] as const, "auto"), heading: text(raw.heading, 160), rowMatch: text(raw.rowMatch, 120), ...(viewId ? { viewId } : {}), ...(savedViewId ? { savedViewId } : {}), ...(ownLayout ? { layout: ownLayout } : {}), ...(presetId ? { presetId } : {}), ...(cardId ? { cardId } : {}), ...(where ? { where } : {}), ...(sortColumn ? { sort: { column: sortColumn, desc: sortRaw?.desc === true } } : {}), ...(raw.ignoreSearch === true ? { ignoreSearch: true } : {}), ...(cleanClick(raw.click) ? { click: cleanClick(raw.click) } : {}) }
+      return { ...common, type, index: text(raw.index, 90), tab: text(raw.tab, 120), kind, limit: Number.isFinite(limit) ? Math.max(0, Math.min(500, Math.round(limit))) : 0, height: oneOf(raw.height, ["auto", "sm", "md", "lg"] as const, "auto"), heading: text(raw.heading, 160), rowMatch: text(raw.rowMatch, 120), ...(viewId ? { viewId } : {}), ...(savedViewId ? { savedViewId } : {}), ...(ownLayout ? { layout: ownLayout } : {}), ...(presetId ? { presetId } : {}), ...(cardId ? { cardId } : {}), ...(card ? { card } : {}), ...(where ? { where } : {}), ...(sortColumn ? { sort: { column: sortColumn, desc: sortRaw?.desc === true } } : {}), ...(raw.ignoreSearch === true ? { ignoreSearch: true } : {}), ...(cleanClick(raw.click) ? { click: cleanClick(raw.click) } : {}) }
     }
     case "stat": return { ...common, type, index: text(raw.index, 90), statId: text(raw.statId, 60), heading: text(raw.heading, 160) }
-    case "rowfields": return { ...common, type, columns: Array.isArray(raw.columns) ? raw.columns.flatMap((column) => { const clean = text(column, 120); return clean ? [clean] : [] }).slice(0, 40) : [], heading: text(raw.heading, 160), style: oneOf(raw.style, ["list", "grid", "form"] as const, "grid"), ...(text(raw.formId, 40) ? { formId: text(raw.formId, 40) } : {}) }
+    case "rowfields": return { ...common, type, columns: Array.isArray(raw.columns) ? raw.columns.flatMap((column) => { const clean = text(column, 120); return clean ? [clean] : [] }).slice(0, 40) : [], heading: text(raw.heading, 160), style: oneOf(raw.style, ["list", "grid", "form"] as const, "grid"), ...(text(raw.formId, 40) ? { formId: text(raw.formId, 40) } : {}), ...(raw.style === "form" && raw.form && parseIndexLayout(raw.form) ? { form: parseIndexLayout(raw.form)! } : {}) }
     case "backlinks": return { ...common, type, heading: text(raw.heading, 160) }
     case "search": return { ...common, type, placeholder: text(raw.placeholder, 120), heading: text(raw.heading, 160) }
     case "module": return { ...common, type, module: oneOf(raw.module, eraserModuleKeys, "origine"), place: oneOf(raw.place, moduleSections.map((item) => item.value), "regles"), heading: text(raw.heading, 160) }

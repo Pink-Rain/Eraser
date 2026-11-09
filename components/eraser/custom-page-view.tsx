@@ -269,7 +269,7 @@ function RowFieldsView({ block, row }: { block: Extract<PageBlock, { type: "rowf
   const columns = (block.columns.length ? block.columns.flatMap((name) => row.columns.filter((column) => fold(column.header) === fold(name))) : row.columns).filter((column) => column.text || /<img|https?:/.test(column.html))
   // Comme la fiche de l'index (le formulaire étoilé, ou celui que le bloc nomme) : ses sections, ses
   // lignes de champs, sa colonne latérale, et ses blocs (tuiles, paliers, texte…) en lecture.
-  const layout = block.style === "form" ? (block.formId ? row.forms?.[block.formId] ?? row.form : row.form) : undefined
+  const layout = block.style === "form" ? block.form ?? (block.formId ? row.forms?.[block.formId] ?? row.form : row.form) : undefined
   if (block.style === "form" && layout && columns.length) {
     const columnOf = (header: string) => row.columns.find((column) => fold(column.header) === fold(header))
     const plainOf = (header: string) => columnOf(header)?.text ?? ""
