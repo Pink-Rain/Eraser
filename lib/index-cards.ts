@@ -45,7 +45,7 @@ export type CardClick = "sheet" | "form" | "page" | "none"
 export const cardClicks: Array<{ value: CardClick; label: string; hint: string }> = [
   { value: "sheet", label: "Ouvrir sa fiche", hint: "Son formulaire à l’étoile, dans une fenêtre, là où l’on est (d’office)." },
   { value: "form", label: "Ouvrir un de ses formulaires", hint: "Le formulaire choisi ci-dessous, dans une fenêtre, là où l’on est (index ou page)." },
-  { value: "page", label: "Ouvrir la page", hint: "La page de la ligne, si l’index en a une (sinon sa fiche)." },
+  { value: "page", label: "Ouvrir sa fiche-page", hint: "La fiche-page de la ligne (Index des pages › Nouvelle fiche-page), si son index en a une ; sinon sa fiche." },
   { value: "none", label: "Rien", hint: "La carte ne réagit pas au clic (ses boutons, si elle en a, restent)." },
 ]
 

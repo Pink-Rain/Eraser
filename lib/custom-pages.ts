@@ -333,7 +333,7 @@ export function samePlace(left: Pick<CustomPage, "place" | "campaignId">, right:
 
 /* ---------- Les blocs ---------- */
 
-export const blockCatalog: Array<{ type: BlockType; label: string; hint: string; group: "Texte" | "Révélations et carnets" | "Navigation" | "Données d’index" | "Page de ligne" | "Modules d’Eraser" }> = [
+export const blockCatalog: Array<{ type: BlockType; label: string; hint: string; group: "Texte" | "Révélations et carnets" | "Navigation" | "Données d’index" | "Fiche-page" | "Modules d’Eraser" }> = [
   { type: "title", label: "Titre", hint: "Un titre de partie, avec une petite ligne au-dessus", group: "Texte" },
   { type: "text", label: "Texte riche", hint: "Gras, listes, liens, couleurs et citations « { »", group: "Texte" },
   { type: "callout", label: "Encadré", hint: "Info, conseil du MJ, secret ou alerte", group: "Texte" },
@@ -346,9 +346,9 @@ export const blockCatalog: Array<{ type: BlockType; label: string; hint: string;
   { type: "view", label: "Vue d’index", hint: "Tableau, cartes, liste, kanban, maître-détail… filtrée comme tu veux", group: "Données d’index" },
   { type: "search", label: "Recherche", hint: "Un champ qui filtre les vues d’index de la page", group: "Données d’index" },
   { type: "stat", label: "Statistiques", hint: "Une statistique d’un index, ou toutes ses épinglées", group: "Données d’index" },
-  { type: "rowfields", label: "Valeurs de la ligne", hint: "Page de ligne : les colonnes de la ligne affichée", group: "Page de ligne" },
+  { type: "rowfields", label: "Valeurs de la ligne", hint: "Fiche-page : les colonnes de la ligne affichée", group: "Fiche-page" },
   { type: "module", label: "Module d’Eraser", hint: "Un morceau des pages d’Eraser : glossaire, répertoire des index, accueil, page d’origine…", group: "Modules d’Eraser" },
-  { type: "backlinks", label: "Cité dans", hint: "Page de ligne : les lignes d’autres index qui la citent", group: "Page de ligne" },
+  { type: "backlinks", label: "Cité dans", hint: "Fiche-page : les lignes d’autres index qui la citent", group: "Fiche-page" },
 ]
 export const blockTypes = blockCatalog.map((item) => item.type)
 export const blockLabel = (type: BlockType) => blockCatalog.find((item) => item.type === type)?.label ?? type
@@ -884,6 +884,8 @@ export type PageSummary = {
   /** La page d'Eraser qu'elle remplace ou complète. */
   replaces?: string
   replaceMode?: ReplaceMode
+  /** Fiche-page : l'index (et l'onglet) dont elle est la page de chaque ligne. */
+  rowOf?: { index: string; tab?: string }
 }
 
 export function pageSummary(page: CustomPage, viewer: PageViewer): PageSummary {
@@ -892,6 +894,8 @@ export function pageSummary(page: CustomPage, viewer: PageViewer): PageSummary {
     place: page.place, campaignId: page.campaignId, vis: page.vis, status: page.status, unpublished: hasUnpublishedChanges(page),
     blocks: allBlocks(page).length, createdAt: page.createdAt, updatedAt: page.updatedAt, updatedBy: page.updatedBy.name, trashedAt: page.trashedAt, editable: canEditPage(page, viewer),
     ...(page.replaces ? { replaces: page.replaces, replaceMode: page.replaceMode ?? "after" } : {}),
+    // Une fiche-page (la page de chaque ligne d'un index) : l'Index des pages la montre comme telle.
+    ...(page.rowOf ? { rowOf: page.rowOf } : {}),
   }
 }
 

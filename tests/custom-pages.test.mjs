@@ -129,6 +129,12 @@ test("Nettoyage : rien d'exécutable, blocs inconnus écartés, colonnes ajusté
   const row = pages.cleanCustomPage({ title: "{Nom}", replaces: "/regles/combat", rowOf: { index: "creatures", tab: "" } });
   assert.deepEqual(row.rowOf, { index: "creatures" });
   assert.equal(row.replaces, undefined);
+  // Une fiche-page : l'Index des pages (atelier) reçoit l'index dont elle est la page de chaque ligne.
+  const stamp = "2026-11-01T00:00:00.000Z"
+  const author = { uid: "u", name: "Admin" }
+  const stored = { ...row, id: "p-fiche", status: "brouillon", createdAt: stamp, createdBy: author, updatedAt: stamp, updatedBy: author, published: null, publishedAt: "", publishedBy: null, trashedAt: "", trashedBy: null, live: {} }
+  assert.deepEqual(pages.pageSummary(stored, { role: "admin", uid: "u" }).rowOf, { index: "creatures" });
+  assert.equal(pages.pageSummary({ ...stored, rowOf: undefined }, { role: "admin", uid: "u" }).rowOf, undefined);
   // Une page de campagne (lisible selon ses membres) ne remplace pas une page d'Eraser.
   assert.equal(pages.cleanCustomPage({ title: "x", place: "campagne", campaignId: "C1", replaces: "/regles/combat" }).replaces, undefined);
 });

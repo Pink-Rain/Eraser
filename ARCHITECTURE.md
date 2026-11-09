@@ -368,6 +368,13 @@ d’Eraser, reproduit à l’identique par `defaultItemPlaceDisplay`.
   feuille, construit pour chaque lecteur depuis les pages du Worker et le menu
   d’Eraser. Cartes, survols et vues comme un autre index ; utilisable dans un
   bloc Vue d’index.
+- **Fiches-pages** : une page de l'atelier réglée sur un index (`rowOf`, `lib/custom-pages-rows.ts`)
+  est la page de chacune de ses lignes, à `/fiche/<index>/<ID>` (une par index, ou par onglet). Elle
+  se crée par « Nouvelle fiche-page » (Index des pages de l'extension Eraser Page) et se dessine sur
+  une ligne d'exemple. `pageSummary` donne son `rowOf` à l'Index des pages. Une carte ou une
+  présentation y mène par son clic `page`, nommé « Ouvrir sa fiche-page » (`cardClicks`,
+  `presentationClicks`) ; une ligne sans fiche-page ouvre la page qu'Eraser lui donne (une classe,
+  un personnage), sinon sa fiche.
 - **Créateur de pages** : réservé aux administrateurs (`canBuildPages`,
   `lib/custom-pages.ts`) — créer, modifier, brouillons, menu. `canManagePages` (MJ
   et administrateurs) garde ce que le MJ fait d’une page qu’il lit (secrets, notes),

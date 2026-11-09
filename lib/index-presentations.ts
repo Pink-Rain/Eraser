@@ -416,7 +416,7 @@ export const presentationClicks: Array<{ value: PresentationClick; label: string
   { value: "side", label: "Panneau à côté, toujours ouvert", hint: "La ligne choisie (la première d’office) dans un panneau à côté : la vue devient un maître-détail." },
   { value: "center", label: "Fenêtre au centre", hint: "Le détail de la ligne dans une fenêtre, par-dessus la vue." },
   { value: "below", label: "Afficher dessous", hint: "La ligne choisie se déplie sous l’élément (ou sous la vue)." },
-  { value: "page", label: "Ouvrir la page", hint: "La page de la ligne, si l’index en a une." },
+  { value: "page", label: "Ouvrir sa fiche-page", hint: "La fiche-page de la ligne (Index des pages › Nouvelle fiche-page), si son index en a une ; sinon sa fiche." },
   { value: "none", label: "Rien", hint: "Les éléments ne réagissent pas au clic." },
 ]
 const clickValues = presentationClicks.map((entry) => entry.value)
