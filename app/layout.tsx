@@ -6,7 +6,7 @@ import { OpenInAppPrompt } from "@/components/eraser/open-in-app-prompt";
 import { UpdatePrompt } from "@/components/eraser/update-prompt";
 import { listCampaignsForMj, listCharactersForUser } from "@/lib/google-sheets";
 import { replacementFor, shellMenu, warmShellCopies } from "@/lib/custom-pages-server";
-import { knownInstalledVersions } from "@/lib/extensions-install";
+import { shellExtensions, type ShellExtension } from "@/lib/extensions-install";
 import { syncExtensionsSoon } from "@/lib/extensions-sync";
 import { currentRequestPath } from "@/lib/request-path";
 import { currentAccount, currentViewAccount } from "@/lib/server-auth";
@@ -30,12 +30,16 @@ export default async function RootLayout({
 }>) {
   const [account, viewAccount] = await Promise.all([currentAccount(), currentViewAccount()]);
   let content = children;
+  let extensions: ShellExtension[] = [];
   if (account?.role && viewAccount) {
     // Une fois par lancement : les index se lisent en arrière-plan pour s'ouvrir tout de suite (lib/warm-up.ts).
     warmUpOnce(account.role);
     // Les extensions (toutes, quel que soit le rôle) : téléchargées et mises à jour en
     // arrière-plan, au lancement puis toutes les six heures (lib/extensions-sync.ts).
     syncExtensionsSoon();
+    // Celles qui sont installées : leur démarrage et leurs styles, sur toutes les pages. Lues du
+    // disque une fois par lancement (quelques millisecondes), puis gardées en mémoire.
+    extensions = await shellExtensions();
     // Cette coque est rendue à chaque navigation (vinext relance le layout racine, requêtes
     // RSC comprises), et même deux fois par page : une première fois « à blanc », sans
     // paramètres de requête, pour y détecter une redirection, puis pour de vrai. Attendre ici
@@ -75,7 +79,7 @@ export default async function RootLayout({
         campaigns={campaigns}
         todos={[]}
         pageLabel="Eraser"
-        extensions={knownInstalledVersions()}
+        extensions={extensions}
       >
         {page}
       </AppShell>
@@ -86,6 +90,11 @@ export default async function RootLayout({
     <html lang="fr" suppressHydrationWarning>
       <body className="antialiased">
         <script dangerouslySetInnerHTML={{ __html: applyEffectsScript }} />
+        {/* Les styles des extensions pour toutes les pages (`globalStyles`), après ceux d'Eraser :
+            posés avant l'affichage, ils l'emportent à force égale. Fichiers immuables par version. */}
+        {extensions.flatMap((extension) => extension.globalStyles.map((style) => (
+          <link key={`${extension.id}/${style}`} rel="stylesheet" href={`/api/extensions/${encodeURIComponent(extension.id)}/fichiers/${encodeURIComponent(extension.version)}/${style}`} data-eraser-extension={extension.id} />
+        )))}
         {content}<UpdatePrompt /><OpenInAppPrompt />
       </body>
     </html>

@@ -94,6 +94,7 @@ import { menuItemActive, resolveMenu, type MenuIconKey, type MenuPageEntry, type
 // qui tourne, donc aussi d'une mise à jour reçue sans réinstallation.
 import { version as appVersion } from "@/package.json"
 import { PageSearch, ShellBreadcrumb, VolumeControl } from "@/components/eraser/shell-nav"
+import { ExtensionBoot, ExtensionLayers, ExtensionSlot } from "@/components/eraser/extension-runtime"
 
 const AdminTodoMenu = dynamic(() => import("@/components/eraser/admin-todo-menu").then((module) => module.AdminTodoMenu))
 const GlobalTableChat = dynamic(() => import("@/components/eraser/global-table-chat").then((module) => module.GlobalTableChat), { ssr: false })
@@ -317,8 +318,8 @@ export function AppShell({
   todos: AdminTodoRecord[]
   initialViewRole: SiteRole
   pageLabel: string
-  /** Les extensions installées sur cet ordinateur et leur version (lib/extensions-install.ts). */
-  extensions?: Array<{ id: string; version: string }>
+  /** Les extensions installées sur cet ordinateur, leur version et leur module de démarrage (lib/extensions-install.ts). */
+  extensions?: Array<{ id: string; version: string; boot?: string | null }>
   children: ReactNode
 }) {
   const pathname = usePathname()
@@ -339,6 +340,8 @@ export function AppShell({
   const characterStorageKey = `eraser-character:${user.email}`
   const campaignStorageKey = `eraser-campaign:${user.email}`
   const [viewRole, setViewRole] = useState<SiteRole>(initialViewRole)
+  // Ce que reçoivent les ajouts des extensions dans les emplacements de la coque (lib/extensions.ts, `extensionSlots`).
+  const slotContext = useMemo(() => ({ pathname, viewRole }), [pathname, viewRole])
   // Le personnage et la campagne retenus sont lus dans le stockage dès le premier rendu
   // client, et non plus recopiés dans un état par un minuteur après peinture.
   const [selectedCharacterId, setSelectedCharacterId] = useStoredText(characterStorageKey)
@@ -744,7 +747,7 @@ export function AppShell({
         overrides that pad/shrink the sidebar primitives by its height instead. */}
     <DesktopTitlebar />
     <SidebarProvider className="h-svh overflow-hidden">
-      <Sidebar collapsible="icon" className="border-r-0">
+      <Sidebar collapsible="icon" className="border-r-0" data-eraser-part="barre-laterale">
         <SidebarHeader className="gap-3 border-b border-sidebar-border p-3 group-data-[collapsible=icon]:p-1">
           <div className="flex items-center gap-2">
             <DropdownMenu open={accountMenuOpen} onOpenChange={setAccountMenuOpen}>
@@ -859,6 +862,7 @@ export function AppShell({
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
+          <ExtensionSlot name="barre-laterale" context={slotContext} wrap={(content) => <SidebarGroup data-eraser-slot="barre-laterale"><SidebarGroupContent><SidebarMenu>{content}</SidebarMenu></SidebarGroupContent></SidebarGroup>} />
         </SidebarContent>
 
         {user.role === "admin" && viewRole === "admin" && (
@@ -891,6 +895,8 @@ export function AppShell({
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        <ExtensionSlot name="barre-laterale.pied" context={slotContext} wrap={(content) => <SidebarGroup data-eraser-slot="barre-laterale.pied" className="border-t border-sidebar-border"><SidebarGroupContent><SidebarMenu>{content}</SidebarMenu></SidebarGroupContent></SidebarGroup>} />
 
         <SidebarFooter className="border-t border-sidebar-border p-3">
           <SidebarMenu>
@@ -926,11 +932,12 @@ export function AppShell({
           quelle que soit la page affichée, sans dépendre d’un `position: sticky` que le
           contenu d’une page pourrait neutraliser. */}
       <SidebarInset className="h-svh min-h-svh min-w-0 w-0 flex-1 overflow-hidden">
-        <header className="z-50 flex h-14 shrink-0 items-center gap-3 border-b bg-background px-4 shadow-sm md:px-7">
+        <header data-eraser-part="en-tete" className="z-50 flex h-14 shrink-0 items-center gap-3 border-b bg-background px-4 shadow-sm md:px-7">
           <SidebarTrigger aria-label="Afficher ou masquer la navigation" />
           {/* Le fil d'Ariane suit la page qui s'ouvre dès le clic, puis celle affichée. */}
           <ShellBreadcrumb pathname={pendingPage?.to || pathname} current={pendingPage?.title || currentPageLabel} campaignName={(id) => visibleCampaigns.find((campaign) => campaign.id === id)?.name} />
           <div className="ml-auto flex shrink-0 items-center gap-2">
+            <ExtensionSlot name="page.en-tete" context={slotContext} className="flex items-center gap-2" />
             <PageSearch />
             {user.role === "admin" && viewRole === "admin" && !pendingPage && atelierInstalled && <PageEditButton pathname={pathname} pageId={editPageId} />}
             <SharePageButton title={currentPageLabel} />
@@ -942,7 +949,7 @@ export function AppShell({
         </header>
         {/* `--eraser-viewport` : la hauteur visible de ce bloc (l’écran moins l’en-tête), pour
             les calques qui couvrent l’écran pendant qu’on fait défiler (FX page entière). */}
-        <div ref={pageScrollerRef} className="paper-grain flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-clip overscroll-contain [--eraser-viewport:calc(100svh-3.5rem)]">
+        <div ref={pageScrollerRef} data-eraser-part="page" className="paper-grain flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-clip overscroll-contain [--eraser-viewport:calc(100svh-3.5rem)]">
           <ShellDataContext.Provider value={shellData}>
             <PageEditContext.Provider value={setEditPageId}>
             {pendingPage && <PendingPage pending={pendingPage} />}
@@ -950,7 +957,9 @@ export function AppShell({
             {/* « Modifier » d’un index reste ouvert, attaché à sa page : il vit ici, caché sur les autres pages. */}
             <EditorDockProvider areaRef={pageScrollerRef} hidden={Boolean(pendingPage)}>
             <div data-view-role={viewRole} className={pendingPage ? "hidden" : "contents"}>
+              <ExtensionSlot name="page.avant" context={slotContext} />
               {children}
+              <ExtensionSlot name="page.apres" context={slotContext} />
             </div>
             </EditorDockProvider>
             </PageEditContext.Provider>
@@ -960,6 +969,9 @@ export function AppShell({
     </SidebarProvider>
     <GlobalTableChat user={{ uid: user.uid, role: user.role }} />
     <ItemNotifications />
+    {/* Les extensions : leur démarrage, puis ce qu'elles posent par-dessus tout (components/eraser/extension-runtime.tsx). */}
+    <ExtensionLayers context={slotContext} />
+    <ExtensionBoot extensions={extensions} account={{ uid: user.uid, displayName: user.displayName, role: user.role }} pathname={pathname} viewRole={viewRole} />
     </AppTabsProvider>
     </PageLabelContext.Provider>
   )

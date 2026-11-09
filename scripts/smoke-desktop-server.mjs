@@ -39,13 +39,16 @@ async function waitFor(url) {
 }
 
 // Une extension comme Eraser la range après l'avoir téléchargée (lib/extensions-install.ts) :
-// le serveur construit doit l'ouvrir, servir ses fichiers et charger sa partie serveur.
+// le serveur construit doit l'ouvrir, servir ses fichiers et charger sa partie serveur ; avec
+// l'API 3, poser ses styles sur toutes les pages et servir son module de démarrage.
 async function installFakeExtension() {
   const directory = join(dataDirectory, "extensions", "map")
   await mkdir(join(directory, "0.1.0"), { recursive: true })
   await writeFile(join(directory, "0.1.0", "main.js"), "export function mount(element) { element.textContent = 'Eraser Map' }")
+  await writeFile(join(directory, "0.1.0", "boot.js"), "export function activate(eraser) { eraser.slots.add('page.en-tete', () => null) }")
+  await writeFile(join(directory, "0.1.0", "global.css"), ":root { --eraser-smoke: 1; }")
   await writeFile(join(directory, "0.1.0", "server.mjs"), "export default { async fetch(request, eraser) { return Response.json({ version: eraser.extension.version, path: eraser.path, role: eraser.account.role }) } }")
-  const manifest = { id: "map", version: "0.1.0", api: 1, entry: "main.js", styles: [], server: "server.mjs", pack: "eraser-extension.pack.gz", sha256: "0".repeat(64) }
+  const manifest = { id: "map", version: "0.1.0", api: 3, entry: "main.js", styles: [], boot: "boot.js", globalStyles: ["global.css"], server: "server.mjs", pack: "eraser-extension.pack.gz", sha256: "0".repeat(64) }
   await writeFile(join(directory, "current.json"), JSON.stringify({ version: "0.1.0", manifest, installedAt: new Date().toISOString() }))
 }
 
@@ -168,6 +171,12 @@ try {
   if (!extensionModule.ok || !/javascript/.test(extensionModule.headers.get("content-type") || "") || !(await extensionModule.text()).includes("export function mount")) {
     throw new Error(`Le module de l'extension n'est pas servi (${extensionModule.status}).`)
   }
+  // API 3 : ses styles sur une page d'Eraser (pas seulement la sienne), avant l'affichage, et son démarrage servi.
+  const home = await fetch(`${origin}/`, { headers: { cookie: loginCookie } })
+  const homeHtml = await home.text()
+  if (!home.ok || !homeHtml.includes("/api/extensions/map/fichiers/0.1.0/global.css")) throw new Error(`Les styles d'une extension ne sont pas posés sur les pages d'Eraser (${home.status}).`)
+  const bootModule = await fetch(`${origin}/api/extensions/map/fichiers/0.1.0/boot.js`, { headers: { cookie: loginCookie } })
+  if (!bootModule.ok || !(await bootModule.text()).includes("export function activate")) throw new Error(`Le module de démarrage de l'extension n'est pas servi (${bootModule.status}).`)
   const extensionServer = await fetch(`${origin}/api/extensions/map/serveur/carte/2`, { headers: { cookie: loginCookie } })
   const extensionAnswer = extensionServer.ok ? await extensionServer.json() : null
   if (extensionAnswer?.version !== "0.1.0" || extensionAnswer.path?.join("/") !== "carte/2" || extensionAnswer.role !== "admin") {

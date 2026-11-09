@@ -149,6 +149,12 @@ export function noteExtensionShown({ id, version, ms, codeMs, complete }: { id: 
   record({ kind: "extension", label: `${id} ${version}`, ms, detail: [`code chargé en ${Math.round(codeMs)} ms`, complete ? "contenu prêt" : "contenu encore en chargement après 20 s"].join(" · ") })
 }
 
+/** Le démarrage d'une extension (son module `boot`, components/eraser/extension-runtime.tsx), au premier moment libre après l'ouverture. */
+export function noteExtensionBooted({ id, version, ms, codeMs }: { id: string; version: string; ms: number; codeMs: number }) {
+  if (typeof window === "undefined") return
+  record({ kind: "extension", label: `${id} ${version} · démarrage`, ms, detail: `code chargé en ${Math.round(codeMs)} ms` })
+}
+
 /**
  * L'image qui a mis la fenêtre à l'écran (commencée avant son premier affichage) : le temps de
  * l'ouverture, pas un gel d'un écran déjà là. Comptée avec les pages, détaillée par les temps du

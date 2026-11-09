@@ -48,15 +48,19 @@ const map = { id: "map", name: "Eraser Map", description: "", repository: "Pink-
 const serverModule = "export default { async fetch(request, eraser) { return new Response(`${eraser.extension.version} ${eraser.account.uid} ${eraser.path.join('/')} ${new URL(request.url).search}`) } }";
 
 /** Publie une version dans le faux GitHub (la plus récente en tête, comme GitHub). */
-function publish(repository, version, { api = 1, id = "map", corruptPack = false, files: extra = {} } = {}) {
+function publish(repository, version, { api = 1, id = "map", corruptPack = false, boot = false, files: extra = {} } = {}) {
   const files = new Map(Object.entries({
     "main.js": `export function mount(element) { element.textContent = "${version}" }`,
     "main.css": ".x{}",
     "server.mjs": serverModule,
     "chunks/part.js": "export const part = 1",
+    ...(boot ? { "boot.js": "export function activate(eraser) {}", "global.css": ":root{--primary:#123456}" } : {}),
     ...extra,
   }).map(([path, content]) => [path, Buffer.from(content)]));
-  const { manifest, pack } = packExtension({ id, version, api, entry: "main.js", styles: ["main.css"], server: "server.mjs", files });
+  // `boot` : une extension de l'API 3 sans page, lancée au démarrage sur toutes les pages.
+  const { manifest, pack } = boot
+    ? packExtension({ id, version, api: Math.max(api, 3), boot: "boot.js", globalStyles: ["global.css"], files })
+    : packExtension({ id, version, api, entry: "main.js", styles: ["main.css"], server: "server.mjs", files });
   const prefix = `/download/${repository}/${version}`;
   assets.set(`${prefix}/eraser-extension.json`, Buffer.from(JSON.stringify(manifest)));
   assets.set(`${prefix}/eraser-extension.pack.gz`, corruptPack ? Buffer.concat([pack, Buffer.from("!")]) : pack);
@@ -87,7 +91,16 @@ test("versions et chemins : préversions avant la version finale, rien hors du d
 
 test("le manifeste : complet, ou refusé", () => {
   const good = { id: "map", version: "0.1.0", api: 1, entry: "main.js", styles: ["main.css"], server: "server.mjs", pack: "eraser-extension.pack.gz", sha256: "a".repeat(64) };
-  assert.deepEqual(extensions.parseExtensionManifest(good), good);
+  // Un manifeste d'avant l'API 3 : ni démarrage ni styles globaux.
+  assert.deepEqual(extensions.parseExtensionManifest(good), { ...good, boot: null, globalStyles: [] });
+  // API 3 : un démarrage sans page, ou les deux ; jamais ni l'un ni l'autre.
+  const booting = { ...good, api: 3, entry: undefined, boot: "boot.js", globalStyles: ["global.css"] };
+  assert.deepEqual(extensions.parseExtensionManifest(booting), { ...booting, entry: null });
+  assert.equal(extensions.parseExtensionManifest({ ...booting, entry: "main.js" })?.entry, "main.js");
+  assert.equal(extensions.parseExtensionManifest({ ...booting, boot: null }), null);
+  for (const patch of [{ boot: "../boot.js" }, { globalStyles: ["/x.css"] }, { globalStyles: [3] }]) {
+    assert.equal(extensions.parseExtensionManifest({ ...booting, ...patch }), null, JSON.stringify(patch));
+  }
   assert.equal(extensions.parseExtensionManifest({ ...good, version: "v0.1.0" })?.version, "0.1.0");
   assert.equal(extensions.parseExtensionManifest({ ...good, server: undefined })?.server, null);
   assert.equal(extensions.parseExtensionManifest({ ...good, pack: undefined })?.pack, "eraser-extension.pack.gz");
@@ -107,6 +120,15 @@ test("le paquet : fabriqué par scripts/pack-extension.mjs, relu à l'identique,
   assert.equal(install.parseExtensionPack(JSON.stringify({ format: "eraser-extension-pack", files: { "../evil.js": "" } })), null);
   assert.equal(install.parseExtensionPack(JSON.stringify({ format: "autre", files: { "main.js": "" } })), null);
   assert.throws(() => packExtension({ id: "doc", version: "1.2.3", api: 1, entry: "absent.js", files }), /absent\.js/);
+  // API 3 : un démarrage (et ses styles globaux) à la place d'une page.
+  const booting = packExtension({ id: "doc", version: "1.2.3", api: 3, boot: "main.js", globalStyles: ["img/x.png"], files }).manifest;
+  assert.equal(booting.entry, null);
+  assert.equal(booting.boot, "main.js");
+  assert.deepEqual(booting.globalStyles, ["img/x.png"]);
+  assert.equal(extensions.parseExtensionManifest(booting)?.boot, "main.js");
+  assert.throws(() => packExtension({ id: "doc", version: "1.2.3", api: 2, boot: "main.js", files }), /API 3/);
+  assert.throws(() => packExtension({ id: "doc", version: "1.2.3", api: 3, files }), /rien à lancer/);
+  assert.throws(() => packExtension({ id: "doc", version: "1.2.3", api: 3, boot: "absent.js", files }), /absent\.js/);
 });
 
 test("un dépôt sans version publiée, un dépôt introuvable : rien n'est installé", async () => {
@@ -191,6 +213,61 @@ test("« Chercher les mises à jour » relit GitHub une fois par minute au plus"
   // L'admin (« Vérifier les mises à jour ») relit tout de suite.
   check = await install.updateExtension(map, { force: true });
   assert.equal(check.installed?.version, "0.8.0");
+});
+
+test("API 3 : une extension sans page, lancée au démarrage sur toutes les pages, avec ses styles", async () => {
+  const doc = { id: "doc", name: "Eraser Doc", description: "", repository: "Pink-Rain/Eraser_doc" };
+  const manifest = publish("Pink-Rain/Eraser_doc", "1.0.0", { id: "doc", boot: true });
+  assert.equal(manifest.entry, null);
+  const check = await install.updateExtension(doc, { force: true });
+  assert.equal(check.error, null);
+  const installed = await install.readInstalledExtension("doc");
+  assert.equal(installed.entry, null);
+  assert.equal(installed.boot, "boot.js");
+  assert.deepEqual(installed.globalStyles, ["global.css"]);
+  // La coque reçoit le démarrage et les styles de chacune (et rien pour une extension qui n'en a pas).
+  const shell = await install.shellExtensions();
+  assert.deepEqual(shell.find((entry) => entry.id === "doc"), { id: "doc", version: "1.0.0", boot: "boot.js", globalStyles: ["global.css"] });
+  assert.deepEqual(shell.find((entry) => entry.id === "map"), { id: "map", version: "0.8.0", boot: null, globalStyles: [] });
+});
+
+test("le contrat des extensions : emplacements et boîte à outils jamais retirés ni renommés, chaque emplacement rendu", async () => {
+  const { readFile } = await import("node:fs/promises");
+  // Ajouter un emplacement ou un outil : l'ajouter aussi ici. Ne jamais rien retirer de ces listes.
+  const slots = ["page.avant", "page.apres", "page.en-tete", "barre-laterale", "barre-laterale.pied", "calque", "index.fiche", "index.fiche.actions"];
+  const tools = ["api", "extension", "account", "require", "file", "page", "go", "server", "eraser", "slots", "ui", "styles", "on"];
+  const uiTools = ["dialog", "toast", "confirm"];
+  assert.ok(extensions.EXTENSION_API_VERSION >= 3);
+  for (const slot of slots) assert.ok(extensions.extensionSlotNames.includes(slot), `emplacement retiré : ${slot}`);
+
+  // Chaque emplacement promis est vraiment posé dans Eraser.
+  const sources = [];
+  const walk = async (folder) => {
+    for (const entry of await readdir(join(root, folder), { withFileTypes: true })) {
+      const path = `${folder}/${entry.name}`;
+      if (entry.isDirectory()) await walk(path);
+      else if (/\.tsx$/.test(entry.name)) sources.push(await readFile(join(root, path), "utf8"));
+    }
+  };
+  await walk("components");
+  await walk("app");
+  for (const slot of extensions.extensionSlotNames) {
+    assert.ok(sources.some((source) => source.includes(`<ExtensionSlot name="${slot}"`) || (slot === "calque" && source.includes("<ExtensionLayers"))), `emplacement promis mais posé nulle part : ${slot}`);
+  }
+
+  // La boîte à outils : décrite dans le contrat (lib/extension-api.ts) et donnée par le moteur.
+  const api = await readFile(join(root, "lib/extension-api.ts"), "utf8");
+  const contract = api.slice(api.indexOf("export type Eraser = {"), api.indexOf("\n}\n", api.indexOf("export type Eraser = {")));
+  const runtime = await readFile(join(root, "components/eraser/extension-runtime.tsx"), "utf8");
+  const toolbox = runtime.slice(runtime.indexOf("const toolbox: Eraser = {"), runtime.indexOf("toolboxes.set(cacheKey"));
+  for (const tool of tools) {
+    assert.match(contract, new RegExp(`^  ${tool}: `, "m"), `outil retiré du contrat : ${tool}`);
+    assert.match(toolbox, new RegExp(`^    ${tool}[,:(]`, "m"), `outil absent du moteur : ${tool}`);
+  }
+  for (const tool of uiTools) {
+    assert.match(contract, new RegExp(`^    ${tool}: `, "m"), `outil retiré du contrat : ui.${tool}`);
+    assert.match(toolbox, new RegExp(`^      ${tool}\\(`, "m"), `outil absent du moteur : ui.${tool}`);
+  }
 });
 
 test("ce qu'Eraser prête aux extensions se charge dans le navigateur : aucun code du serveur", async () => {

@@ -8,6 +8,7 @@ import { IndexRichText } from "@/components/eraser/index-references"
 import { RichTextToolbar, RichTextToolbarHost, type RichTextTarget } from "@/components/eraser/rich-text"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { ExtensionSlot } from "@/components/eraser/extension-runtime"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { DEFAULT_LAYOUT_ACCENT, FieldLabel, fieldAlignClass, IndexLayoutView, labelLookOf, largeFieldClass, layoutBackgroundOf, smallFieldClass } from "@/components/eraser/index-layout-view"
@@ -109,6 +110,8 @@ export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, r
   }
 
   const background = sheetBackgroundOf(layout, fields)
+  // Ce que reçoivent les extensions dans la fiche de n'importe quel index (lib/extensions.ts, « index.fiche »).
+  const slotContext = { index: rowRef?.index ?? "", id: rowRef?.id ?? "", tab: rowRef?.tab ?? "", values: Object.fromEntries(fields.filter((field) => !field.block).map((field) => [field.label || field.key, field.value])) }
   return <Dialog open={open} onOpenChange={(value) => { if (!value) close() }}>
     <DialogContent
       className={`flex max-h-[92svh] flex-col gap-4 ${layout?.aside.length ? "sm:max-w-5xl" : "sm:max-w-4xl"}`}
@@ -132,6 +135,7 @@ export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, r
       <RichTextToolbarHost.Provider value={toolbarHost}>
         <RowSheetBody key={rowKey} rowKey={rowKey} fields={fields} layout={layout} rowFor={rowFor} renderField={renderField} retryRef={retryRef} onSave={onSave} onStatus={setStatus} rowRef={rowRef} inventoryEndpoint={inventoryEndpoint} openForm={openForm} columnValue={columnValue} />
       </RichTextToolbarHost.Provider>
+      <ExtensionSlot name="index.fiche" context={slotContext} className="flex flex-col gap-2" />
       {error && <p className="rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p>}
       <DialogFooter className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[1fr_auto_1fr] sm:justify-normal">
         <span className="flex min-w-0 items-center gap-3 font-mono text-[11px] text-muted-foreground">
@@ -143,6 +147,7 @@ export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, r
           <Button type="button" variant="outline" size="sm" onClick={() => go(next)} disabled={!next} title={next ? `Suivante : ${navigation.labelOf(next) || "Sans nom"} (Alt + →)` : "Dernière ligne"}>Suivante<ChevronRight /></Button>
         </span> : <span />}
         <span className="flex flex-wrap items-center justify-end gap-2">
+          <ExtensionSlot name="index.fiche.actions" context={slotContext} className="flex flex-wrap items-center gap-2" />
           {footer}
           {(error || status === "error") && status !== "saving" && <Button type="button" size="sm" variant="outline" onClick={() => retryRef.current?.()} title="Renvoyer ce qui n’a pas été enregistré"><RefreshCw />Réessayer</Button>}
           <SaveIndicator status={error ? "error" : status} />

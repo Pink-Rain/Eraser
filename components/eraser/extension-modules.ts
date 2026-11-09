@@ -63,6 +63,7 @@ import * as uiProgress from "@/components/ui/progress"
 import * as uiSelect from "@/components/ui/select"
 import * as uiSeparator from "@/components/ui/separator"
 import * as uiSheet from "@/components/ui/sheet"
+import * as uiSidebar from "@/components/ui/sidebar"
 import * as uiSkeleton from "@/components/ui/skeleton"
 import * as uiTabs from "@/components/ui/tabs"
 import * as uiTextarea from "@/components/ui/textarea"
@@ -147,6 +148,7 @@ const modules: Record<string, Readonly<Record<string, unknown>>> = {
   "@/components/ui/select": lent(uiSelect),
   "@/components/ui/separator": lent(uiSeparator),
   "@/components/ui/sheet": lent(uiSheet),
+  "@/components/ui/sidebar": lent(uiSidebar),
   "@/components/ui/skeleton": lent(uiSkeleton),
   "@/components/ui/tabs": lent(uiTabs),
   "@/components/ui/textarea": lent(uiTextarea),

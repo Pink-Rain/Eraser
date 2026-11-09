@@ -22,6 +22,7 @@ import {
   EXTENSION_API_VERSION,
   EXTENSION_MANIFEST_ASSET,
   EXTENSION_PACK_FORMAT,
+  manifestFiles,
   parseExtensionManifest,
   safeExtensionPath,
   type ExtensionDefinition,
@@ -111,8 +112,13 @@ export type InstalledExtension = {
   id: string
   version: string
   api: number
-  entry: string
+  /** Le module de ses pages ; null : l'extension n'a pas de page (API 3). */
+  entry: string | null
   styles: string[]
+  /** Le module lancé au démarrage, sur toutes les pages (API 3). */
+  boot: string | null
+  /** Ses feuilles de style posées sur toutes les pages (API 3). */
+  globalStyles: string[]
   server: string | null
   installedAt: string
   /** Le dossier de cette version. */
@@ -140,33 +146,55 @@ async function readCurrent(id: string): Promise<CurrentFile | null> {
 }
 
 /**
- * Les versions installées sur cet ordinateur, gardées en mémoire pour la coque (rien n'est lu à
+ * Les extensions installées sur cet ordinateur, gardées en mémoire pour la coque (rien n'est lu à
  * chaque page) : lues une fois au premier appel, tenues à jour par chaque installation.
  */
-let installedVersions: Map<string, string> | null = null
+let installedForShell: Map<string, InstalledExtension> | null = null
+let installedReading: Promise<void> | null = null
 
-export function knownInstalledVersions(): Array<{ id: string; version: string }> {
-  if (!installedVersions) {
-    const versions = new Map<string, string>()
-    installedVersions = versions
-    void Promise.all(linkedExtensions.map(async (extension) => {
-      const installed = await readInstalledExtension(extension.id)
-      if (installed && !versions.has(extension.id)) versions.set(extension.id, installed.version)
-    })).catch(() => undefined)
+function readInstalledForShell() {
+  if (!installedReading) {
+    const found = new Map<string, InstalledExtension>()
+    installedForShell = found
+    installedReading = Promise.all(linkedExtensions.map(async (extension) => {
+      const installed = await readInstalledExtension(extension.id).catch(() => null)
+      if (installed && !found.has(extension.id)) found.set(extension.id, installed)
+    })).then(() => undefined, () => undefined)
   }
-  return [...installedVersions].map(([id, version]) => ({ id, version }))
+  return installedReading
 }
 
-/** La version installée sur cet ordinateur, si son point d'entrée est bien là. */
+export function knownInstalledVersions(): Array<{ id: string; version: string }> {
+  void readInstalledForShell()
+  return [...installedForShell!.values()].map(({ id, version }) => ({ id, version }))
+}
+
+/** Ce que la coque lance sur toutes les pages : une extension qu'Eraser sait faire tourner, son module de démarrage et ses styles. */
+export type ShellExtension = { id: string; version: string; boot: string | null; globalStyles: string[] }
+
+/**
+ * Les extensions installées pour la coque (app/layout.tsx). Le premier appel attend la lecture du
+ * disque (quelques fichiers `current.json`, une fois par lancement) : dès la première page, les
+ * styles d'une extension sont posés avant l'affichage.
+ */
+export async function shellExtensions(): Promise<ShellExtension[]> {
+  await readInstalledForShell()
+  return [...installedForShell!.values()]
+    .filter((installed) => installed.api <= EXTENSION_API_VERSION)
+    .map(({ id, version, boot, globalStyles }) => ({ id, version, boot, globalStyles }))
+}
+
+/** La version installée sur cet ordinateur, si son point d'entrée (page ou démarrage) est bien là. */
 export async function readInstalledExtension(id: string): Promise<InstalledExtension | null> {
   const directory = extensionDirectory(id)
   const current = await readCurrent(id)
   if (!directory || !current) return null
   const versionDirectory = join(directory, current.version)
-  const entry = await stat(join(versionDirectory, current.manifest.entry)).catch(() => null)
-  if (!entry?.isFile()) return null
   const { manifest } = current
-  return { id, version: manifest.version, api: manifest.api, entry: manifest.entry, styles: manifest.styles, server: manifest.server, installedAt: current.installedAt, directory: versionDirectory }
+  // Son point d'entrée (sa page, sinon son module de démarrage) doit être là.
+  const entry = await stat(join(versionDirectory, ...(manifest.entry ?? manifest.boot ?? "").split("/"))).catch(() => null)
+  if (!entry?.isFile()) return null
+  return { id, version: manifest.version, api: manifest.api, entry: manifest.entry, styles: manifest.styles, boot: manifest.boot, globalStyles: manifest.globalStyles, server: manifest.server, installedAt: current.installedAt, directory: versionDirectory }
 }
 
 /**
@@ -210,7 +238,7 @@ async function installPublished(definition: ExtensionDefinition, published: Extr
   let files: Map<string, Uint8Array> | null
   try { files = parseExtensionPack(gunzipSync(packed).toString("utf8")) } catch { files = null }
   if (!files) throw new Error("Paquet illisible.")
-  for (const needed of [manifest.entry, ...manifest.styles, ...(manifest.server ? [manifest.server] : [])]) {
+  for (const needed of manifestFiles(manifest)) {
     if (!files.has(needed)) throw new Error(`Le paquet n'a pas ${needed}.`)
   }
 
@@ -238,7 +266,7 @@ async function installPublished(definition: ExtensionDefinition, published: Extr
   await cleanup(directory, [current.version, current.previous ?? ""])
   const installed = await readInstalledExtension(definition.id)
   if (!installed) throw new Error("L'extension installée est introuvable.")
-  installedVersions?.set(definition.id, installed.version)
+  installedForShell?.set(definition.id, installed)
   return installed
 }
 

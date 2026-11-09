@@ -18,7 +18,10 @@ export default async function ExtensionPage({ params }: { params: Promise<{ id: 
   const installed = await readInstalledExtension(id)
 
   let content
-  if (installed && installed.api <= EXTENSION_API_VERSION) {
+  if (installed && installed.api <= EXTENSION_API_VERSION && !installed.entry) {
+    // API 3 : une extension qui agit sur l'application (son module de démarrage) sans avoir de page.
+    content = <ExtensionUnavailable title={`${definition.name} n'a pas de page`} detail="Elle agit directement dans les pages d'Eraser." />
+  } else if (installed && installed.api <= EXTENSION_API_VERSION && installed.entry) {
     content = <ExtensionHost
       id={id}
       version={installed.version}

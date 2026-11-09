@@ -7,44 +7,22 @@ import * as jsxRuntime from "react/jsx-runtime"
 import { useRouter } from "next/navigation"
 import { Puzzle } from "lucide-react"
 
-import type { SiteRole } from "@/lib/auth-types"
-import { EXTENSION_API_VERSION } from "@/lib/extensions"
+import { extensionToolbox, lendEraserModules, type ExtensionGlobals } from "@/components/eraser/extension-runtime"
+import type { Eraser, ExtensionAccount } from "@/lib/extension-api"
 import { noteExtensionShown } from "@/lib/fluidity-journal"
 
+export type { ExtensionAccount } from "@/lib/extension-api"
+
 /**
- * Ce qu'Eraser prête aux extensions dans le navigateur (version `EXTENSION_API_VERSION`). Une
- * extension rend avec le React d'Eraser — jamais le sien — et demande ses pièces (composants,
- * routeur, modèles) à `require` (components/eraser/extension-modules.ts).
+ * L'objet donné aux pages d'une extension : stable d'une version d'API à l'autre, on n'y retire
+ * rien. Depuis l'API 3, c'est la boîte à outils de toute extension (lib/extension-api.ts) plus ce
+ * qui est propre à une page : son adresse et `navigate`.
  */
-type ExtensionGlobals = {
-  api: number
-  React: typeof React
-  ReactDOMClient: typeof ReactDOMClient
-  jsxRuntime: typeof jsxRuntime
-  /** Depuis l'API 2 : un module prêté par Eraser, par le nom sous lequel le code l'importe. */
-  require: (id: string) => unknown
-}
-
-declare global {
-  interface Window {
-    EraserExtensions?: ExtensionGlobals
-  }
-}
-
-export type ExtensionAccount = { uid: string; displayName: string; role: SiteRole }
-
-/** L'objet donné à l'extension : stable d'une version d'API à l'autre, on n'y retire rien. */
-export type EraserExtensionContext = ExtensionGlobals & {
-  extension: { id: string; version: string; base: string }
-  account: ExtensionAccount
+export type EraserExtensionContext = ExtensionGlobals & Eraser & {
   /** L'adresse sous `/extension/<id>/`, morceau par morceau. */
   path: string[]
   /** Change d'adresse dans l'extension (`navigate("carte/2")`). */
   navigate: (path: string) => void
-  /** Appelle la partie serveur de l'extension (`/api/extensions/<id>/serveur/<chemin>`). */
-  server: (path: string, init?: RequestInit) => Promise<Response>
-  /** Appelle une API d'Eraser (« /api/… »), avec le compte connecté. */
-  eraser: (path: string, init?: RequestInit) => Promise<Response>
 }
 
 type ExtensionModule = {
@@ -87,22 +65,18 @@ export function ExtensionHost({ id, version, entry, styles, path, account }: {
   // Le contexte suit l'adresse et le compte : `Page` le reçoit en propriété, `mount` par `update`.
   const context = useMemo<EraserExtensionContext | null>(() => {
     if (!requireLent) return null
-    const base = `/extension/${id}`
+    const toolbox = extensionToolbox({ id, version }, { uid: account.uid, displayName: account.displayName, role: account.role }, requireLent)
+    const base = toolbox.extension.base
     return {
-      api: EXTENSION_API_VERSION,
+      ...toolbox,
       React,
       ReactDOMClient,
       jsxRuntime,
-      require: requireLent,
-      extension: { id, version, base },
-      account: { uid: account.uid, displayName: account.displayName, role: account.role },
       path: pathKey ? pathKey.split("/") : [],
       navigate: (next) => {
         const clean = next.replace(/^\/+/, "")
         router.push(clean ? `${base}/${clean}` : base)
       },
-      server: (next, init) => fetch(`/api/extensions/${encodeURIComponent(id)}/serveur/${next.replace(/^\/+/, "")}`, init),
-      eraser: (next, init) => next.startsWith("/api/") ? fetch(next, init) : Promise.reject(new Error("Une API d'Eraser commence par « /api/ ».")),
     }
   }, [requireLent, id, version, pathKey, account.uid, account.displayName, account.role, router])
 
@@ -119,9 +93,8 @@ export function ExtensionHost({ id, version, entry, styles, path, account }: {
       document.head.appendChild(link)
       return link
     })
-    import("@/components/eraser/extension-modules")
-      .then(({ eraserRequire }) => {
-        window.EraserExtensions = { api: EXTENSION_API_VERSION, React, ReactDOMClient, jsxRuntime, require: eraserRequire }
+    lendEraserModules()
+      .then((eraserRequire) => {
         if (alive) setRequireLent(() => eraserRequire)
         return import(/* @vite-ignore */ `${files}/${entry}`) as Promise<ExtensionModule>
       })

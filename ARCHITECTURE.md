@@ -589,9 +589,37 @@ tabletop, encore vide), `page` (Pink-Rain/Eraser_page, **l'atelier des pages**, 
   `/api/extensions/<id>/fichiers/<version>/…` (fichiers immuables) et ses `styles`. **API 2** : le
   module exporte `Page`, un composant rendu dans l'arbre d'Eraser (ses contextes : routeur,
   coque, titre de page) qui reçoit `eraser` (compte, `path`, `navigate`, `server`, `eraser` pour
-  les API `/api/…`, `require`). API 1 : `mount(élément, eraser)` et `update(eraser)`. Ce qu'une
+  les API `/api/…`, `require` et, depuis l'API 3, toute la boîte à outils ci-dessous). API 1 : `mount(élément, eraser)` et `update(eraser)`. Ce qu'une
   extension charge encore porte `aria-busy="true"`, comme les pages d'Eraser : l'hôte mesure son
   ouverture jusqu'à ce qu'il n'y en ait plus (relevé de fluidité, « Extensions »).
+- **Agir sur toute l'application (API 3)** : une extension n'est pas qu'une page. Son manifeste
+  peut déclarer `boot` (un module lancé sur chaque ordinateur, au premier moment libre après
+  l'ouverture, qui exporte `activate(eraser)`) et `globalStyles` (des feuilles posées sur toutes
+  les pages par `app/layout.tsx`, après celles d'Eraser, avant l'affichage). `entry` (les pages)
+  devient facultatif : il faut l'un ou l'autre. `eraser` est **la même boîte à outils partout**
+  (démarrage, pages, composants posés) : contrat dans `lib/extension-api.ts`, moteur dans
+  `components/eraser/extension-runtime.tsx`.
+  - `eraser.slots.add(emplacement, Composant)` pose un composant dans un **emplacement** :
+    `extensionSlots` (`lib/extensions.ts`) les nomme et dit ce que reçoit `context`. Aujourd'hui :
+    `page.avant`, `page.apres`, `page.en-tete` (toutes les pages), `barre-laterale`,
+    `barre-laterale.pied`, `calque` (au-dessus de tout), `index.fiche` et `index.fiche.actions`
+    (la fiche d'une ligne de **tous** les index). Un emplacement est un `<ExtensionSlot name=… />` ;
+    sans ajout il ne rend rien et ne charge rien.
+  - `eraser.ui.dialog / toast / confirm` (fenêtres, messages, confirmations, avec les composants
+    d'Eraser), `eraser.styles.add` (CSS ou feuille à la volée), `eraser.on("page", …)` (la page
+    affichée et le rôle de vue), `eraser.page()`, `eraser.go(adresse)`, `eraser.file(chemin)`, et
+    comme avant `server`, `eraser` (API d'Eraser), `require`, `account`.
+  - Repères stables pour le CSS des extensions : `data-eraser-part` (`barre-laterale`, `en-tete`,
+    `page`, `messages`) et `data-eraser-slot` ; jamais les classes Tailwind d'Eraser, qui changent.
+  - **Protégé** : chaque ajout est dans une barrière d'erreur (une extension qui plante disparaît,
+    la page reste) ; tout ce qui passe par `eraser` est défait quand l'extension change de version
+    (son `activate` peut rendre de quoi défaire le reste). Le démarrage va au relevé de fluidité
+    (« extension · démarrage »).
+  - **Contrat gardé par `tests/extensions.test.mjs`** : un emplacement, un outil de `eraser` ou un
+    outil de `eraser.ui` retiré ou renommé fait échouer les tests, et chaque emplacement promis doit
+    être posé quelque part. On ajoute ; on ne retire jamais. Un nouvel emplacement (un endroit
+    précis au milieu d'une page) : une entrée dans `extensionSlots`, un `<ExtensionSlot>` là où il
+    se rend, une ligne dans le test.
 - **Ce qu'Eraser prête** (`components/eraser/extension-modules.ts`, `window.EraserExtensions.require`) :
   React, `react/jsx-runtime`, `react/compiler-runtime`, `next/link`, `next/navigation`, les
   composants `components/ui/*`, et les pièces d'Eraser dont les extensions ont besoin (affichage
@@ -614,7 +642,8 @@ tabletop, encore vide), `page` (Pink-Rain/Eraser_page, **l'atelier des pages**, 
   `remove`, `list`), ses données sur le Worker, portée `extension:<id>`, 20 000 caractères par
   entrée. Google n'est pas encore prêté : une extension qui en a besoin passe par une API
   d'Eraser, ou l'API de l'extension s'agrandit (porte du quota comprise).
-- **Version de l'API** : `EXTENSION_API_VERSION` (2). On ne retire jamais rien de ce qu'elle
+- **Version de l'API** : `EXTENSION_API_VERSION` (3 depuis l'alpha 281 : démarrage, styles globaux,
+  emplacements, fenêtres ; 2 : `Page` ; 1 : `mount`). On ne retire jamais rien de ce qu'elle
   offre ; on l'incrémente quand on ajoute ce dont une extension aura besoin. Une extension qui
   demande plus attend la mise à jour d'Eraser.
 - **L'atelier des pages** (extension `page`) : l'Index des pages (`/extension/page`, `?dossier=`,

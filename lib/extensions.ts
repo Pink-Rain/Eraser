@@ -23,7 +23,7 @@
  * attend qu'Eraser soit à jour. À incrémenter quand on ajoute quelque chose dont une extension
  * aura besoin ; ne jamais retirer ce qu'une version précédente offrait.
  */
-export const EXTENSION_API_VERSION = 2
+export const EXTENSION_API_VERSION = 3
 
 export const EXTENSION_MANIFEST_ASSET = "eraser-extension.json"
 export const EXTENSION_PACK_ASSET = "eraser-extension.pack.gz"
@@ -54,10 +54,18 @@ export type ExtensionManifest = {
   version: string
   /** La version d'`EXTENSION_API_VERSION` dont l'extension a besoin. */
   api: number
-  /** Le module chargé par la page : il exporte `mount(élément, eraser)`. */
-  entry: string
-  /** Feuilles de style posées avec la page. */
+  /** Le module de ses pages (`/extension/<id>/…`) : il exporte `Page` (ou `mount`). Facultatif depuis l'API 3, si `boot` est là. */
+  entry: string | null
+  /** Feuilles de style posées avec ses pages. */
   styles: string[]
+  /**
+   * API 3 : le module lancé au démarrage d'Eraser, sur toutes les pages (`activate(eraser)`,
+   * lib/extension-api.ts). Il pose ce que l'extension ajoute à l'application : emplacements,
+   * fenêtres, styles, réactions au changement de page. Petit : le reste se charge à la demande.
+   */
+  boot: string | null
+  /** API 3 : feuilles de style posées sur toutes les pages, après celles d'Eraser (servies avant l'affichage). */
+  globalStyles: string[]
   /** Partie serveur facultative : un module qui exporte `default.fetch(requête, eraser)` ou `handle`. */
   server: string | null
   /** Le nom du paquet parmi les fichiers de la version publiée. */
@@ -72,14 +80,19 @@ export function parseExtensionManifest(value: unknown): ExtensionManifest | null
   const id = typeof raw.id === "string" ? raw.id.trim() : ""
   const version = typeof raw.version === "string" ? raw.version.trim().replace(/^v/i, "") : ""
   const api = typeof raw.api === "number" && Number.isInteger(raw.api) && raw.api >= 1 ? raw.api : 0
-  const entry = typeof raw.entry === "string" ? safeExtensionPath(raw.entry) : null
-  const styles = Array.isArray(raw.styles) ? raw.styles.map((style) => (typeof style === "string" ? safeExtensionPath(style) : null)) : []
+  // Absent (null, "") : pas de page ; présent mais hors du dossier : manifeste refusé.
+  const optionalPath = (value: unknown) => value === undefined || value === null || value === "" ? null : (typeof value === "string" && safeExtensionPath(value)) || undefined
+  const paths = (value: unknown) => Array.isArray(value) ? value.map((item) => (typeof item === "string" ? safeExtensionPath(item) : null)) : []
+  const entry = optionalPath(raw.entry)
+  const boot = optionalPath(raw.boot)
+  const styles = paths(raw.styles)
+  const globalStyles = paths(raw.globalStyles)
   // Absente : pas de partie serveur. Présente mais hors du dossier : manifeste refusé.
   const server = raw.server === undefined || raw.server === null || raw.server === "" ? null : (typeof raw.server === "string" && safeExtensionPath(raw.server)) || undefined
   const pack = raw.pack === undefined ? EXTENSION_PACK_ASSET : typeof raw.pack === "string" && /^[\w.-]+$/.test(raw.pack) ? raw.pack : ""
   const sha256 = typeof raw.sha256 === "string" && /^[0-9a-f]{64}$/i.test(raw.sha256) ? raw.sha256.toLowerCase() : ""
-  if (!/^[a-z0-9-]+$/.test(id) || !parseVersion(version) || !api || !entry || styles.some((style) => !style) || server === undefined || !pack || !sha256) return null
-  return { id, version, api, entry, styles: styles as string[], server, pack, sha256 }
+  if (!/^[a-z0-9-]+$/.test(id) || !parseVersion(version) || !api || entry === undefined || boot === undefined || (!entry && !boot) || [...styles, ...globalStyles].some((style) => !style) || server === undefined || !pack || !sha256) return null
+  return { id, version, api, entry, styles: styles as string[], boot, globalStyles: globalStyles as string[], server, pack, sha256 }
 }
 
 /**
@@ -87,6 +100,41 @@ export function parseExtensionManifest(value: unknown): ExtensionManifest | null
  * Windows, barre oblique inverse) : null sinon. Rien d'une extension n'est écrit ni lu hors de
  * son dossier.
  */
+/** Les fichiers qu'un paquet doit contenir pour que le manifeste tienne. */
+export function manifestFiles(manifest: Pick<ExtensionManifest, "entry" | "styles" | "boot" | "globalStyles" | "server">) {
+  return [manifest.entry, manifest.boot, ...manifest.styles, ...manifest.globalStyles, manifest.server].filter((path): path is string => Boolean(path))
+}
+
+/**
+ * Les emplacements qu'Eraser offre aux extensions (`eraser.slots.add(nom, Composant)`), avec ce
+ * que reçoit le composant dans `context`. C'est un contrat, gardé par tests/extensions.test.mjs :
+ * on en ajoute, on n'en retire ni n'en renomme jamais, et on n'enlève jamais un champ de leur
+ * contexte (on en ajoute). Un nouvel emplacement s'ajoute ici et là où il se rend
+ * (`<ExtensionSlot name=… />`, components/eraser/extension-runtime.tsx).
+ */
+export const extensionSlots = {
+  /** Au-dessus du contenu de chaque page. `context` : `{ pathname, viewRole }`. */
+  "page.avant": "Au-dessus du contenu de chaque page",
+  /** En dessous du contenu de chaque page. `context` : `{ pathname, viewRole }`. */
+  "page.apres": "En dessous du contenu de chaque page",
+  /** Dans l'en-tête de chaque page, avant la recherche (petits boutons). `context` : `{ pathname, viewRole }`. */
+  "page.en-tete": "Dans l'en-tête de chaque page, à droite",
+  /** Dans la barre latérale, sous le menu (des `SidebarMenuItem` de `@/components/ui/sidebar`). `context` : `{ pathname, viewRole }`. */
+  "barre-laterale": "Dans la barre latérale, sous le menu",
+  /** Au pied de la barre latérale, juste au-dessus du profil (des `SidebarMenuItem`). `context` : `{ pathname, viewRole }`. */
+  "barre-laterale.pied": "Au pied de la barre latérale, au-dessus du profil",
+  /** Au-dessus de tout, sur toutes les pages (fenêtres flottantes, effets). `context` : `{ pathname, viewRole }`. */
+  "calque": "Au-dessus de tout, sur toutes les pages",
+  /** Dans la fiche d'une ligne de n'importe quel index, sous ses champs. `context` : `{ index, id, tab, values }` (`values` : colonne → valeur). */
+  "index.fiche": "Dans la fiche d'une ligne d'index, sous ses champs",
+  /** Dans le pied de la fiche d'une ligne de n'importe quel index (petits boutons). `context` : comme `index.fiche`. */
+  "index.fiche.actions": "Dans le pied de la fiche d'une ligne d'index",
+} as const
+
+export type ExtensionSlotName = keyof typeof extensionSlots
+
+export const extensionSlotNames = Object.keys(extensionSlots) as ExtensionSlotName[]
+
 export function safeExtensionPath(value: string): string | null {
   const path = value.trim()
   if (!path || path.length > 300 || path.includes("\\") || path.includes("\0") || path.startsWith("/") || /^[a-z]:/i.test(path)) return null

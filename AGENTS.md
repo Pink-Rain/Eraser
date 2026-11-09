@@ -217,6 +217,15 @@
   `EXTENSION_API_VERSION` forment le contrat : ne jamais retirer ni renommer un module prêté, ni
   changer ses exports, sans mettre à jour les extensions ; jamais de module qui tire du code
   serveur. Détail dans `ARCHITECTURE.md` (« Extensions »).
+- **Une extension agit sur toute l'application, pas seulement sur sa page** (API 3) : module
+  `boot` lancé au démarrage, `globalStyles`, emplacements (`extensionSlots`, `lib/extensions.ts`),
+  fenêtres et messages, écoute de la page. Le contrat stable est `lib/extension-api.ts`
+  (`eraser`, la même boîte à outils partout) et `extensionSlots` : on y ajoute, on n'y retire et
+  on n'y renomme jamais rien (gardé par `tests/extensions.test.mjs`). Eraser ne connaît aucune
+  extension : jamais de code propre à une extension pour la faire agir. Si une extension doit se
+  glisser à un endroit précis d'une page, ajouter un emplacement générique (`<ExtensionSlot>`),
+  jamais un code qui la nomme. Le CSS d'une extension vise `data-eraser-part` / `data-eraser-slot`,
+  jamais les classes d'Eraser.
 - **Rien dans Eraser qui ne serve qu'à une extension** : on ne prête que ce qu'Eraser utilise
   lui-même ; le reste vit dans le dépôt de l'extension. Pour retirer d'Eraser un module prêté,
   publier d'abord l'extension qui n'en a plus besoin, puis l'alpha qui le retire.
