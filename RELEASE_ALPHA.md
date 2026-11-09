@@ -1,22 +1,23 @@
-# Eraser 0.1.1-alpha.281 — Les extensions sortent de leur page
+# Eraser 0.1.1-alpha.282 — Les fiches-pages, et l'apparence se règle dans la page
 
-Cette version arrive **sans réinstallation** (même enveloppe que l'alpha 280) : Eraser la
+Cette version arrive **sans réinstallation** (même enveloppe que l'alpha 281) : Eraser la
 télécharge, redémarre son serveur et recharge la page tout seul. Rien ne change dans Google Sheets.
+Elle va avec **Eraser Page 0.4.0**, qui arrive seule juste après.
 
-- **Une extension n'est plus seulement une page** : elle peut agir sur toute l'application.
-  Elle a un module de démarrage, lancé une fois sur chaque ordinateur au premier moment libre
-  après l'ouverture, et ses propres styles, posés sur toutes les pages avant l'affichage
-  (couleurs, polices, tout ce qui se fait en CSS).
-- **Des emplacements partout** : au-dessus et en dessous de chaque page, dans l'en-tête de chaque
-  page, dans la barre latérale et à son pied, au-dessus de tout, et dans la fiche d'une ligne de
-  tous les index (sous ses champs et dans son pied). Une extension y pose ses boutons et ses
-  bidules ; un emplacement vide ne coûte rien.
-- **Fenêtres, messages, confirmations** : une extension ouvre une fenêtre, affiche un petit message
-  en bas de l'écran ou demande une confirmation, avec les composants d'Eraser. Elle sait sur quelle
-  page on est et réagit quand on en change.
-- **Rien ne casse à cause d'une extension** : si l'une plante, ce qu'elle a posé disparaît et la
-  page reste. Quand elle se met à jour, tout ce qu'elle avait posé est retiré avant que la nouvelle
-  version prenne la place. Son démarrage apparaît dans « Fluidité de cet ordinateur ».
-- **Un contrat stable** : ce qu'Eraser offre aux extensions est écrit à part et vérifié à chaque
-  construction ; une mise à jour d'Eraser ne peut plus en retirer un morceau sans que ça se voie.
-- Les extensions existantes (Eraser Doc, Eraser Page, Eraser Map) fonctionnent comme avant.
+- **Les fiches-pages** : la page de chaque ligne d'un index (chaque peuple, chaque lieu, chaque
+  classe), pour faire un wiki. Dans l'Index des pages, « Nouvelle fiche-page » : on choisit l'index,
+  la page naît avec une page de départ (le nom, l'image, les valeurs, « Cité dans »), et l'atelier
+  la montre remplie avec une ligne d'exemple qu'on choisit. L'Index des pages les range sous
+  « Fiche-page · Peuples ».
+- **Relier les cartes et les listes à une fiche-page** : au clic, « Ouvrir sa fiche-page » (dans
+  l'éditeur des cartes, dans celui des listes, et directement sur un bloc de page). La page des
+  classes, une fois ouverte dans l'atelier, peut ainsi mener à la fiche-page de chaque classe.
+- **L'apparence d'un bloc se règle depuis la page** : « Modifier l'apparence » ouvre un éditeur en
+  grand, avec une seule rangée de formes (tableau, cartes, liste, kanban, galerie, chronologie,
+  calendrier, arborescence, codex, tableau de bord). Les cartes se dessinent dans l'éditeur des
+  cartes, pour la page seulement. Une liste ou une chronologie se règle comme une carte : on clique
+  un morceau de l'aperçu (l'en-tête, une section, un élément, la barre de recherche, le bas) et ses
+  réglages s'ouvrent. Rien n'est écrit dans l'index : il ne sert plus que de raccourci (« Partir
+  de… ») et de réserve de presets (« Enregistrer en preset »).
+- **« Valeurs de la ligne » d'une fiche-page** se disposent aussi depuis la page, avec l'éditeur des
+  formulaires (sections, champs, colonne de côté, blocs), sans toucher au formulaire de l'index.
