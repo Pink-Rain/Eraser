@@ -1742,13 +1742,16 @@ export function IndexPresentation(input: PresentationProps) {
   const structural = pickForRole(layout.clickByRole, pageRoles, baseClick) ?? "sheet"
   const itemCard = layout.itemForm ? undefined : layout.itemCard
   const { cardOf } = input
-  const actionOf = useCallback((row: string): PresentationClick | "form" => {
+  /** Le clic réglé pour la ligne (la vue, son rôle, sinon la carte de l'élément) ; `null` : rien de réglé nulle part. */
+  const chosenActionOf = useCallback((row: string): PresentationClick | "form" | null => {
     const own = layout.clickByRole ? pickForRole(layout.clickByRole, rolesOf(roleRowFor({ nameOf, valueOf, headers }, row)), baseClick) : baseClick
     if (own) return own
-    // Absent : le clic de la carte de l'élément (« Survol et clic »), sinon la fiche.
+    // Absent : le clic de la carte de l'élément (« Survol et clic »).
     const card = itemCard && itemCard !== PRESENTATION_ITEM_CARD ? cardOf?.(row, itemCard) : null
-    return card?.click ?? "sheet"
+    return card?.click ?? null
   }, [baseClick, cardOf, headers, itemCard, layout.clickByRole, nameOf, rolesOf, valueOf])
+  // Rien de réglé : la fiche.
+  const actionOf = useCallback((row: string): PresentationClick | "form" => chosenActionOf(row) ?? "sheet", [chosenActionOf])
   const clickOf = useCallback((row: string): PresentationClick => { const action = actionOf(row); return action === "form" ? "sheet" : action }, [actionOf])
   const onOpen = (row: string) => {
     const action = actionOf(row)
@@ -1757,7 +1760,12 @@ export function IndexPresentation(input: PresentationProps) {
     const here = (form: string) => setChosen({ row, mode: "center", form })
     if (action === "page") { if (input.inPlace && !input.onOpenPage) return here("principal"); const opened: unknown = (input.onOpenPage ?? input.onOpen)(row); if (opened === false && input.inPlace) here("principal"); return }
     if (action === "form") { const card = itemCard ? cardOf?.(row, itemCard) : null; if (input.inPlace) return here(card?.clickForm || "principal"); return input.onOpenForm ? input.onOpenForm(row, card?.clickForm || "principal") : input.onOpen(row) }
-    if (action === "sheet" && input.inPlace) return here("principal")
+    if (action === "sheet" && input.inPlace) {
+      // Rien de réglé (ni la vue, ni le rôle, ni la carte) : la fiche-page de la ligne si elle en a une (une
+      // classe, un personnage, une page de ligne de l'atelier), comme dans l'index ; sinon sa fiche, ici.
+      if (chosenActionOf(row) === null && input.onOpenPage?.(row) === true) return
+      return here("principal")
+    }
     if (action === "side" || action === "below" || action === "center") return setChosen((current) => current?.row === row && action === "below" ? null : { row, mode: action })
     input.onOpen(row)
   }
