@@ -1,10 +1,12 @@
 import { Suspense, type ReactNode } from "react"
-import { Files } from "lucide-react"
+import Link from "next/link"
+import { ArrowLeft, Files, PencilRuler } from "lucide-react"
 
 import { customPageLinks } from "@/components/eraser/custom-page-links"
 import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
 import { ClassAccentSampler } from "@/components/eraser/class-accent-sampler"
-import { ClassPresentationPanel, ClassSupplementsPanel } from "@/components/eraser/class-detail"
+import { ClassDetail, ClassPresentationPanel, ClassSupplementsPanel } from "@/components/eraser/class-detail"
+import { Button } from "@/components/ui/button"
 import { classImageUrl } from "@/lib/class-images"
 import { listClasses } from "@/lib/google-sheets"
 import { HomeAchievementsPanel, HomeCampaigns, HomeCharacters, HomeGreeting, HomeMain, HomeSide, HomeTodos } from "@/components/eraser/home-shell"
@@ -64,6 +66,26 @@ async function ClassPart({ classId, part }: { classId: string; part: "presentati
   return part === "presentation" ? <ClassPresentationPanel content={content} /> : <ClassSupplementsPanel content={content} />
 }
 
+/**
+ * Toute la fiche d'une classe, comme avant le créateur de pages (app/regles/classes/[id]) : le
+ * retour aux classes, « Modifier dans le créateur de classe » (MJ, admins), puis la fiche.
+ */
+async function ClassSheet({ classId, canEdit }: { classId: string; canEdit: boolean }) {
+  const content = await getClassContent(classId).catch((error) => {
+    console.error("CLASS_CONTENT_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    return null
+  })
+  return <div className="grid gap-2">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <Button asChild variant="ghost" className="-ml-3"><Link href="/regles/classes"><ArrowLeft className="size-4" />Retour aux classes</Link></Button>
+      {canEdit && <Button asChild variant="outline" size="sm"><Link href={`/creation-de-classe?classe=${encodeURIComponent(classId)}`}><PencilRuler className="size-4" />Modifier dans le créateur de classe</Link></Button>}
+    </div>
+    {content
+      ? <ClassDetail content={content} imageUrl={classImageUrl(content.characterClass.image)} />
+      : <p className="rounded-2xl border border-dashed bg-card/60 px-6 py-10 text-center text-sm text-muted-foreground">Cette classe n’existe pas ou a été retirée de l’index.</p>}
+  </div>
+}
+
 function render(block: ModuleBlock, context: ModuleContext): ReactNode {
   const manager = canManagePages(context.account.role)
   switch (block.module) {
@@ -86,6 +108,10 @@ function render(block: ModuleBlock, context: ModuleContext): ReactNode {
       // Sans classe (atelier, adresse propre de la page) : l'emplacement seulement.
       if (context.row?.index !== "classes") return undefined
       return <Suspense fallback={<DeferredContentLoading label="Chargement de la classe…" />}><ClassPart classId={context.row.id} part={block.module === "classe-presentation" ? "presentation" : "supplements"} /></Suspense>
+    case "classe-fiche":
+      // Sans classe (atelier, adresse propre de la page) : l'emplacement seulement.
+      if (context.row?.index !== "classes") return undefined
+      return <Suspense fallback={<DeferredContentLoading label="Chargement de la classe…" />}><ClassSheet classId={context.row.id} canEdit={manager} /></Suspense>
   }
 }
 
