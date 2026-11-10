@@ -125,6 +125,11 @@
 
 ## Fluidité
 
+- Un envoi de fichiers (`multipart/form-data`) passe par le contrôle des « actions serveur » de
+  vinext, même vers `/api/…` : sa taille maximale est `experimental.serverActions.bodySizeLimit`
+  de `next.config.ts` (40 Mo). Chaque route vérifie ensuite ses propres limites.
+- `putSharedMedia` garde la liste du dossier des visuels à jour au lieu de l'oublier : plusieurs
+  visuels envoyés de suite ne relisent pas tout le dossier chacun.
 - Une action d'un clic s'affiche d'abord et s'enregistre ensuite, avec retour en arrière visible
   si le serveur refuse (modèles : quantités de l'inventaire, relations, quêtes, PNJ). Ce qui
   attend un identifiant donné par le serveur reste en attente.

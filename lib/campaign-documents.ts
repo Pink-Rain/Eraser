@@ -145,10 +145,15 @@ export async function saveCampaignDocument(campaignId: string, input: { id?: unk
     const current = index >= 0 ? documentFromRow(rows[index]) : null
     if (index >= 0 && current?.campaignId !== campaignId) throw new Error("DOCUMENT_NOT_FOUND")
     if (background.kind === "upload" && !uploaded && current?.background.kind !== "upload") throw new Error("DOCUMENT_BACKGROUND_MISSING")
-    if (uploaded) await putSharedMedia(mediaKey(campaignId, id, "fond"), await uploaded.arrayBuffer(), uploaded.type)
-    for (const [asset, file] of pieces) await putSharedMedia(mediaKey(campaignId, id, `piece-${asset}`), await file.arrayBuffer(), file.type)
-    if (render) await putSharedMedia(mediaKey(campaignId, id, "rendu"), await render.arrayBuffer(), render.type)
-    if (print) await putSharedMedia(mediaKey(campaignId, id, "impression"), await print.arrayBuffer(), print.type)
+    // Les images partent ensemble vers Drive (une à une, un document de plusieurs images attendait
+    // plusieurs secondes) ; la ligne n'est écrite qu'une fois toutes arrivées.
+    const media: Array<[DocumentPart, File]> = [
+      ...(uploaded ? [["fond", uploaded] as [DocumentPart, File]] : []),
+      ...pieces.map(([asset, file]) => [`piece-${asset}`, file] as [DocumentPart, File]),
+      ...(render ? [["rendu", render] as [DocumentPart, File]] : []),
+      ...(print ? [["impression", print] as [DocumentPart, File]] : []),
+    ]
+    await Promise.all(media.map(async ([part, file]) => putSharedMedia(mediaKey(campaignId, id, part), await file.arrayBuffer(), file.type)))
     const now = new Date().toISOString()
     const document: CampaignDocumentRecord = {
       id, campaignId, sessionId, title, background, content,

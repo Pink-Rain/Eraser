@@ -14,7 +14,8 @@ const failed = (code: string) => (error: unknown) => {
  * Ce que ce serveur sait garder d'un document, lu par l'éditeur (Eraser Doc) : sans l'une de ces
  * capacités, il n'en propose pas les outils (un Eraser plus ancien effacerait leur travail).
  */
-const DOCUMENT_FEATURES = ["dossiers", "modeles", "calques", "formes"]
+// « envoi-unique » : ce serveur accepte un document entier en un envoi (avant, 1 Mo au plus).
+const DOCUMENT_FEATURES = ["dossiers", "modeles", "calques", "formes", "envoi-unique"]
 
 /**
  * Les documents de la campagne (éditeur de l'extension Eraser Doc, Créateur de session) : MJ et

@@ -525,8 +525,9 @@ auteur dans toutes ses campagnes. Eraser garde :
   joueurs, les modèles du compte et `features`, ce que ce serveur sait garder, pour l'éditeur),
   `POST` (enregistrer : le rendu WebP et l'impression JPEG sur fond blanc, dessinés dans le
   navigateur par l'extension, vont dans Drive avec le fond envoyé et les pièces `piece-<nom>` :
-  images posées et calques de dessin ; tout est facultatif sauf le document, car le serveur refuse
-  un envoi de fichiers de plus de 1 Mo et l'éditeur envoie un gros document en plusieurs fois),
+  images posées et calques de dessin, envoyées ensemble vers Drive ; tout est facultatif sauf le
+  document : un éditeur face à un Eraser d'avant l'alpha 286, qui refusait plus de 1 Mo par envoi,
+  envoie un gros document en plusieurs fois ; depuis, `features` dit « envoi-unique »),
   `PATCH` (session, dossier, modèle : seuls les champs envoyés changent), `DELETE`, `give`, `image`
   (`?part=fond` et `?part=piece-<nom>` : au MJ, et à l'auteur d'un modèle depuis ses autres
   campagnes), `pdf` (une page, `lib/document-pdf.ts`, faite à la demande) ;
