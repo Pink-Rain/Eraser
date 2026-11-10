@@ -1,11 +1,13 @@
-# Eraser 0.1.1-alpha.283 — La fiche de classe d'avant, en module
+# Eraser 0.1.1-alpha.284 — Une étiquette, c'est une étiquette
 
-Cette version arrive **sans réinstallation** (même enveloppe que l'alpha 282) : Eraser la
+Cette version arrive **sans réinstallation** (même enveloppe que l'alpha 283) : Eraser la
 télécharge, redémarre son serveur et recharge la page tout seul. Rien ne change dans Google Sheets.
 
-- **Nouveau module « Classe : fiche complète (comme avant) »** dans le créateur de pages (bloc
-  « Module d'Eraser »). Posé sur la fiche-page de l'index des classes, il affiche la fiche de la
-  classe en entier, exactement comme avant le créateur de pages : son illustration, sa présentation,
-  ses spécialités, ses sorts par rang et le reste, avec « Retour aux classes » et « Modifier dans le
-  créateur de classe » (MJ et admins). On met ses propres blocs autour.
-- Ailleurs (une page qui ne montre pas une classe, l'atelier), il ne montre que sa place.
+- **Listes à choix multiple et ajout libre (« Type » des items…)** : plusieurs étiquettes ajoutées
+  dans une case restent des étiquettes séparées. Avant, la liste proposait aussi les valeurs déjà
+  écrites dans la colonne, mais case entière : « Parchemin, Culture » devenait une option à part,
+  qui recollait ensuite les deux étiquettes en une seule. Chaque étiquette est maintenant proposée
+  seule (« Parchemin », « Culture »), et les cases déjà touchées s'affichent d'elles-mêmes en
+  étiquettes séparées : rien à corriger dans la feuille.
+- Une option déclarée dans les réglages de la colonne qui contient une virgule (« Bluff,
+  mensonge ») reste entière, comme avant.

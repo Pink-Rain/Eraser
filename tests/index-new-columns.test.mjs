@@ -138,3 +138,16 @@ test("Statistiques : par paire, une rareté ne croise que ses propres lieux ; s�
   // Ensemble (par paire) : Commun ne va qu'avec la Forêt, Rare qu'avec le Donjon.
   assert.deepEqual(crossed(stats.groupRef(groups[0].id), stats.groupRef(groups[1].id)), ["a:Commun×Forêt", "a:Rare×Donjon", "b:Commun×Donjon"]);
 });
+
+test("Liste à ajout libre en choix multiple : les valeurs déjà écrites sont proposées étiquette par étiquette", () => {
+  const multiple = { kind: "choice", multiple: true, allowCustom: true, options: [] };
+  // Gardée entière, « Parchemin, Culture » devenait une option qui recollait ensuite ses deux étiquettes.
+  assert.deepEqual(columns.choiceValuesOfCell("Parchemin, Culture", multiple), ["Parchemin", "Culture"]);
+  assert.deepEqual(columns.splitListValue("Parchemin, Culture", columns.choiceValuesOfCell("Parchemin, Culture", multiple).map((value) => ({ value }))), ["Parchemin", "Culture"]);
+  // Une option déclarée qui contient une virgule reste entière.
+  assert.deepEqual(columns.choiceValuesOfCell("Bluff, mensonge, Culture", { ...multiple, options: [{ value: "Bluff, mensonge" }] }), ["Bluff, mensonge", "Culture"]);
+  // Un seul choix : la case entière, comme avant.
+  assert.deepEqual(columns.choiceValuesOfCell("Parchemin, Culture", { kind: "choice", allowCustom: true, options: [] }), ["Parchemin, Culture"]);
+  assert.deepEqual(columns.choiceValuesOfCell("  ", multiple), []);
+  assert.deepEqual(columns.choiceValuesOfCell("<b>Arme</b>; Culture", multiple), ["Arme", "Culture"]);
+});

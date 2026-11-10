@@ -47,7 +47,7 @@ import { usePersistentState } from "@/hooks/use-persistent-state"
 import { IN_PLACE_ATTRIBUTE, replaceAppUrl, URL_CHANGE_EVENT } from "@/components/eraser/app-tabs"
 import { IndexTabPicker, useIndexTabParam } from "@/components/eraser/index-tab-picker"
 import { buttonPresets, runActionButton, type ActionRuntime } from "@/lib/index-actions"
-import { choiceCorrection, computeRollup, isCheckedValue, isIdHeader, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type ChoiceSource, type IndexColumnSpec } from "@/lib/index-columns"
+import { choiceCorrection, choiceValuesOfCell, computeRollup, isCheckedValue, isIdHeader, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type ChoiceSource, type IndexColumnSpec } from "@/lib/index-columns"
 import { numberCorrection } from "@/lib/index-numbers"
 import { positionalObjectId } from "@/lib/object-item-id"
 import { ObjectIcon } from "@/components/eraser/object-icon"
@@ -397,7 +397,8 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       const at = columnIndexOf(owner, column.header)
       if (at < 0) continue
       const values = used.get(foldName(column.header)) ?? new Set<string>()
-      for (const row of owner.rows) { const value = (row.values[at] ?? "").replace(/<[^>]+>/g, "").trim(); if (value && value.length <= 80) values.add(value) }
+      // Choix multiple : chaque étiquette de la case, jamais la case entière (« Parchemin, Culture »).
+      for (const row of owner.rows) for (const value of choiceValuesOfCell(row.values[at] ?? "", column.spec)) values.add(value)
       used.set(foldName(column.header), values)
     }
     const specs = new Map<string, IndexColumnSpec>()
