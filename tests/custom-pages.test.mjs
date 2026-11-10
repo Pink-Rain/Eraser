@@ -674,3 +674,10 @@ test("Versions brouillon : enregistrer, relire (la plus récente d'abord), suppr
   await store.deleteCustomPage(created.id);
   assert.deepEqual(await store.listPageSnapshots(created.id), []);
 });
+
+test("le module « Classe : fiche complète (comme avant) » se garde sur une page", async () => {
+  const modules = await vite.ssrLoadModule("/lib/eraser-modules.ts");
+  assert.ok(modules.eraserModuleKeys.includes("classe-fiche"));
+  assert.match(modules.eraserModules.find((entry) => entry.key === "classe-fiche").label, /fiche complète/);
+  assert.equal(pages.cleanBlock({ id: "m2", type: "module", module: "classe-fiche" }).module, "classe-fiche");
+});

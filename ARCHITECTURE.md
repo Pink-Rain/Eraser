@@ -383,7 +383,11 @@ d’Eraser, reproduit à l’identique par `defaultItemPlaceDisplay`.
   `presentationClicks`) ; une ligne sans fiche-page ouvre la page qu'Eraser lui donne (une classe,
   un personnage), sinon sa fiche. Son bloc « Valeurs de la ligne » disposé comme une fiche peut
   garder sa propre disposition (`form`, faite dans l'atelier avec l'éditeur des formulaires), qui
-  passe avant le formulaire `formId` de l'index.
+  passe avant le formulaire `formId` de l'index. Sur la fiche-page d'une classe (ou la page qui
+  remplace celle d'une classe), le module « Classe : fiche complète (comme avant) » (`classe-fiche`,
+  `components/eraser/eraser-modules.tsx`) remet toute la fiche d'avant le créateur de pages
+  (`ClassDetail`, avec « Retour aux classes » et « Modifier dans le créateur de classe ») ;
+  ailleurs, il ne montre que sa place.
 - **Créateur de pages** : réservé aux administrateurs (`canBuildPages`,
   `lib/custom-pages.ts`) — créer, modifier, brouillons, menu. `canManagePages` (MJ
   et administrateurs) garde ce que le MJ fait d’une page qu’il lit (secrets, notes),

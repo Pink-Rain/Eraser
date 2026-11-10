@@ -26,6 +26,7 @@ export type EraserModuleKey =
   | "accueil-a-faire"
   | "classe-presentation"
   | "classe-specificites"
+  | "classe-fiche"
   | "classes-accents"
 
 export type EraserModule = { key: EraserModuleKey; label: string; hint: string }
@@ -45,6 +46,7 @@ export const eraserModules: EraserModule[] = [
   { key: "classes-accents", label: "Classes : couleurs d’accent", hint: "Règles › Classes : calcule en arrière-plan la couleur d’accent des classes qui n’en ont pas (admins seulement, rien d’affiché)" },
   { key: "classe-presentation", label: "Classe : présentation", hint: "Page d’une classe : caractéristiques principales et secondaires, spécialités" },
   { key: "classe-specificites", label: "Classe : spécificités", hint: "Page d’une classe : ses tableaux propres (les cartes du Cartomancien…)" },
+  { key: "classe-fiche", label: "Classe : fiche complète (comme avant)", hint: "Page d’une classe (fiche-page de l’index des classes) : toute la fiche d’avant le créateur de pages, telle quelle (illustration, présentation, spécialités, sorts par rang…), avec « Retour aux classes » et « Modifier dans le créateur de classe »" },
 ]
 
 export const eraserModuleKeys = eraserModules.map((item) => item.key)
