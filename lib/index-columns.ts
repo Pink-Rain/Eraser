@@ -653,6 +653,19 @@ export function splitListValue(value: string, options: ChoiceOption[] = [], sepa
   return result
 }
 
+/**
+ * Les valeurs qu'une case apporte aux propositions d'une liste à ajout libre. À choix
+ * multiple, la case est découpée en étiquettes (« Parchemin, Culture » en apporte deux) :
+ * gardée entière, elle devenait une option qui recollait ensuite ses morceaux à l'affichage.
+ * Seules les options déclarées de la colonne peuvent contenir une virgule (« Bluff, mensonge »).
+ */
+export function choiceValuesOfCell(text: string, spec: IndexColumnSpec) {
+  const clean = text.replace(/<[^>]+>/g, "").trim()
+  if (!clean) return []
+  const values = spec.multiple ? splitListValue(clean, spec.options ?? [], spec.listSeparator) : [clean]
+  return values.filter((value) => value.length <= 80)
+}
+
 export function joinListValue(values: string[], separator = ",") {
   return values.map((value) => value.trim()).filter(Boolean).join(separator.trim() === "-" ? " - " : ", ")
 }

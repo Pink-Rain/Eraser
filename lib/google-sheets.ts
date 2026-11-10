@@ -3053,7 +3053,8 @@ const NPC_LAST_COLUMN = columnName(npcSheetHeaders.length)
 // Les trois dernières sont venues après : dans une feuille existante, elles s'ajoutent à droite.
 export const campaignEventSheetHeaders = ["ID", "ID campagne", "Type", "Référence", "Nom", "Icône", "Image", "Étiquette", "Couleur", "Description", "Créé par", "Créé le", "Modifié le"]
 // Les documents d'une campagne (page Document) : le fond et les zones de texte (JSON), le rendu dans Drive.
-export const campaignDocumentSheetHeaders = ["ID", "ID campagne", "ID session", "Titre", "Fond (JSON)", "Contenu (JSON)", "Version du rendu", "Créé par", "Créé le", "Modifié le"]
+// « Dossier » et « Modèle » : rangement et modèles de l'éditeur (Eraser Doc), ajoutés à droite.
+export const campaignDocumentSheetHeaders = ["ID", "ID campagne", "ID session", "Titre", "Fond (JSON)", "Contenu (JSON)", "Version du rendu", "Créé par", "Créé le", "Modifié le", "Dossier", "Modèle"]
 export const sessionNoteSheetHeaders = ["ID", "ID campagne", "ID session", "Visibilité", "ID personnage", "Type", "Titre", "Texte", "Moment", "Liens (JSON)", "Quête (JSON)", "Auteur", "UID auteur", "Créé le", "Modifié le", "Ordre"]
 // « Ordre » : la place d'un événement dans la frise de sa session, ajoutée à droite.
 // « Cachés (JSON) » : ce que le MJ n'a pas encore révélé aux joueurs (lib/session-reveal.ts), ajouté à droite.

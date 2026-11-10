@@ -34,6 +34,32 @@ test("un document illisible ou hors bornes est ramené à un document sûr", () 
   assert.deepEqual(model.cleanDocumentBackground({ kind: "builtin", key: "livre" }), { kind: "builtin", key: "livre" });
 });
 
+test("lignes, images, calques de dessin et modes de fusion sont gardés, l'ordre des calques complété", () => {
+  const content = model.cleanDocumentContent({
+    height: 1000,
+    zones: [{ id: "z1", blend: "overlay", paragraphs: [[{ text: "Titre" }]] }, { id: "z2", blend: "inventé", paragraphs: [] }],
+    lines: [{ id: "l1", x1: 10, y1: 20, x2: 900, y2: 20, width: 500, color: "#AA0000", style: "dotted", blend: "screen" }, { id: "l2", style: "zigzag" }],
+    shapes: [{ id: "s1", shape: "star", fill: "linear", fillColor: "#FF0000", fillColor2: "#00ff00", fillOpacity2: 0, gradientAngle: 45, strokeWidth: 0, blend: "color" }, { id: "s2", shape: "hexagone", fill: "arc-en-ciel", strokeStyle: "dashed" }],
+    pictures: [{ id: "p1", kind: "drawing", asset: "dessin-1", x: 0, y: 0, width: 1000, height: 1000, blend: "soft-light" }, { id: "p2", asset: "../../etc" }, { id: "p3", asset: "photo", blend: "addition" }],
+    order: ["p1", "inconnu", "l1", "z1", "p1"],
+  });
+  assert.deepEqual([content.shapes[0].shape, content.shapes[0].fill, content.shapes[0].fillColor, content.shapes[0].fillOpacity2, content.shapes[0].gradientAngle, content.shapes[0].strokeWidth, content.shapes[0].blend], ["star", "linear", "#ff0000", 0, 45, 0, "color"]);
+  assert.deepEqual([content.shapes[1].shape, content.shapes[1].fill, content.shapes[1].strokeStyle, content.shapes[1].blend], ["rectangle", "none", "dashed", "multiply"]);
+  assert.equal(content.zones[0].blend, "overlay");
+  assert.equal("blend" in content.zones[1], false);
+  assert.deepEqual(content.lines[0], { id: "l1", x1: 10, y1: 20, x2: 900, y2: 20, width: 80, color: "#aa0000", style: "dotted", opacity: 1, blend: "screen" });
+  assert.equal(content.lines[1].style, "solid");
+  assert.equal(content.lines[1].blend, "multiply");
+  assert.deepEqual(content.pictures.map((picture) => [picture.id, picture.kind, picture.asset, picture.blend]), [["p1", "drawing", "dessin-1", "soft-light"], ["p3", "image", "photo", "addition"]]);
+  assert.deepEqual(content.order, ["p1", "l1", "z1", "z2", "l2", "s1", "s2", "p3"]);
+  assert.deepEqual(model.documentAssets(content), ["dessin-1", "photo"]);
+  // Un document d'avant (zones seules) garde l'ordre de ses zones.
+  const old = model.cleanDocumentContent({ height: 1000, zones: [{ id: "a", paragraphs: [] }, { id: "b", paragraphs: [] }] });
+  assert.deepEqual([old.lines, old.shapes, old.pictures, old.order], [[], [], [], ["a", "b"]]);
+  assert.equal(model.cleanDocumentFolder("  Lettres   du roi  "), "Lettres du roi");
+  assert.equal(model.documentPartUrl("c 1", "d1", "piece-p", "2026-11-10T12:00:00Z"), "/api/campaigns/c%201/documents/d1/image?part=piece-p&v=20261110T120000Z");
+});
+
 test("l'éditeur des documents est dans l'extension Eraser Doc, paramètres compris", () => {
   assert.equal(model.documentStudioHref("CAMP 1"), "/extension/doc/campagne/CAMP%201");
   assert.equal(model.documentStudioHref("c1", { document: "doc-2" }), "/extension/doc/campagne/c1?document=doc-2");

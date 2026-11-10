@@ -125,6 +125,11 @@
 
 ## Fluidité
 
+- Un envoi de fichiers (`multipart/form-data`) passe par le contrôle des « actions serveur » de
+  vinext, même vers `/api/…` : sa taille maximale est `experimental.serverActions.bodySizeLimit`
+  de `next.config.ts` (40 Mo). Chaque route vérifie ensuite ses propres limites.
+- `putSharedMedia` garde la liste du dossier des visuels à jour au lieu de l'oublier : plusieurs
+  visuels envoyés de suite ne relisent pas tout le dossier chacun.
 - Une action d'un clic s'affiche d'abord et s'enregistre ensuite, avec retour en arrière visible
   si le serveur refuse (modèles : quantités de l'inventaire, relations, quêtes, PNJ). Ce qui
   attend un identifiant donné par le serveur reste en attente.
@@ -181,8 +186,13 @@
 - Une police ou un fond ajouté à l'éditeur ajoute sa clé dans `documentFontKeys` ou
   `builtinBackgroundKeys` (sinon Eraser la refuse à l'enregistrement) : Eraser d'abord, puis
   l'extension.
-- Ne jamais renommer les clés enregistrées (colonnes de la feuille, champs du JSON des
-  zones, `{"target":"document"}` dans le JSON d'un exemplaire d'inventaire).
+- Ne jamais renommer les clés enregistrées (colonnes de la feuille, dont « Dossier » et
+  « Modèle », champs du JSON des zones, lignes, formes et images, modes de fusion
+  `documentBlendModes`, `{"target":"document"}` dans le JSON d'un exemplaire d'inventaire).
+- Un nouvel élément de document (ou un nouveau champ) s'ajoute d'abord au nettoyage de
+  `lib/document-model.ts` (sinon Eraser l'efface à l'enregistrement) et à `features` de
+  `GET …/documents?atelier=1` si l'éditeur doit savoir que le serveur le garde : Eraser d'abord,
+  puis l'extension.
 
 ## Chat, tabletop et Roll20
 

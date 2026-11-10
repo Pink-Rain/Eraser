@@ -139,7 +139,10 @@ export async function putSharedMedia(key: string, bytes: ArrayBuffer, contentTyp
     contentType,
   }
   pointerCache.set(key, { expiresAt: Date.now() + POINTER_TTL_MS, pointer })
-  folderListing = null
+  // La liste du dossier reste bonne : le visuel envoyé y prend sa place. L'oublier faisait relire
+  // tout le dossier (plus d'une seconde) avant le visuel suivant, à chaque envoi.
+  const listing = folderListing
+  if (listing) listing.byName = listing.byName.then((byName) => byName.set(driveName(key), pointer))
   if (bucket) {
     await bucket.put(cacheKey(key, pointer.modifiedTime), bytes, { httpMetadata: { contentType } }).catch(() => undefined)
   }
