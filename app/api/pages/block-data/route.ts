@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server"
-import { tabLayoutsOf } from "@/lib/index-layout-defaults"
+import { tabFormOrBuiltin, tabLayoutOrBuiltin, tabLayoutsOf } from "@/lib/index-layout-defaults"
 import { tabFormsOf } from "@/lib/index-layouts"
 import { listIndexLayouts } from "@/lib/index-layouts-store"
 
 import { ATELIER_HREF, canManagePages, cleanBlock, pageForViewer, type ViewBlock } from "@/lib/custom-pages"
 import { isMeCondition, statBlockData, viewBlockData, viewKindsOf, type BlockDataOptions } from "@/lib/custom-pages-data"
 import { identityUidsForUser } from "@/lib/identity-links"
-import { backlinksOf, fillRowText, rowContextOf, rowPageHref, templateForRow, type RowContext } from "@/lib/custom-pages-rows"
+import { backlinksOf, fillRowText, packRowContext, rowContextOf, rowPageHref, templateForRow, type RowContext } from "@/lib/custom-pages-rows"
 import { readCustomPage } from "@/lib/custom-pages-store"
 import { backlinkSources, indexSourceOf, readOptions, rowTemplates, viewerFor } from "@/lib/custom-pages-server"
 import { listCustomIndexes } from "@/lib/custom-indexes"
@@ -128,6 +128,9 @@ async function statData(key: WorldIndexKey, statId: string, player: boolean, row
  *   ce que recevrait un joueur).
  * - ?catalog=1 (&index=) : les index, leurs onglets, leurs vues et leurs stats (atelier).
  * - ?row-templates=1 : les index dont les lignes ont une page (fiche de l'index).
+ * - ?row-preview=1&rowIndex=&rowId= (&as=joueur, &forms=) : la ligne d'exemple d'une fiche-page dans
+ *   l'atelier (MJ et admins), telle que sa vraie page la reçoit.
+ * - &as=joueur sur ?page=&block= : l'atelier (MJ et admins) reçoit ce qu'un joueur recevrait.
  */
 export async function GET(request: Request) {
   const account = await authorizedAccount(["admin", "mj", "joueur"])
@@ -180,9 +183,26 @@ export async function GET(request: Request) {
       })
     }
 
+    // La ligne d'exemple d'une fiche-page, telle que sa vraie page la reçoit (atelier : MJ, admins ;
+    // &as=joueur : ce qu'un joueur en lirait) : ses valeurs, sa fiche et les formulaires demandés.
+    if (parameters.get("row-preview")) {
+      if (!canManagePages(account.role)) return denied()
+      const key = await knownWorldIndexKey(parameters.get("rowIndex"))
+      if (!key) return NextResponse.json({ error: "Index inconnu." }, { status: 400 })
+      const asPlayer = parameters.get("as") === "joueur"
+      const row = rowContextOf(await indexSourceOf(key), parameters.get("rowId") ?? "", readOptions(key, asPlayer))
+      if (!row) return NextResponse.json({ error: "Cette ligne n’existe pas dans l’index." }, { status: 404 })
+      const layouts = await listIndexLayouts(key).catch(() => ({}))
+      const form = tabLayoutOrBuiltin(layouts, key, row.tab, "form")
+      const forms = Object.fromEntries((parameters.get("forms") ?? "").split(",").map((id) => id.trim()).filter(Boolean).slice(0, 12).flatMap((formId) => { const layout = tabFormOrBuiltin(layouts, key, row.tab, formId); return layout ? [[formId, layout]] : [] }))
+      return NextResponse.json({ row: packRowContext({ ...row, ...(form ? { form } : {}), ...(Object.keys(forms).length ? { forms } : {}) }) })
+    }
+
     const pageId = parameters.get("page")
     const blueprintPath = parameters.get("blueprint")
     if (pageId || blueprintPath) {
+      // L'atelier (MJ, admins) : ce que recevrait un joueur (« Voir comme Joueur », aperçu d'une fiche-page).
+      const reader = player || (parameters.get("as") === "joueur" && canManagePages(account.role))
       // Une page d'Eraser dessinée par le moteur (sans page enregistrée) : son plan, aux mêmes identifiants de blocs.
       const page = pageId ? await readCustomPage(pageId) : virtualEraserPage(blueprintPath ?? "")
       const view = page ? pageForViewer(page, await viewerFor(account, page), { draft: parameters.get("draft") === "1" }) : null
@@ -192,16 +212,16 @@ export async function GET(request: Request) {
       // La ligne d'une page de ligne, ou d'une page qui remplace celle d'une ligne (une classe).
       const rowIndex = page?.rowOf?.index ?? rowOfRoute(page?.replaces)?.index
       const rowKey = rowIndex ? await knownWorldIndexKey(parameters.get("rowIndex")) : null
-      const row = rowKey && rowKey === rowIndex ? rowContextOf(await indexSourceOf(rowKey), parameters.get("rowId") ?? "", readOptions(rowKey, player)) : null
+      const row = rowKey && rowKey === rowIndex ? rowContextOf(await indexSourceOf(rowKey), parameters.get("rowId") ?? "", readOptions(rowKey, reader)) : null
       if (block.type === "backlinks") {
         if (!row) return NextResponse.json({ data: { kind: "backlinks", items: [] } })
-        const items = backlinksOf(await backlinkSources(), row, { ...readOptions(row.index, player), hrefOf: (index, tab, id) => rowPageOf?.(index, tab, id) ?? (player ? undefined : `${(worldIndexDefinitions as Record<string, { path: string } | undefined>)[index]?.path ?? `/ressources/index/${encodeURIComponent(index)}`}?ligne=${encodeURIComponent(id)}`) })
+        const items = backlinksOf(await backlinkSources(), row, { ...readOptions(row.index, reader), hrefOf: (index, tab, id) => rowPageOf?.(index, tab, id) ?? (reader ? undefined : `${(worldIndexDefinitions as Record<string, { path: string } | undefined>)[index]?.path ?? `/ressources/index/${encodeURIComponent(index)}`}?ligne=${encodeURIComponent(id)}`) })
         return NextResponse.json({ data: { kind: "backlinks", items } })
       }
       const key = await blockIndexKey(block.index)
       if (!key) return NextResponse.json({ error: "L’index de ce bloc n’existe plus." }, { status: 404 })
       const match = block.type === "view" && block.rowMatch && row ? { column: block.rowMatch, index: row.index, id: row.id, name: row.name } : undefined
-      const data = block.type === "view" ? await viewData(key, block, match, row, player, rowPageOf, account) : await statData(key, block.statId, player, rowPageOf, account)
+      const data = block.type === "view" ? await viewData(key, block, match, row, reader, rowPageOf, account) : await statData(key, block.statId, reader, rowPageOf, account)
       return data ? NextResponse.json({ data }) : NextResponse.json({ error: block.type === "view" ? "L’onglet de ce bloc n’existe plus dans l’index." : "Cette statistique n’existe plus dans l’index." }, { status: 404 })
     }
 

@@ -8,7 +8,7 @@
  * réécrire aucun texte. Sans dépendance au serveur.
  */
 import { internalAppPath } from "@/lib/app-links"
-import type { LayoutBlock, LayoutLook, LayoutSection } from "@/lib/index-layouts"
+import type { IndexLayout, LayoutBlock, LayoutLook, LayoutSection } from "@/lib/index-layouts"
 import type { ColumnStyle } from "@/lib/index-columns"
 
 export const REFERENCE_PATH = "/reference/"
@@ -48,11 +48,20 @@ export function parseReferenceHref(href: string): IndexReference | null {
   }
 }
 
+/** Une empreinte courte d'un survol propre (deux survols différents n'ont pas la même clé). */
+function layoutSignature(layout: IndexLayout) {
+  const text = JSON.stringify(layout)
+  let hash = 5381
+  for (let at = 0; at < text.length; at += 1) hash = ((hash << 5) + hash + text.charCodeAt(at)) | 0
+  return `${text.length.toString(36)}.${(hash >>> 0).toString(36)}`
+}
+
 /** Clé d'une référence (une ligne, ou une case d'une ligne). */
-export function referenceKey(reference: IndexReference & { hover?: string }) {
-  // Une version de survol autre que l'étoilée : une clé à part (les autres clés ne changent pas).
+export function referenceKey(reference: IndexReference & { hover?: string; layout?: IndexLayout }) {
+  // Une version de survol autre que l'étoilée, ou un survol propre à une page : une clé à part (les autres clés ne changent pas).
   const hover = !reference.column && reference.hover && reference.hover !== "principal" ? `\u0001${reference.hover}` : ""
-  return `${reference.index}\u0001${reference.id}\u0001${fold(reference.column ?? "")}${hover}`
+  const own = !reference.column && reference.layout ? `\u0002${layoutSignature(reference.layout)}` : ""
+  return `${reference.index}\u0001${reference.id}\u0001${fold(reference.column ?? "")}${hover}${own}`
 }
 
 /** Le séparateur du libellé d'une case citée : « Sérénité › Type ». */
@@ -179,7 +188,7 @@ export { fold as foldReferenceText }
 // ---------------------------------------------------------------------------
 
 /** Ce qu'une référence demande : sa ligne, et la case quand c'en est une. `name` : repli par le nom. */
-export type ReferenceRequest = IndexReference & { name?: string; /** Une version du survol de la ligne (une présentation la choisit) ; absente : l'étoilée. */ hover?: string }
+export type ReferenceRequest = IndexReference & { name?: string; /** Une version du survol de la ligne (une présentation la choisit) ; absente : l'étoilée. */ hover?: string; /** Un survol propre à une page (fait dans l'atelier) : il passe avant `hover`. Le serveur ne montre jamais que ce que le lecteur peut lire. */ layout?: IndexLayout }
 
 /** Comment une case citée s'affiche : le style imposé de sa colonne, la couleur de ses choix. */
 export type ReferenceLook = { style?: ColumnStyle; options?: Array<{ value: string; color?: string }>; unit?: string; kind?: string; multiple?: boolean }

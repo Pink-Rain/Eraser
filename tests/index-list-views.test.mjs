@@ -161,3 +161,11 @@ test("le formulaire : l'onglet ouvert d'abord selon une colonne de la ligne", ()
   // Sans onglets, le réglage ne sert pas à l'affichage.
   assert.equal(layouts.arrangeLayout({ ...layout, tabs: undefined }, [], (item) => item).tabsBy, undefined);
 });
+
+test("le survol propre à une vue (fait dans une page) se relit avec elle", () => {
+  const hoverLayout = { sections: [{ id: "s1", rows: [{ id: "r1", fields: [{ column: "Région" }] }] }], aside: [] };
+  const layout = views.cleanPresentation({ kind: "list", hover: "-", hoverLayout });
+  assert.equal(layout.hoverLayout.sections[0].rows[0].fields[0].column, "Région");
+  assert.equal(layout.hover, "-");
+  assert.equal(views.cleanPresentation({ kind: "list", hoverLayout: 3 }).hoverLayout, undefined);
+});

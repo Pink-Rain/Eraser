@@ -754,8 +754,9 @@ export function IndexCardGrid({ card, cardOf, rows, rowSource, onOpen, hrefOf, r
       {visible.map((row) => {
         const shown = cardOf?.(row.key) ?? card
         const node = <IndexCard key={row.key} card={shown} row={rowSource(row.key)} onOpen={() => onOpen(row.key)} href={hrefOf?.(row.key)} />
-        const ref = shown.hover === "-" ? null : rowRef?.(row.key)
-        return ref?.id ? <RowHover key={row.key} index={ref.index} id={ref.id} hover={shown.hover}>{node}</RowHover> : node
+        // Le survol propre à la carte (fait dans une page) passe avant la version choisie.
+        const ref = shown.hover === "-" && !shown.hoverLayout ? null : rowRef?.(row.key)
+        return ref?.id ? <RowHover key={row.key} index={ref.index} id={ref.id} hover={shown.hover} layout={shown.hoverLayout}>{node}</RowHover> : node
       })}
     </div>
     {more && <div ref={sentinel} className="flex items-center justify-center gap-2 py-3 text-xs text-muted-foreground">

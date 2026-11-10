@@ -20,7 +20,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 import type { StateDefinition, StatesCatalog } from "@/lib/character-states"
 import { foldName, isImageSource, matchChoice, parseGlyphValue, type ColumnStyle } from "@/lib/index-columns"
 import { parseReferenceHref, referenceKey, referenceNameFromLabel, type ReferenceRequest, type ResolvedLayout, type ResolvedLayoutField, type ResolvedReference } from "@/lib/index-references"
-import { resolveLayoutColor, type LayoutSpan } from "@/lib/index-layouts"
+import { resolveLayoutColor, type IndexLayout, type LayoutSpan } from "@/lib/index-layouts"
 import { DEFAULT_LAYOUT_ACCENT, IndexLayoutView, labelLookOf, layoutBackgroundOf } from "@/components/eraser/index-layout-view"
 import { LayoutBlockView } from "@/components/eraser/index-layout-blocks"
 import { resolveReference } from "@/components/eraser/reference-store"
@@ -401,8 +401,8 @@ export function LayoutDetails({ reference, layout, color, depth, level }: { refe
  * cartes…) : la version du survol choisie par la vue (`hover`), sinon l'étoilée. La ligne
  * n'est lue qu'à l'ouverture (une demande groupée, gardée 30 s), jamais d'avance.
  */
-export function RowHover({ index, id, hover, className, children }: { index: string; id: string; hover?: string; className?: string; children: ReactNode }) {
-  const request = useMemo((): ReferenceRequest => ({ index, id, ...(hover && hover !== "principal" ? { hover } : {}) }), [hover, id, index])
+export function RowHover({ index, id, hover, layout, className, children }: { index: string; id: string; hover?: string; /** Un survol propre à une page (fait dans l'atelier) : il passe avant `hover`. */ layout?: IndexLayout; className?: string; children: ReactNode }) {
+  const request = useMemo((): ReferenceRequest => ({ index, id, ...(layout ? { layout } : hover && hover !== "principal" ? { hover } : {}) }), [hover, id, index, layout])
   const key = referenceKey(request)
   const [open, setOpen] = useState(false)
   const [loaded, setLoaded] = useState<{ key: string; value: ResolvedReference | null } | null>(null)

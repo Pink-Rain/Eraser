@@ -384,7 +384,7 @@ export function PageHeader({ eyebrow, title, description, icon, emoji, children 
  * Révéler un secret et écrire dans un carnet passent par /api/pages : la page revient
  * telle que le serveur la voit après le changement.
  */
-export function CustomPageView({ initial, links, campaignName, indexPaths, row: packedRow, eyebrow: eyebrowOverride, notice, actions, blocksOnly = false, modules }: {
+export function CustomPageView({ initial, links, campaignName, indexPaths, row: packedRow, eyebrow: eyebrowOverride, notice, actions, blocksOnly = false, modules, asPlayer = false }: {
   initial: PageView
   links: Record<string, PageLinkTarget>
   campaignName?: string
@@ -400,6 +400,8 @@ export function CustomPageView({ initial, links, campaignName, indexPaths, row: 
   blocksOnly?: boolean
   /** Le contenu des blocs « Module d'Eraser », rendu sur le serveur. */
   modules?: Record<string, ReactNode>
+  /** L'aperçu de l'atelier « comme Joueur » : les blocs reçoivent ce qu'un joueur recevrait. */
+  asPlayer?: boolean
 }) {
   const [raw, setView] = useState(initial)
   // « Modifier la page » de l'en-tête ouvre cette page dans l'atelier (pour qui peut la modifier).
@@ -419,7 +421,7 @@ export function CustomPageView({ initial, links, campaignName, indexPaths, row: 
   }
 
   const context: BlockContext = {
-    source: virtualPagePath(view.id) ? { blueprint: virtualPagePath(view.id)!, ...(row ? { row: { index: row.index, id: row.id } } : {}) } : { pageId: view.id, draft: view.draft, ...(row ? { row: { index: row.index, id: row.id } } : {}) },
+    source: virtualPagePath(view.id) ? { blueprint: virtualPagePath(view.id)!, ...(row ? { row: { index: row.index, id: row.id } } : {}) } : { pageId: view.id, draft: view.draft, ...(row ? { row: { index: row.index, id: row.id } } : {}), ...(asPlayer ? { asPlayer: true } : {}) },
     row,
     canReveal: view.canReveal,
     links,

@@ -1775,21 +1775,26 @@ export function IndexPresentation(input: PresentationProps) {
     empty: layout.emptyText || input.empty,
   }
   const { rowRef } = input
-  // Le survol : celui de la vue ; sinon (absent) celui de la carte de l'élément ; sinon l'étoilé.
+  // Le survol : celui propre à la vue (fait dans une page), sinon celui choisi par la vue ; sinon (absent)
+  // celui de la carte de l'élément (le sien propre, ou sa version) ; sinon l'étoilé.
   // Une règle de couleur vraie pour la ligne y pose son signe, ou la grise.
   const hover = layout.hover
+  const ownHover = layout.hoverLayout
   const rules = layout.rules
+  const itemTemplate = layout.itemTemplate
   const wrap = useCallback<RowHoverWrap>((row, node, className) => {
-    const shown = hover ?? (itemCard && itemCard !== PRESENTATION_ITEM_CARD ? cardOf?.(row, itemCard)?.hover : undefined)
-    const ref = shown === NO_ROW_HOVER ? null : rowRef?.(row)
-    const hovered = ref?.id ? <RowHover index={ref.index} id={ref.id} hover={shown} className={className}>{node}</RowHover> : node
+    const element = itemCard === PRESENTATION_ITEM_CARD ? itemTemplate : itemCard ? cardOf?.(row, itemCard) ?? undefined : undefined
+    const shown = hover ?? element?.hover
+    const own = ownHover ?? (hover === undefined ? element?.hoverLayout : undefined)
+    const ref = shown === NO_ROW_HOVER && !ownHover ? null : rowRef?.(row)
+    const hovered = ref?.id ? <RowHover index={ref.index} id={ref.id} hover={shown} layout={own} className={className}>{node}</RowHover> : node
     const rule = ruleFor(rules, row, valueOf)
     if (!rule || (!rule.icon && !rule.dim && !(rule.tint && itemCard))) return hovered
     return <div className="relative min-w-0" style={{ ...(rule.dim ? { opacity: 0.5, filter: "grayscale(0.6)" } : {}), ...(rule.tint && itemCard ? { boxShadow: `0 0 0 2px ${rule.tint}`, borderRadius: 12 } : {}) }}>
       {hovered}
       {rule.icon && <span aria-hidden className="pointer-events-none absolute right-1.5 top-1.5 z-[2] grid size-5 place-items-center rounded-full border bg-card shadow-sm"><Glyph value={rule.icon} className="size-3" color={rule.tint} /></span>}
     </div>
-  }, [cardOf, hover, itemCard, rowRef, rules, valueOf])
+  }, [cardOf, hover, itemCard, itemTemplate, ownHover, rowRef, rules, valueOf])
   // L'en-tête et la barre d'outils : au-dessus de la vue, ou au-dessus du détail (maître-détail, panneau à côté).
   const withDetail = layout.kind === "master-detail" || sidePanel
   const header = <ListHeaderView layout={layout} count={kept.length} />

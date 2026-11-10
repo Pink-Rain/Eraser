@@ -111,3 +111,14 @@ test("une case citée qui contient des étiquettes et des « {Colonne} » les ga
   const plain = table(headers, specs, ["Arc long", "Arme", "{Nom} & {Type}"]);
   assert.equal(cells.citedCell(plain, plain.rows[0], "Phrase").valueHtml, "{Nom} &amp; {Type}");
 });
+
+test("un survol propre à une page (fait dans l'atelier) a sa propre clé, sans changer les autres", () => {
+  const layout = { sections: [{ id: "s1", rows: [{ id: "r1", fields: [{ column: "Région" }] }] }], aside: [] };
+  const other = { sections: [{ id: "s1", rows: [{ id: "r1", fields: [{ column: "Type" }] }] }], aside: [] };
+  const plain = refs.referenceKey({ index: "peoples", id: "P1" });
+  assert.notEqual(refs.referenceKey({ index: "peoples", id: "P1", layout }), plain);
+  assert.notEqual(refs.referenceKey({ index: "peoples", id: "P1", layout }), refs.referenceKey({ index: "peoples", id: "P1", layout: other }));
+  assert.equal(refs.referenceKey({ index: "peoples", id: "P1", layout }), refs.referenceKey({ index: "peoples", id: "P1", layout: JSON.parse(JSON.stringify(layout)) }));
+  // Une case citée n'a pas de survol : la mise en page n'y compte pas.
+  assert.equal(refs.referenceKey({ index: "peoples", id: "P1", column: "Type", layout }), refs.referenceKey({ index: "peoples", id: "P1", column: "Type" }));
+});

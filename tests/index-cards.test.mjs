@@ -136,3 +136,12 @@ test("la grille : « Même hauteur » et « Remplir la largeur » se gardent, se
   const unchecked = cards.parseCardTemplate(JSON.stringify({ ...sample, grid: { equal: false, fill: "oui" } }));
   assert.equal(unchecked.grid, undefined, "une case décochée (ou illisible) n'est pas enregistrée");
 });
+
+test("le survol propre à une carte (fait dans une page) se relit, suit les colonnes renommées", () => {
+  const hoverLayout = { sections: [{ id: "s1", rows: [{ id: "r1", fields: [{ column: "Région" }] }] }], aside: [] };
+  const card = cards.parseCardTemplate({ id: "c1", name: "Carte", blocks: [{ id: "b1", type: "title", column: "Nom" }], hoverLayout });
+  assert.equal(card.hoverLayout.sections[0].rows[0].fields[0].column, "Région");
+  assert.equal(cards.parseCardTemplate({ id: "c2", name: "Carte", blocks: [{ id: "b1", type: "title", column: "Nom" }], hoverLayout: "illisible" }).hoverLayout, undefined);
+  const renamed = cards.renameCardColumns(card, new Map([["region", "Contrée"]]));
+  assert.equal(renamed.hoverLayout.sections[0].rows[0].fields[0].column, "Contrée");
+});

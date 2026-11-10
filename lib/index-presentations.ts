@@ -14,6 +14,7 @@
  */
 import { cellNumber, cellParts, cleanStats, type StatDefinition } from "@/lib/index-stats"
 import { parseCardTemplate, type CardTemplate } from "@/lib/index-cards"
+import { parseIndexLayout, type IndexLayout } from "@/lib/index-layouts"
 import { cleanViewRoles, isViewRole, type ViewRole } from "@/lib/view-roles"
 import { cleanVersionMeta, type VersionMeta } from "@/lib/index-versions"
 
@@ -218,6 +219,8 @@ export type Presentation = {
    * (« Modifier › Survol ») ; absent : le survol à l'étoile ; « - » : aucun.
    */
   hover?: string
+  /** Un survol propre à cette vue (fait dans l'atelier d'une page) : il passe avant `hover` et celui de la carte de l'élément. */
+  hoverLayout?: IndexLayout
   /** Au clic sur un élément : ouvrir la fiche (d'office), ouvrir la page de la ligne, afficher à côté, afficher dessous, rien. */
   click?: PresentationClick
   /** Le panneau de détail (à côté, dessous, et le maître-détail) : les colonnes, un formulaire en lecture, ou une carte ; sa largeur ; précédent / suivant. */
@@ -662,6 +665,8 @@ export function cleanPresentation(value: unknown): Presentation | undefined {
   if (menu) layout.menu = menu
   if (text(raw.itemForm, 40)) layout.itemForm = text(raw.itemForm, 40)
   if (text(raw.hover, 40)) layout.hover = text(raw.hover, 40)
+  const hoverLayout = raw.hoverLayout ? parseIndexLayout(raw.hoverLayout) : null
+  if (hoverLayout) layout.hoverLayout = hoverLayout
   // « Ouvrir la fiche » se garde quand il est choisi : il l'emporte alors sur le clic de la carte de l'élément.
   const click = oneOf(raw.click, clickValues)
   if (click) layout.click = click

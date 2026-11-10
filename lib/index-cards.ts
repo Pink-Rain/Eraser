@@ -16,6 +16,7 @@
 import { cleanActionStep } from "@/lib/index-actions"
 import { foldName, isNameColumnSpec, normalizeSpec, type ActionButton, type ActionStep, type IndexColumnSpec } from "@/lib/index-columns"
 import { cleanViewRoles, type ViewRole } from "@/lib/view-roles"
+import { parseIndexLayout, renameLayoutColumns, type IndexLayout } from "@/lib/index-layouts"
 
 // ---------------------------------------------------------------------------
 // Le modèle
@@ -178,6 +179,8 @@ export type CardTemplate = {
   name: string
   /** Au passage de la souris sur la carte (vue Cartes) : cette version du survol de la ligne ; absent : l'étoilée ; « - » : aucun. */
   hover?: string
+  /** Un survol propre à cette carte (fait dans l'atelier d'une page) : il passe avant `hover`. */
+  hoverLayout?: IndexLayout
   /** Au clic sur la carte : absent, sa fiche ; « form » : le formulaire `clickForm` (« principal » : l'étoilé). */
   click?: CardClick
   clickForm?: string
@@ -557,6 +560,8 @@ export function parseCardTemplate(input: unknown): CardTemplate | null {
   if (!blocks.length && !media && !text(raw.id, 40)) return null
   const card: CardTemplate = { id: text(raw.id, 40) || cardId(), name: text(raw.name, 60) || "Carte", blocks }
   if (text(raw.hover, 40)) card.hover = text(raw.hover, 40)
+  const hoverLayout = raw.hoverLayout ? parseIndexLayout(raw.hoverLayout) : null
+  if (hoverLayout) card.hoverLayout = hoverLayout
   const click = oneOf<CardClick>(raw.click, ["sheet", "form", "page", "none"])
   if (click && click !== "sheet") card.click = click
   if (click === "form" && text(raw.clickForm, 40)) card.clickForm = text(raw.clickForm, 40)
@@ -663,6 +668,7 @@ export function renameCardColumns(card: CardTemplate, renames: Map<string, strin
     ...(card.media ? { media: { ...card.media, column: rename(card.media.column) } } : {}),
     ...(card.accent ? { accent: { ...card.accent, ...(card.accent.column ? { column: rename(card.accent.column) } : {}) } } : {}),
     ...(card.corner ? { corner: rename(card.corner) } : {}),
+    ...(card.hoverLayout ? { hoverLayout: renameLayoutColumns(card.hoverLayout, renames) } : {}),
     blocks: card.blocks.map((block) => {
       const next: CardBlock = { ...block }
       if (block.column) next.column = maybe(block.column)

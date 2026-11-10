@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 
 import { MAX_REFERENCE_REQUESTS, type ReferenceRequest } from "@/lib/index-references"
 import { referenceCatalog, resolveReferences } from "@/lib/index-references-server"
+import { parseIndexLayout } from "@/lib/index-layouts"
 import { authorizedAccount } from "@/lib/server-auth"
 
 /**
@@ -28,7 +29,9 @@ export async function POST(request: Request) {
     const list = Array.isArray(body.references) ? body.references : []
     const references = list.slice(0, MAX_REFERENCE_REQUESTS).flatMap((item): ReferenceRequest[] => {
       if (!item || typeof item !== "object") return []
-      const { index, id, column, name, hover } = item as Record<string, unknown>
+      const { index, id, column, name, hover, layout } = item as Record<string, unknown>
+      // Un survol propre à une page : seulement sa mise en page (des colonnes), nettoyée ; les valeurs restent celles que le lecteur peut lire.
+      const ownLayout = !column && layout ? parseIndexLayout(layout) : null
       if (typeof index !== "string" || typeof id !== "string" || !index.trim() || !id.trim()) return []
       return [{
         index: index.trim().slice(0, 120),
@@ -36,6 +39,7 @@ export async function POST(request: Request) {
         ...(typeof column === "string" && column.trim() ? { column: column.trim().slice(0, 120) } : {}),
         ...(typeof name === "string" && name.trim() ? { name: name.trim().slice(0, 200) } : {}),
         ...(typeof hover === "string" && hover.trim() ? { hover: hover.trim().slice(0, 40) } : {}),
+        ...(ownLayout ? { layout: ownLayout } : {}),
       }]
     })
     // Un joueur ne retrouve une ligne que par l'identifiant écrit dans le texte qu'il lit,

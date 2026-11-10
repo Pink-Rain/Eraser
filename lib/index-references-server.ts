@@ -262,7 +262,7 @@ export async function resolveReferences(requests: ReferenceRequest[], options: {
       const cell = citedCell(table, row, request.column)
       results[key] = cell ? { ...base, ...cell } : null
     } else {
-      const layout = await hoverLayoutOf(source.key, table.tab, layouts, request.hover)
+      const layout = request.layout ?? await hoverLayoutOf(source.key, table.tab, layouts, request.hover)
       const hidden = (column: string) => Boolean(options.player && source.hiddenForPlayers?.(column))
       results[key] = { ...base, ...rowDetails(table, row, { object: source.key === OBJECT_REFERENCE_INDEX }), ...(layout ? { layout: hoverOf(layout, table, row, hidden) } : {}) }
     }
