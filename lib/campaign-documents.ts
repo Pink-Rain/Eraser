@@ -17,16 +17,17 @@ import {
   updateRanges,
 } from "@/lib/google-sheets"
 import { withAsyncLock } from "@/lib/async-lock"
-import { cleanDocumentBackground, cleanDocumentContent, DOCUMENT_ITEM_TYPE, documentItemModifiers, type CampaignDocumentRecord, type DocumentBackground } from "@/lib/document-model"
+import { cleanDocumentBackground, cleanDocumentContent, cleanDocumentFolder, DOCUMENT_ITEM_TYPE, documentAssets, documentItemModifiers, type CampaignDocumentRecord, type DocumentBackground } from "@/lib/document-model"
 import { GROUND_CATEGORY } from "@/lib/inventory-schema"
 import { pdfFromJpeg } from "@/lib/document-pdf"
 import { getSharedMedia, putSharedMedia } from "@/lib/shared-media"
 
 /**
- * Les documents d'une campagne (page Document) : une ligne par document dans la feuille
- * « Documents de campagne » (titre, fond, zones de texte en JSON), et dans Drive le fond
- * envoyé depuis l'ordinateur, le rendu (WebP, lu dans l'application et par Roll20) et
- * l'impression (JPEG sur fond blanc, dont est fait le PDF).
+ * Les documents d'une campagne (éditeur : extension Eraser Doc) : une ligne par document dans la
+ * feuille « Documents de campagne » (titre, fond, contenu en JSON, dossier, modèle), et dans Drive
+ * le fond envoyé depuis l'ordinateur, les images posées et les calques de dessin (« pièces »), le
+ * rendu (WebP, lu dans l'application et par Roll20) et l'impression (JPEG sur fond blanc, dont est
+ * fait le PDF).
  */
 
 const COLUMNS = campaignDocumentSheetHeaders.length
@@ -64,11 +65,13 @@ function documentFromRow(row: string[]): CampaignDocumentRecord | null {
     createdByUid: row[7] || "",
     createdAt: row[8] || "",
     updatedAt: row[9] || "",
+    folder: cleanDocumentFolder(row[10]),
+    template: row[11] === "oui",
   }
 }
 
 function documentRow(document: CampaignDocumentRecord) {
-  return [document.id, document.campaignId, document.sessionId, document.title, JSON.stringify(document.background), JSON.stringify(document.content), document.renderVersion, document.createdByUid, document.createdAt, document.updatedAt]
+  return [document.id, document.campaignId, document.sessionId, document.title, JSON.stringify(document.background), JSON.stringify(document.content), document.renderVersion, document.createdByUid, document.createdAt, document.updatedAt, document.folder, document.template ? "oui" : ""]
 }
 
 function documentCells(document: CampaignDocumentRecord): Record<string, string> {
@@ -93,9 +96,23 @@ export async function getCampaignDocument(campaignId: string, documentId: string
   return (await listCampaignDocuments(campaignId)).find((document) => document.id === documentId) ?? null
 }
 
-const mediaKey = (campaignId: string, documentId: string, part: "fond" | "rendu" | "impression") => `campaigns/${campaignId}/documents/${documentId}/${part}`
+/** Les modèles d'un compte, dans toutes ses campagnes (« Nouveau document » de l'éditeur). */
+export async function listDocumentTemplates(createdByUid: string) {
+  const sheet = await resolveJdrSheet("campaign_documents")
+  if (!sheet) return []
+  const named = await readNamedSheet(sheet.spreadsheetId, sheet.tabName, campaignDocumentSheetHeaders)
+  return named.rows.map((row) => documentFromRow(canonicalRow(named.columns, row)))
+    .filter((document): document is CampaignDocumentRecord => Boolean(document?.template && document.createdByUid === createdByUid))
+    .sort((left, right) => left.title.localeCompare(right.title, "fr"))
+}
 
-export type DocumentFiles = { render?: File | null; print?: File | null; background?: File | null }
+/** Une pièce du document : une image posée ou un calque de dessin (son nom dans le contenu). */
+export type DocumentPart = "fond" | "rendu" | "impression" | `piece-${string}`
+export const isDocumentPiece = (part: string): part is `piece-${string}` => /^piece-[\w-]{1,80}$/.test(part)
+
+const mediaKey = (campaignId: string, documentId: string, part: DocumentPart) => `campaigns/${campaignId}/documents/${documentId}/${part}`
+
+export type DocumentFiles = { render?: File | null; print?: File | null; background?: File | null; pieces?: Map<string, File> }
 
 function checkedImage(file: File | null | undefined, types: RegExp, maxBytes: number) {
   if (!file) return null
@@ -109,7 +126,7 @@ function checkedImage(file: File | null | undefined, types: RegExp, maxBytes: nu
  * Une modification garde son créateur et sa date de création ; un document d'une autre
  * campagne est refusé.
  */
-export async function saveCampaignDocument(campaignId: string, input: { id?: unknown; sessionId?: unknown; title?: unknown; background?: unknown; content?: unknown }, files: DocumentFiles, createdByUid: string) {
+export async function saveCampaignDocument(campaignId: string, input: { id?: unknown; sessionId?: unknown; title?: unknown; background?: unknown; content?: unknown; folder?: unknown; template?: unknown }, files: DocumentFiles, createdByUid: string) {
   const id = typeof input.id === "string" && /^[\w-]{1,80}$/.test(input.id) ? input.id : crypto.randomUUID()
   const title = (typeof input.title === "string" ? input.title : "").trim().slice(0, 160) || "Document sans titre"
   const sessionId = typeof input.sessionId === "string" ? input.sessionId.slice(0, 200) : ""
@@ -119,6 +136,9 @@ export async function saveCampaignDocument(campaignId: string, input: { id?: unk
   const render = checkedImage(files.render, /^image\/(webp|png|jpeg)$/, 15 * 1024 * 1024)
   const print = checkedImage(files.print, /^image\/jpeg$/, 15 * 1024 * 1024)
   const uploaded = checkedImage(files.background, /^image\//, 15 * 1024 * 1024)
+  // Seules les pièces que le contenu désigne sont gardées.
+  const assets = new Set(documentAssets(content))
+  const pieces = [...(files.pieces ?? new Map<string, File>())].flatMap(([asset, file]) => assets.has(asset) ? [[asset, checkedImage(file, /^image\/(webp|png|jpeg|gif)$/, 15 * 1024 * 1024)!] as const] : [])
   return withAsyncLock("campaign-documents", async () => {
     const { sheet, columns, rows, raw, startRow } = await readDocumentRows()
     const index = rows.findIndex((row) => row[0] === id)
@@ -126,6 +146,7 @@ export async function saveCampaignDocument(campaignId: string, input: { id?: unk
     if (index >= 0 && current?.campaignId !== campaignId) throw new Error("DOCUMENT_NOT_FOUND")
     if (background.kind === "upload" && !uploaded && current?.background.kind !== "upload") throw new Error("DOCUMENT_BACKGROUND_MISSING")
     if (uploaded) await putSharedMedia(mediaKey(campaignId, id, "fond"), await uploaded.arrayBuffer(), uploaded.type)
+    for (const [asset, file] of pieces) await putSharedMedia(mediaKey(campaignId, id, `piece-${asset}`), await file.arrayBuffer(), file.type)
     if (render) await putSharedMedia(mediaKey(campaignId, id, "rendu"), await render.arrayBuffer(), render.type)
     if (print) await putSharedMedia(mediaKey(campaignId, id, "impression"), await print.arrayBuffer(), print.type)
     const now = new Date().toISOString()
@@ -135,6 +156,9 @@ export async function saveCampaignDocument(campaignId: string, input: { id?: unk
       createdByUid: current?.createdByUid || createdByUid,
       createdAt: current?.createdAt || now,
       updatedAt: now,
+      // Absents de l'envoi (une version de l'éditeur qui ne les connaît pas) : ceux d'avant restent.
+      folder: input.folder === undefined ? current?.folder ?? "" : cleanDocumentFolder(input.folder),
+      template: input.template === undefined ? current?.template ?? false : input.template === true,
     }
     if (index >= 0) {
       await updateRanges(sheet.spreadsheetId, namedRowWrites(sheet.tabName, columns, startRow + index, documentCells(document)), { valueInputOption: "RAW" })
@@ -153,18 +177,36 @@ export async function saveCampaignDocument(campaignId: string, input: { id?: unk
   })
 }
 
-/** Range un document dans une session (ou l'en sort) : seule sa case « ID session » change. */
-export async function setCampaignDocumentSession(campaignId: string, documentId: string, sessionId: string) {
+/**
+ * Range un document sans le redessiner : sa session (ou aucune), son dossier, s'il est un modèle.
+ * Seules les cases données changent.
+ */
+export async function updateCampaignDocumentPlace(campaignId: string, documentId: string, change: { sessionId?: string; folder?: string; template?: boolean }) {
   return withAsyncLock("campaign-documents", async () => {
     const { sheet, columns, rows, startRow } = await readDocumentRows()
     const index = rows.findIndex((row) => row[0] === documentId && row[1] === campaignId)
     const current = index >= 0 ? documentFromRow(rows[index]) : null
     if (!current) throw new Error("DOCUMENT_NOT_FOUND")
-    const updatedAt = new Date().toISOString()
-    await updateRanges(sheet.spreadsheetId, namedRowWrites(sheet.tabName, columns, startRow + index, { "ID session": sessionId.slice(0, 200), "Modifié le": updatedAt }), { valueInputOption: "RAW" })
+    const next = {
+      ...current,
+      ...(change.sessionId === undefined ? {} : { sessionId: change.sessionId.slice(0, 200) }),
+      ...(change.folder === undefined ? {} : { folder: cleanDocumentFolder(change.folder) }),
+      ...(change.template === undefined ? {} : { template: change.template }),
+      updatedAt: new Date().toISOString(),
+    }
+    const cells: Record<string, string> = { "Modifié le": next.updatedAt }
+    if (change.sessionId !== undefined) cells["ID session"] = next.sessionId
+    if (change.folder !== undefined) cells.Dossier = next.folder
+    if (change.template !== undefined) cells["Modèle"] = next.template ? "oui" : ""
+    await updateRanges(sheet.spreadsheetId, namedRowWrites(sheet.tabName, columns, startRow + index, cells), { valueInputOption: "RAW" })
     clearSpreadsheetReadCache(sheet.spreadsheetId)
-    return { ...current, sessionId: sessionId.slice(0, 200), updatedAt }
+    return next
   })
+}
+
+/** Range un document dans une session (ou l'en sort) : seule sa case « ID session » change. */
+export async function setCampaignDocumentSession(campaignId: string, documentId: string, sessionId: string) {
+  return updateCampaignDocumentPlace(campaignId, documentId, { sessionId })
 }
 
 /**
@@ -186,7 +228,7 @@ async function bytesOf(object: { body: unknown }) {
   return object.body instanceof ArrayBuffer ? object.body : await new Response(object.body as BodyInit).arrayBuffer()
 }
 
-export async function readDocumentImage(campaignId: string, documentId: string, part: "fond" | "rendu" | "impression") {
+export async function readDocumentImage(campaignId: string, documentId: string, part: DocumentPart) {
   return getSharedMedia(mediaKey(campaignId, documentId, part))
 }
 

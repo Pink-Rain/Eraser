@@ -1,13 +1,21 @@
-# Eraser 0.1.1-alpha.284 — Une étiquette, c'est une étiquette
+# Eraser 0.1.1-alpha.285 — Les documents prennent des couleurs
 
-Cette version arrive **sans réinstallation** (même enveloppe que l'alpha 283) : Eraser la
-télécharge, redémarre son serveur et recharge la page tout seul. Rien ne change dans Google Sheets.
+Cette version arrive **sans réinstallation** (même enveloppe que l'alpha 284) : Eraser la
+télécharge, redémarre son serveur et recharge la page tout seul. Dans Google Sheets, la feuille
+« Documents de campagne » reçoit deux colonnes à droite (« Dossier » et « Modèle ») au premier
+document enregistré ; rien d'autre ne bouge.
 
-- **Listes à choix multiple et ajout libre (« Type » des items…)** : plusieurs étiquettes ajoutées
-  dans une case restent des étiquettes séparées. Avant, la liste proposait aussi les valeurs déjà
-  écrites dans la colonne, mais case entière : « Parchemin, Culture » devenait une option à part,
-  qui recollait ensuite les deux étiquettes en une seule. Chaque étiquette est maintenant proposée
-  seule (« Parchemin », « Culture »), et les cases déjà touchées s'affichent d'elles-mêmes en
-  étiquettes séparées : rien à corriger dans la feuille.
-- Une option déclarée dans les réglages de la colonne qui contient une virgule (« Bluff,
-  mensonge ») reste entière, comme avant.
+Eraser sait maintenant garder tout ce que la nouvelle version de l'éditeur des documents
+(extension Eraser Doc 0.2.0) permet de faire :
+
+- **Lignes droites, formes, images et dessins** posés sur un document, en plus du texte : une ligne
+  pleine, en tirets ou en points ; un rectangle, une ellipse, un triangle, un losange ou une étoile,
+  avec ou sans contour, rempli d'une couleur ou d'un dégradé ; une image de l'ordinateur ; un
+  calque de dessin tracé à la plume, rangé dans Drive comme une image.
+- **Les calques et leurs modes de fusion** : chaque élément passe devant ou derrière les autres, et
+  se mêle à ce qui est dessous (Normal, Multiplier, Assombrir, Superposition, Éclaircir, Addition,
+  Incrustation, Lumière douce, Couleur, Saturation, Luminosité).
+- **Dossiers et modèles** : un document se range dans un dossier ; un document marqué « modèle »
+  est proposé à son auteur dans « Nouveau document », dans toutes ses campagnes.
+- Les documents déjà écrits s'ouvrent et se lisent comme avant ; les joueurs, l'inventaire et
+  Roll20 reçoivent toujours l'image du document.

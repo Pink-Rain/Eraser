@@ -505,19 +505,31 @@ n'est pas compilé et garde son comportement.
 L'éditeur des documents d'une campagne vit dans l'extension **Eraser Doc** (`Pink-Rain/Eraser_doc`,
 `/extension/doc/campagne/<id>`, menu › Dossier › Document ; l'ancienne `/campagne/[id]/document`
 y renvoie). Il écrit des documents : un fond (fourni avec l'extension, envoyé depuis l'ordinateur
-ou une adresse) et des zones de texte posées dessus, chacune avec sa police (fichiers dans
-l'extension, licence OFL), sa taille, son encre et son inclinaison. Eraser garde :
+ou une adresse) et, posés dessus dans l'ordre des calques (`order`), des zones de texte (police
+dans l'extension, licence OFL, taille, encre, inclinaison), des lignes droites, des formes
+(contour, remplissage uni ou en dégradé), des images et des calques de dessin (tracés à la plume
+dans l'éditeur, enregistrés comme images), chacun avec son mode de fusion (`documentBlendModes`).
+Les documents se rangent en dossiers (un niveau) ; un document marqué « modèle » est proposé à son
+auteur dans toutes ses campagnes. Eraser garde :
 
 - le modèle pur (`lib/document-model.ts`) : mesures en unités du document (largeur 1000), texte en
   paragraphes de morceaux stylés, clés des polices et des fonds (`documentFontKeys`,
-  `builtinBackgroundKeys`, vérifiées à l'enregistrement), nettoyage, marque d'inventaire, adresses
-  (`documentImageUrl`, `documentPdfUrl`, `documentStudioHref`) ; prêté à l'extension ;
+  `builtinBackgroundKeys`, des modes de fusion, des formes, vérifiées à l'enregistrement),
+  nettoyage (zones, lignes, formes, images et calques de dessin, ordre des calques), marque
+  d'inventaire, adresses (`documentImageUrl`, `documentPartUrl`, `documentPdfUrl`,
+  `documentStudioHref`) ; prêté à l'extension ;
 - une ligne par document dans la feuille « Documents de campagne » (`lib/campaign-documents.ts`),
-  créée au premier document enregistré ; « ID session » le range dans une session ;
-- les API : `GET /api/campaigns/[id]/documents` (`?atelier=1` : la campagne, ses sessions et ses
-  joueurs en plus, pour l'éditeur), `POST` (enregistrer : le rendu WebP et l'impression JPEG sur
-  fond blanc, dessinés dans le navigateur par l'extension, vont dans Drive avec le fond envoyé),
-  `PATCH`/`DELETE`, `give`, `image`, `pdf` (une page, `lib/document-pdf.ts`, faite à la demande) ;
+  créée au premier document enregistré ; « ID session » le range dans une session, « Dossier »
+  dans un dossier de l'éditeur, « Modèle » (`oui`) en fait un modèle ;
+- les API : `GET /api/campaigns/[id]/documents` (`?atelier=1` : la campagne, ses sessions, ses
+  joueurs, les modèles du compte et `features`, ce que ce serveur sait garder, pour l'éditeur),
+  `POST` (enregistrer : le rendu WebP et l'impression JPEG sur fond blanc, dessinés dans le
+  navigateur par l'extension, vont dans Drive avec le fond envoyé et les pièces `piece-<nom>` :
+  images posées et calques de dessin ; tout est facultatif sauf le document, car le serveur refuse
+  un envoi de fichiers de plus de 1 Mo et l'éditeur envoie un gros document en plusieurs fois),
+  `PATCH` (session, dossier, modèle : seuls les champs envoyés changent), `DELETE`, `give`, `image`
+  (`?part=fond` et `?part=piece-<nom>` : au MJ, et à l'auteur d'un modèle depuis ses autres
+  campagnes), `pdf` (une page, `lib/document-pdf.ts`, faite à la demande) ;
 - la lecture : `components/eraser/document-viewer.tsx` (prêté), l'inventaire et le Créateur de
   session (`session-documents.tsx`, dont « Écrire » et « Modifier » ouvrent l'extension).
 

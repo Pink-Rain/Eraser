@@ -1,6 +1,8 @@
 /**
- * Les documents d'une campagne : une image de fond et des zones de texte posées dessus, chacune
- * avec sa police, sa taille, sa couleur et son inclinaison. Règle pure, sans navigateur : le
+ * Les documents d'une campagne : une image de fond et, posés dessus, des zones de texte (chacune
+ * avec sa police, sa taille, sa couleur et son inclinaison), des lignes droites, des formes
+ * (contour, remplissage uni ou en dégradé), des images et des calques de dessin (tracés à la main,
+ * gardés comme images), chacun avec son mode de fusion. Règle pure, sans navigateur : le
  * serveur (enregistrement, PDF, Roll20), l'inventaire (un document donné) et l'extension Eraser
  * Doc (`Pink-Rain/Eraser_doc`, qui l'emprunte) s'en servent. L'éditeur, son rendu, ses polices
  * et ses fonds sont dans l'extension ; ici, seulement les clés qu'Eraser vérifie à
@@ -45,7 +47,84 @@ export type DocumentZone = {
   opacity: number
   /** L'encre se mêle au papier (mode « produit ») au lieu de le recouvrir. */
   ink: boolean
+  /** Le mode de fusion choisi ; absent, celui d'`ink` (produit ou normal). */
+  blend?: DocumentBlendMode
   paragraphs: DocumentParagraph[]
+}
+
+/**
+ * Les modes de fusion d'un élément avec ce qui est dessous (fond, autres éléments), les mêmes dans
+ * l'éditeur et dans le rendu. Clés enregistrées : ne jamais en renommer une.
+ */
+export const documentBlendModes = ["normal", "multiply", "screen", "overlay", "darken", "lighten", "soft-light", "color", "saturation", "luminosity", "addition"] as const
+export type DocumentBlendMode = (typeof documentBlendModes)[number]
+
+export const documentLineStyles = ["solid", "dashed", "dotted"] as const
+export type DocumentLineStyle = (typeof documentLineStyles)[number]
+
+/** Une ligne droite, d'un point à l'autre (unités du document). */
+export type DocumentLine = {
+  id: string
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  /** L'épaisseur du trait. */
+  width: number
+  color: string
+  style: DocumentLineStyle
+  opacity: number
+  blend: DocumentBlendMode
+}
+
+export const documentShapeKinds = ["rectangle", "ellipse", "triangle", "diamond", "star"] as const
+export type DocumentShapeKind = (typeof documentShapeKinds)[number]
+/** Le remplissage d'une forme : aucun, uni, dégradé linéaire (selon `gradientAngle`) ou radial. */
+export const documentShapeFills = ["none", "solid", "linear", "radial"] as const
+export type DocumentShapeFill = (typeof documentShapeFills)[number]
+
+/** Une forme : sa boîte (avant inclinaison), son contour et son remplissage. */
+export type DocumentShape = {
+  id: string
+  shape: DocumentShapeKind
+  x: number
+  y: number
+  width: number
+  height: number
+  rotation: number
+  /** L'arrondi des coins d'un rectangle. */
+  radius: number
+  /** L'épaisseur du contour ; 0 : pas de contour. */
+  strokeWidth: number
+  strokeColor: string
+  strokeStyle: DocumentLineStyle
+  fill: DocumentShapeFill
+  fillColor: string
+  /** La couleur d'arrivée d'un dégradé, et son opacité (0 : un fondu vers le transparent). */
+  fillColor2: string
+  fillOpacity2: number
+  /** Le sens d'un dégradé linéaire, en degrés (0 : de gauche à droite, 90 : de haut en bas). */
+  gradientAngle: number
+  opacity: number
+  blend: DocumentBlendMode
+}
+
+/**
+ * Une image posée sur le document (`image`, venue de l'ordinateur) ou un calque de dessin
+ * (`drawing`, tracé à la main dans l'éditeur, enregistré comme image). Son fichier est rangé dans
+ * Drive avec le document, sous le nom `asset` (`?part=piece-<asset>`).
+ */
+export type DocumentPicture = {
+  id: string
+  kind: "image" | "drawing"
+  asset: string
+  x: number
+  y: number
+  width: number
+  height: number
+  rotation: number
+  opacity: number
+  blend: DocumentBlendMode
 }
 
 /** Les fonds fournis (leurs images et leurs zones prêtes à remplir sont dans l'extension Eraser Doc). */
@@ -58,7 +137,16 @@ export type DocumentBackground =
   | { kind: "upload" }
   | { kind: "url"; url: string }
 
-export type DocumentContent = { version: 1; height: number; zones: DocumentZone[] }
+export type DocumentContent = {
+  version: 1
+  height: number
+  zones: DocumentZone[]
+  lines: DocumentLine[]
+  shapes: DocumentShape[]
+  pictures: DocumentPicture[]
+  /** Les identifiants de tous les éléments, du plus bas au plus haut (l'ordre des calques). */
+  order: string[]
+}
 
 export type CampaignDocumentRecord = {
   id: string
@@ -73,6 +161,10 @@ export type CampaignDocumentRecord = {
   createdByUid: string
   createdAt: string
   updatedAt: string
+  /** Le dossier où le MJ l'a rangé dans l'éditeur, ou vide. */
+  folder: string
+  /** Un modèle : proposé à son auteur dans « Nouveau document », dans toutes ses campagnes. */
+  template: boolean
 }
 
 const clamp = (value: unknown, min: number, max: number, fallback: number) => {
@@ -137,7 +229,72 @@ export function cleanDocumentZone(value: unknown, height: number): DocumentZone 
     letterSpacing: clamp(raw.letterSpacing, -10, 60, 0),
     opacity: clamp(raw.opacity, 0.05, 1, 1),
     ink: raw.ink !== false,
+    ...(isBlendMode(raw.blend) ? { blend: raw.blend } : {}),
     paragraphs,
+  }
+}
+
+const isBlendMode = (value: unknown): value is DocumentBlendMode => (documentBlendModes as readonly unknown[]).includes(value)
+const elementId = (value: unknown) => /^[\w-]{1,80}$/.test(text(value, 80)) ? text(value, 80) : crypto.randomUUID()
+
+export function cleanDocumentLine(value: unknown, height: number): DocumentLine | null {
+  if (!value || typeof value !== "object") return null
+  const raw = value as Record<string, unknown>
+  return {
+    id: elementId(raw.id),
+    x1: clamp(raw.x1, -DOCUMENT_WIDTH, DOCUMENT_WIDTH * 2, 100),
+    y1: clamp(raw.y1, -height, height * 2, 100),
+    x2: clamp(raw.x2, -DOCUMENT_WIDTH, DOCUMENT_WIDTH * 2, 300),
+    y2: clamp(raw.y2, -height, height * 2, 100),
+    width: clamp(raw.width, 0.5, 80, 3),
+    color: hexColor(raw.color, DEFAULT_INK),
+    style: (documentLineStyles as readonly unknown[]).includes(raw.style) ? raw.style as DocumentLineStyle : "solid",
+    opacity: clamp(raw.opacity, 0.05, 1, 1),
+    blend: isBlendMode(raw.blend) ? raw.blend : "multiply",
+  }
+}
+
+export function cleanDocumentShape(value: unknown, height: number): DocumentShape | null {
+  if (!value || typeof value !== "object") return null
+  const raw = value as Record<string, unknown>
+  return {
+    id: elementId(raw.id),
+    shape: (documentShapeKinds as readonly unknown[]).includes(raw.shape) ? raw.shape as DocumentShapeKind : "rectangle",
+    x: clamp(raw.x, -DOCUMENT_WIDTH, DOCUMENT_WIDTH * 2, 100),
+    y: clamp(raw.y, -height, height * 2, 100),
+    width: clamp(raw.width, 2, DOCUMENT_WIDTH * 3, 200),
+    height: clamp(raw.height, 2, height * 3, 200),
+    rotation: clamp(raw.rotation, -180, 180, 0),
+    radius: clamp(raw.radius, 0, DOCUMENT_WIDTH, 0),
+    strokeWidth: clamp(raw.strokeWidth, 0, 80, 3),
+    strokeColor: hexColor(raw.strokeColor, DEFAULT_INK),
+    strokeStyle: (documentLineStyles as readonly unknown[]).includes(raw.strokeStyle) ? raw.strokeStyle as DocumentLineStyle : "solid",
+    fill: (documentShapeFills as readonly unknown[]).includes(raw.fill) ? raw.fill as DocumentShapeFill : "none",
+    fillColor: hexColor(raw.fillColor, "#8b1a1a"),
+    fillColor2: hexColor(raw.fillColor2, "#f4ead6"),
+    fillOpacity2: clamp(raw.fillOpacity2, 0, 1, 1),
+    gradientAngle: clamp(raw.gradientAngle, -360, 360, 90),
+    opacity: clamp(raw.opacity, 0.05, 1, 1),
+    blend: isBlendMode(raw.blend) ? raw.blend : "multiply",
+  }
+}
+
+export function cleanDocumentPicture(value: unknown, height: number): DocumentPicture | null {
+  if (!value || typeof value !== "object") return null
+  const raw = value as Record<string, unknown>
+  const asset = text(raw.asset, 80)
+  if (!/^[\w-]{1,80}$/.test(asset)) return null
+  return {
+    id: elementId(raw.id),
+    kind: raw.kind === "drawing" ? "drawing" : "image",
+    asset,
+    x: clamp(raw.x, -DOCUMENT_WIDTH, DOCUMENT_WIDTH * 2, 100),
+    y: clamp(raw.y, -height, height * 2, 100),
+    width: clamp(raw.width, 4, DOCUMENT_WIDTH * 3, 300),
+    height: clamp(raw.height, 4, height * 3, 300),
+    rotation: clamp(raw.rotation, -180, 180, 0),
+    opacity: clamp(raw.opacity, 0.05, 1, 1),
+    blend: isBlendMode(raw.blend) ? raw.blend : "normal",
   }
 }
 
@@ -160,7 +317,26 @@ export function cleanDocumentContent(value: unknown): DocumentContent {
   const raw = value && typeof value === "object" ? value as Record<string, unknown> : {}
   const height = clamp(raw.height, DOCUMENT_WIDTH * 0.2, DOCUMENT_WIDTH * 4, DOCUMENT_WIDTH)
   const zones = Array.isArray(raw.zones) ? raw.zones.slice(0, 60).flatMap((zone) => cleanDocumentZone(zone, height) ?? []) : []
-  return { version: 1, height, zones }
+  const lines = Array.isArray(raw.lines) ? raw.lines.slice(0, 200).flatMap((line) => cleanDocumentLine(line, height) ?? []) : []
+  const shapes = Array.isArray(raw.shapes) ? raw.shapes.slice(0, 100).flatMap((shape) => cleanDocumentShape(shape, height) ?? []) : []
+  const pictures = Array.isArray(raw.pictures) ? raw.pictures.slice(0, 40).flatMap((picture) => cleanDocumentPicture(picture, height) ?? []) : []
+  // Deux éléments ne partagent jamais un identifiant : l'ordre des calques les désigne.
+  const seen = new Set<string>()
+  const unique = <T extends { id: string }>(element: T) => {
+    if (seen.has(element.id)) element.id = crypto.randomUUID()
+    seen.add(element.id)
+    return element
+  }
+  zones.forEach(unique); lines.forEach(unique); shapes.forEach(unique); pictures.forEach(unique)
+  // L'ordre des calques : ceux qu'il nomme, puis les autres (texte, lignes, formes, images), au-dessus.
+  const listed = Array.isArray(raw.order) ? raw.order.filter((id): id is string => typeof id === "string" && seen.has(id)) : []
+  const order = [...new Set([...listed, ...zones.map((zone) => zone.id), ...lines.map((line) => line.id), ...shapes.map((shape) => shape.id), ...pictures.map((picture) => picture.id)])]
+  return { version: 1, height, zones, lines, shapes, pictures, order }
+}
+
+/** Les fichiers d'images d'un document (images posées, calques de dessin). */
+export function documentAssets(content: DocumentContent) {
+  return [...new Set(content.pictures.map((picture) => picture.asset))]
 }
 
 /** Le texte brut d'un document (recherche, accessibilité). */
@@ -200,6 +376,18 @@ export function documentOfItem(modifiers: string): { campaignId: string; documen
 export function documentItemEntries(modifiers: string): Array<{ target: string; value: string }> {
   const found = documentOfItem(modifiers)
   return found ? [{ target: DOCUMENT_ITEM_TARGET, value: `${found.campaignId}/${found.documentId}` }] : []
+}
+
+/** Le dossier d'un document : un nom court, sans espaces superflus. */
+export function cleanDocumentFolder(value: unknown) {
+  return text(value, 200).replace(/\s+/g, " ").trim().slice(0, 80)
+}
+
+/** Un fichier d'image du document (fond importé, image posée, calque de dessin), pour l'éditeur. */
+export function documentPartUrl(campaignId: string, documentId: string, part: "fond" | `piece-${string}`, version = "") {
+  const query = new URLSearchParams({ part })
+  if (version) query.set("v", version.replace(/[^0-9A-Za-z]/g, ""))
+  return `/api/campaigns/${encodeURIComponent(campaignId)}/documents/${encodeURIComponent(documentId)}/image?${query}`
 }
 
 export function documentImageUrl(campaignId: string, documentId: string, version = "") {
