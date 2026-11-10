@@ -1,15 +1,12 @@
-# Eraser 0.1.1-alpha.286 — Les documents s'enregistrent plus vite
+# Eraser 0.1.1-alpha.287 — Un survol propre à la page, et « Voir comme Joueur » qui dit vrai
 
-Cette version arrive **sans réinstallation** (même enveloppe que l'alpha 285) : Eraser la
+Cette version arrive **sans réinstallation** (même enveloppe que l'alpha 286) : Eraser la
 télécharge, redémarre son serveur et recharge la page tout seul. Rien ne change dans Google Sheets.
 
-- **Enregistrer un document est bien plus rapide.** Ses images (rendu, impression, fond importé,
-  images posées, dessins) partent maintenant ensemble vers Google Drive au lieu de l'une après
-  l'autre, et Eraser ne relit plus tout le dossier des visuels avant chacune (plus d'une seconde à
-  chaque fois). Avec Eraser Doc 0.2.1, le document part aussi en un seul envoi : une seule lecture
-  et une seule écriture dans Google Sheets au lieu de deux.
-- **Les envois de plus de 1 Mo sont acceptés** (jusqu'à 40 Mo) : le serveur d'Eraser les refusait
-  avant même de les lire. Les documents s'en servent ; un portrait, un token ou une image un peu
-  lourds aussi.
-- Envoyer plusieurs visuels à la suite (portraits, tokens, fonds) profite du même gain : la liste
-  du dossier des visuels reste à jour au lieu d'être relue après chaque envoi.
+- **Un survol propre à une page.** Avec Eraser Page 0.5.0, une carte ou une présentation (liste,
+  kanban, galerie…) posée dans une page peut avoir son propre survol, réglé dans l'atelier comme
+  une carte. Il passe avant celui de l'index, et les joueurs n'y voient que ce qu'ils peuvent lire.
+- **« Voir comme Joueur » montre vraiment ce qu'un joueur voit.** L'aperçu de l'atelier (MJ et
+  admins) lisait les vues et les valeurs comme un administrateur, même en « Joueur ». Il les lit
+  maintenant comme un joueur les recevrait : les colonnes cachées et les notes du MJ n'y sont plus.
+  Sur une fiche-page, la ligne d'exemple aussi.

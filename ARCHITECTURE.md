@@ -388,6 +388,16 @@ d’Eraser, reproduit à l’identique par `defaultItemPlaceDisplay`.
   `components/eraser/eraser-modules.tsx`) remet toute la fiche d'avant le créateur de pages
   (`ClassDetail`, avec « Retour aux classes » et « Modifier dans le créateur de classe ») ;
   ailleurs, il ne montre que sa place.
+- **Survol propre à une apparence** : une carte (`CardTemplate.hoverLayout`) ou une présentation
+  (`Presentation.hoverLayout`) peut garder son propre survol, fait dans l'atelier (Eraser Page) avec
+  l'éditeur des survols ; il passe avant la version choisie (`hover`). `RowHover` le transmet
+  (`layout`) à `/api/references`, qui le lit sur le serveur comme les autres survols : un joueur
+  n'y voit que ce qu'il peut lire.
+- **« Voir comme Joueur » dans l'atelier** : `/api/pages/block-data` accepte `&as=joueur` (MJ et
+  admins) sur les blocs d'une page (`BlockSource.asPlayer`, `CustomPageView asPlayer`) et
+  `?row-preview=1&rowIndex=&rowId=(&as=joueur)(&forms=)` rend la ligne d'exemple d'une fiche-page
+  telle que sa vraie page la reçoit : l'aperçu lit tout comme un joueur, jamais avec les droits de
+  l'admin.
 - **Créateur de pages** : réservé aux administrateurs (`canBuildPages`,
   `lib/custom-pages.ts`) — créer, modifier, brouillons, menu. `canManagePages` (MJ
   et administrateurs) garde ce que le MJ fait d’une page qu’il lit (secrets, notes),
