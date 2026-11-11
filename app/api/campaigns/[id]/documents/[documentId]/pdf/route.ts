@@ -1,16 +1,17 @@
 import { NextResponse } from "next/server"
 
 import { documentFileName, documentPdf, getCampaignDocument } from "@/lib/campaign-documents"
+import { documentPageCount } from "@/lib/document-model"
 import { campaignReader } from "@/lib/session-access"
 
-/** Le PDF d'un document (une page, son image) : ouvert dans le navigateur, ou téléchargé (`?download=1`). */
+/** Le PDF d'un document (une page par page, leurs images) : ouvert dans le navigateur, ou téléchargé (`?download=1`). */
 export async function GET(request: Request, { params }: { params: Promise<{ id: string; documentId: string }> }) {
   const { id, documentId } = await params
   if (!await campaignReader(id)) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
     const document = await getCampaignDocument(id, documentId)
     const title = document?.title || "Document"
-    const pdf = await documentPdf(id, documentId, title)
+    const pdf = await documentPdf(id, documentId, title, document ? documentPageCount(document) : 1)
     if (!pdf) return NextResponse.json({ error: "Ce document n’a pas encore de rendu : enregistre-le d’abord." }, { status: 404 })
     const disposition = new URL(request.url).searchParams.get("download") === "1" ? "attachment" : "inline"
     const name = documentFileName(title, "pdf")

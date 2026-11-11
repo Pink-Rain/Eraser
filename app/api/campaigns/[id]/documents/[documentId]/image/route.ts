@@ -1,22 +1,24 @@
 import { NextResponse } from "next/server"
 
-import { getCampaignDocument, isDocumentPiece, readDocumentImage, type DocumentPart } from "@/lib/campaign-documents"
+import { documentRenderPart, getCampaignDocument, isDocumentPageBackground, isDocumentPiece, readDocumentImage, type DocumentPart } from "@/lib/campaign-documents"
 import { authorizedAccount } from "@/lib/server-auth"
 import { campaignReader, sessionManager } from "@/lib/session-access"
 
 /**
- * L'image d'un document. Le rendu (par défaut) est lu par ceux qui lisent la campagne : un
- * joueur qui a reçu le document l'ouvre depuis son inventaire. Le fond envoyé depuis
- * l'ordinateur (`?part=fond`) et les pièces (`?part=piece-<nom>` : images posées, calques de
- * dessin) ne servent qu'à l'éditeur : au MJ de la campagne, et à l'auteur d'un modèle, qui s'en
- * sert depuis ses autres campagnes.
+ * L'image d'un document. Le rendu (par défaut ; `?page=<n>` : celui de la n-ième page) est lu par
+ * ceux qui lisent la campagne : un joueur qui a reçu le document l'ouvre depuis son inventaire.
+ * Les fonds envoyés depuis l'ordinateur (`?part=fond`, `?part=fond-<id de la page>`) et les pièces
+ * (`?part=piece-<nom>` : images posées, calques de dessin) ne servent qu'à l'éditeur : au MJ de
+ * la campagne, et à l'auteur d'un modèle, qui s'en sert depuis ses autres campagnes.
  */
 export async function GET(request: Request, { params }: { params: Promise<{ id: string; documentId: string }> }) {
   const { id, documentId } = await params
   const url = new URL(request.url)
   const asked = url.searchParams.get("part") ?? ""
-  const part: DocumentPart = asked === "fond" || isDocumentPiece(asked) ? asked : "rendu"
-  const allowed = part === "rendu" ? await campaignReader(id) : await sessionManager(id) || await templateAuthor(id, documentId)
+  const page = Math.floor(Number(url.searchParams.get("page") || "1"))
+  const rendered = !(asked === "fond" || isDocumentPageBackground(asked) || isDocumentPiece(asked))
+  const part: DocumentPart = rendered ? documentRenderPart(Number.isFinite(page) && page > 1 && page <= 999 ? page : 1) : asked as DocumentPart
+  const allowed = rendered ? await campaignReader(id) : await sessionManager(id) || await templateAuthor(id, documentId)
   if (!allowed) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   const object = await readDocumentImage(id, documentId, part)
   if (!object) return NextResponse.json({ error: "Image introuvable." }, { status: 404 })

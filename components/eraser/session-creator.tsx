@@ -28,7 +28,7 @@ import { replaceAppUrl } from "@/components/eraser/app-tabs"
 import type { CampaignNpcRecord, SavedShopRecord, ShopGeneratorItem } from "@/lib/shop-schema"
 import { builtinShopTypes, type ShopTypeDefinition } from "@/lib/shop-types"
 import type { CampaignEvent } from "@/lib/campaign-events"
-import type { CampaignDocumentRecord } from "@/lib/document-model"
+import { documentRecipients, type CampaignDocumentRecord } from "@/lib/document-model"
 
 export type SessionMember = { id: string; name: string; people: string; classes: string; level: string; honoraryTitle: string }
 
@@ -342,7 +342,7 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
 
       <section className="border-t pt-8">
         <SectionTitle>Documents</SectionTitle>
-        <SessionDocuments campaignId={campaignId} sessionId={session.id} initialDocuments={documents} players={(players.length ? players : members).map((member) => ({ id: member.id, name: member.name }))} />
+        <SessionDocuments campaignId={campaignId} sessionId={session.id} initialDocuments={documents} {...documentRecipients((players.length ? players : members), npcs, shops)} />
       </section>
     </>}
 

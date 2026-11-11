@@ -186,8 +186,10 @@
 - Une police ou un fond ajouté à l'éditeur ajoute sa clé dans `documentFontKeys` ou
   `builtinBackgroundKeys` (sinon Eraser la refuse à l'enregistrement) : Eraser d'abord, puis
   l'extension.
-- Ne jamais renommer les clés enregistrées (colonnes de la feuille, dont « Dossier » et
-  « Modèle », champs du JSON des zones, lignes, formes et images, modes de fusion
+- Ne jamais renommer les clés enregistrées (colonnes de la feuille, dont « Dossier »,
+  « Modèle » et « Pages (JSON) », noms des images dans Drive — `fond`, `rendu`, `impression` pour la
+  première page, `fond-<id>`, `rendu-<n>`, `impression-<n>` pour les suivantes —, champs du JSON des
+  zones, lignes, formes et images, modes de fusion
   `documentBlendModes`, `{"target":"document"}` dans le JSON d'un exemplaire d'inventaire).
 - Un nouvel élément de document (ou un nouveau champ) s'ajoute d'abord au nettoyage de
   `lib/document-model.ts` (sinon Eraser l'efface à l'enregistrement) et à `features` de

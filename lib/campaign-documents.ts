@@ -17,22 +17,23 @@ import {
   updateRanges,
 } from "@/lib/google-sheets"
 import { withAsyncLock } from "@/lib/async-lock"
-import { cleanDocumentBackground, cleanDocumentContent, cleanDocumentFolder, DOCUMENT_ITEM_TYPE, documentAssets, documentItemModifiers, type CampaignDocumentRecord, type DocumentBackground } from "@/lib/document-model"
+import { cleanDocumentBackground, cleanDocumentContent, cleanDocumentFolder, cleanDocumentPages, DOCUMENT_ITEM_TYPE, documentAssets, documentItemModifiers, documentPageCount, MAX_DOCUMENT_PAGES, type CampaignDocumentRecord, type DocumentBackground, type DocumentPage } from "@/lib/document-model"
 import { GROUND_CATEGORY } from "@/lib/inventory-schema"
-import { pdfFromJpeg } from "@/lib/document-pdf"
+import { pdfFromJpegs } from "@/lib/document-pdf"
 import { getSharedMedia, putSharedMedia } from "@/lib/shared-media"
 
 /**
  * Les documents d'une campagne (éditeur : extension Eraser Doc) : une ligne par document dans la
- * feuille « Documents de campagne » (titre, fond, contenu en JSON, dossier, modèle), et dans Drive
- * le fond envoyé depuis l'ordinateur, les images posées et les calques de dessin (« pièces »), le
- * rendu (WebP, lu dans l'application et par Roll20) et l'impression (JPEG sur fond blanc, dont est
- * fait le PDF).
+ * feuille « Documents de campagne » (titre, fond et contenu de la première page en JSON, dossier,
+ * modèle, et les pages suivantes dans « Pages (JSON) »), et dans Drive les fonds envoyés depuis
+ * l'ordinateur, les images posées et les calques de dessin (« pièces »), le rendu de chaque page
+ * (WebP, lu dans l'application et par Roll20) et son impression (JPEG sur fond blanc, dont est
+ * fait le PDF, une page par page).
  */
 
 const COLUMNS = campaignDocumentSheetHeaders.length
 const LAST_COLUMN = columnName(COLUMNS)
-/** Une case Google Sheets tient 50 000 caractères : le contenu reste en dessous. */
+/** Une case Google Sheets tient 50 000 caractères : le contenu (et les pages suivantes) reste en dessous. */
 const MAX_CONTENT_LENGTH = 48_000
 
 async function documentsSheet() {
@@ -67,11 +68,12 @@ function documentFromRow(row: string[]): CampaignDocumentRecord | null {
     updatedAt: row[9] || "",
     folder: cleanDocumentFolder(row[10]),
     template: row[11] === "oui",
+    pages: cleanDocumentPages(parsed(row[12])),
   }
 }
 
 function documentRow(document: CampaignDocumentRecord) {
-  return [document.id, document.campaignId, document.sessionId, document.title, JSON.stringify(document.background), JSON.stringify(document.content), document.renderVersion, document.createdByUid, document.createdAt, document.updatedAt, document.folder, document.template ? "oui" : ""]
+  return [document.id, document.campaignId, document.sessionId, document.title, JSON.stringify(document.background), JSON.stringify(document.content), document.renderVersion, document.createdByUid, document.createdAt, document.updatedAt, document.folder, document.template ? "oui" : "", document.pages.length ? JSON.stringify(document.pages) : ""]
 }
 
 function documentCells(document: CampaignDocumentRecord): Record<string, string> {
@@ -106,13 +108,35 @@ export async function listDocumentTemplates(createdByUid: string) {
     .sort((left, right) => left.title.localeCompare(right.title, "fr"))
 }
 
-/** Une pièce du document : une image posée ou un calque de dessin (son nom dans le contenu). */
-export type DocumentPart = "fond" | "rendu" | "impression" | `piece-${string}`
+/**
+ * Une image du document dans Drive : le fond importé (`fond` pour la première page, `fond-<id>`
+ * pour une autre), le rendu et l'impression d'une page (`rendu`, `impression` pour la première,
+ * `rendu-<n>`, `impression-<n>` pour la n-ième), une pièce (image posée, calque de dessin : son
+ * nom dans le contenu).
+ */
+export type DocumentPart = "fond" | `fond-${string}` | "rendu" | `rendu-${number}` | "impression" | `impression-${number}` | `piece-${string}`
 export const isDocumentPiece = (part: string): part is `piece-${string}` => /^piece-[\w-]{1,80}$/.test(part)
+/** Le fond importé d'une page après la première. */
+export const isDocumentPageBackground = (part: string): part is `fond-${string}` => /^fond-[\w-]{1,80}$/.test(part)
+/** Le rendu (ou l'impression) d'une page : la première garde son ancien nom, lu par les versions d'avant. */
+export const documentRenderPart = (page: number, kind: "rendu" | "impression" = "rendu"): DocumentPart => page > 1 ? `${kind}-${page}` : kind
 
 const mediaKey = (campaignId: string, documentId: string, part: DocumentPart) => `campaigns/${campaignId}/documents/${documentId}/${part}`
 
-export type DocumentFiles = { render?: File | null; print?: File | null; background?: File | null; pieces?: Map<string, File> }
+/**
+ * Les images d'un enregistrement : celles de la première page (`render`, `print`, `background`),
+ * celles des pages suivantes (`pageBackgrounds` par identifiant de page, `pageRenders` et
+ * `pagePrints` par numéro de page, à partir de 2) et les pièces.
+ */
+export type DocumentFiles = {
+  render?: File | null
+  print?: File | null
+  background?: File | null
+  pieces?: Map<string, File>
+  pageBackgrounds?: Map<string, File>
+  pageRenders?: Map<number, File>
+  pagePrints?: Map<number, File>
+}
 
 function checkedImage(file: File | null | undefined, types: RegExp, maxBytes: number) {
   if (!file) return null
@@ -126,38 +150,61 @@ function checkedImage(file: File | null | undefined, types: RegExp, maxBytes: nu
  * Une modification garde son créateur et sa date de création ; un document d'une autre
  * campagne est refusé.
  */
-export async function saveCampaignDocument(campaignId: string, input: { id?: unknown; sessionId?: unknown; title?: unknown; background?: unknown; content?: unknown; folder?: unknown; template?: unknown }, files: DocumentFiles, createdByUid: string) {
+export async function saveCampaignDocument(campaignId: string, input: { id?: unknown; sessionId?: unknown; title?: unknown; background?: unknown; content?: unknown; pages?: unknown; folder?: unknown; template?: unknown }, files: DocumentFiles, createdByUid: string) {
   const id = typeof input.id === "string" && /^[\w-]{1,80}$/.test(input.id) ? input.id : crypto.randomUUID()
   const title = (typeof input.title === "string" ? input.title : "").trim().slice(0, 160) || "Document sans titre"
   const sessionId = typeof input.sessionId === "string" ? input.sessionId.slice(0, 200) : ""
   const background: DocumentBackground = cleanDocumentBackground(input.background)
   const content = cleanDocumentContent(input.content)
   if (JSON.stringify(content).length > MAX_CONTENT_LENGTH) throw new Error("DOCUMENT_TOO_LONG")
-  const render = checkedImage(files.render, /^image\/(webp|png|jpeg)$/, 15 * 1024 * 1024)
+  // Absentes de l'envoi (une version de l'éditeur qui ne connaît pas les pages) : celles d'avant restent.
+  const sentPages = input.pages === undefined ? null : cleanDocumentPages(input.pages)
+  if (sentPages && JSON.stringify(sentPages).length > MAX_CONTENT_LENGTH) throw new Error("DOCUMENT_TOO_LONG")
+  const imageFile = (file: File | null | undefined) => checkedImage(file, /^image\/(webp|png|jpeg)$/, 15 * 1024 * 1024)
+  const render = imageFile(files.render)
   const print = checkedImage(files.print, /^image\/jpeg$/, 15 * 1024 * 1024)
   const uploaded = checkedImage(files.background, /^image\//, 15 * 1024 * 1024)
-  // Seules les pièces que le contenu désigne sont gardées.
-  const assets = new Set(documentAssets(content))
-  const pieces = [...(files.pieces ?? new Map<string, File>())].flatMap(([asset, file]) => assets.has(asset) ? [[asset, checkedImage(file, /^image\/(webp|png|jpeg|gif)$/, 15 * 1024 * 1024)!] as const] : [])
   return withAsyncLock("campaign-documents", async () => {
     const { sheet, columns, rows, raw, startRow } = await readDocumentRows()
     const index = rows.findIndex((row) => row[0] === id)
     const current = index >= 0 ? documentFromRow(rows[index]) : null
     if (index >= 0 && current?.campaignId !== campaignId) throw new Error("DOCUMENT_NOT_FOUND")
+    const pages: DocumentPage[] = sentPages ?? current?.pages ?? []
     if (background.kind === "upload" && !uploaded && current?.background.kind !== "upload") throw new Error("DOCUMENT_BACKGROUND_MISSING")
+    // Le fond importé d'une page arrive avec elle, ou l'a déjà été (la page existait, sur un fond importé).
+    const pageBackgrounds = pages.flatMap((page) => {
+      if (page.background.kind !== "upload") return []
+      const file = checkedImage(files.pageBackgrounds?.get(page.id), /^image\//, 15 * 1024 * 1024)
+      if (!file && current?.pages.find((candidate) => candidate.id === page.id)?.background.kind !== "upload") throw new Error("DOCUMENT_BACKGROUND_MISSING")
+      return file ? [[`fond-${page.id}`, file] as [DocumentPart, File]] : []
+    })
+    // Le rendu et l'impression des pages qui existent ; les autres sont ignorés.
+    const count = documentPageCount({ pages })
+    const pageImages = (found: Map<number, File> | undefined, kind: "rendu" | "impression") => [...(found ?? new Map<number, File>())]
+      .filter(([page]) => Number.isInteger(page) && page >= 2 && page <= count)
+      .map(([page, file]) => [documentRenderPart(page, kind), kind === "rendu" ? imageFile(file)! : checkedImage(file, /^image\/jpeg$/, 15 * 1024 * 1024)!] as [DocumentPart, File])
+    const pageRenders = pageImages(files.pageRenders, "rendu")
+    const pagePrints = pageImages(files.pagePrints, "impression")
+    // Seules les pièces que le contenu désigne sont gardées.
+    const assets = new Set(documentAssets(content, pages))
+    const pieces = [...(files.pieces ?? new Map<string, File>())].flatMap(([asset, file]) => assets.has(asset) ? [[asset, checkedImage(file, /^image\/(webp|png|jpeg|gif)$/, 15 * 1024 * 1024)!] as const] : [])
     // Les images partent ensemble vers Drive (une à une, un document de plusieurs images attendait
     // plusieurs secondes) ; la ligne n'est écrite qu'une fois toutes arrivées.
     const media: Array<[DocumentPart, File]> = [
       ...(uploaded ? [["fond", uploaded] as [DocumentPart, File]] : []),
+      ...pageBackgrounds,
       ...pieces.map(([asset, file]) => [`piece-${asset}`, file] as [DocumentPart, File]),
       ...(render ? [["rendu", render] as [DocumentPart, File]] : []),
       ...(print ? [["impression", print] as [DocumentPart, File]] : []),
+      ...pageRenders,
+      ...pagePrints,
     ]
     await Promise.all(media.map(async ([part, file]) => putSharedMedia(mediaKey(campaignId, id, part), await file.arrayBuffer(), file.type)))
     const now = new Date().toISOString()
     const document: CampaignDocumentRecord = {
-      id, campaignId, sessionId, title, background, content,
-      renderVersion: render ? now : current?.renderVersion || "",
+      id, campaignId, sessionId, title, background, content, pages,
+      // Un rendu (de n'importe quelle page) change la version : les images versionnées sont relues.
+      renderVersion: render || pageRenders.length ? now : current?.renderVersion || "",
       createdByUid: current?.createdByUid || createdByUid,
       createdAt: current?.createdAt || now,
       updatedAt: now,
@@ -237,11 +284,21 @@ export async function readDocumentImage(campaignId: string, documentId: string, 
   return getSharedMedia(mediaKey(campaignId, documentId, part))
 }
 
-/** Le PDF du document, fait de son impression ; `null` tant qu'aucun rendu n'est enregistré. */
-export async function documentPdf(campaignId: string, documentId: string, title: string) {
-  const print = await readDocumentImage(campaignId, documentId, "impression")
-  if (!print) return null
-  return pdfFromJpeg(new Uint8Array(await bytesOf(print)), title)
+/** Le rendu d'une page (la première par défaut), lu dans l'application et par Roll20. */
+export async function readDocumentRender(campaignId: string, documentId: string, page = 1) {
+  return readDocumentImage(campaignId, documentId, documentRenderPart(Number.isInteger(page) && page > 1 ? page : 1))
+}
+
+/**
+ * Le PDF du document, une page par page, fait de leurs impressions ; `null` tant qu'aucun rendu
+ * n'est enregistré. Une page dont l'impression manque (un enregistrement interrompu) est sautée.
+ */
+export async function documentPdf(campaignId: string, documentId: string, title: string, pages = 1) {
+  const prints = await Promise.all(Array.from({ length: Math.max(1, Math.min(pages, MAX_DOCUMENT_PAGES)) }, (_, index) => readDocumentImage(campaignId, documentId, documentRenderPart(index + 1, "impression"))))
+  if (!prints[0]) return null
+  const jpegs: Uint8Array[] = []
+  for (const print of prints) if (print) jpegs.push(new Uint8Array(await bytesOf(print)))
+  return pdfFromJpegs(jpegs, title)
 }
 
 /** Un nom de fichier sûr pour le téléchargement (« Lettre du baron.pdf »). */
@@ -249,6 +306,15 @@ export function documentFileName(title: string, extension: string) {
   const base = title.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z0-9 _-]+/g, "").trim().replace(/\s+/g, " ").slice(0, 80) || "document"
   return `${base}.${extension}`
 }
+
+const documentItem = (document: CampaignDocumentRecord) => ({
+  name: document.title,
+  description: "Un document remis par le MJ : « Lire » l’ouvre en grand.",
+  type: DOCUMENT_ITEM_TYPE,
+  subtype: "",
+  effect: "",
+  modifiers: documentItemModifiers(document.campaignId, document.id),
+})
 
 /**
  * Le document donné à un personnage : un item personnalisé dans son sac (le premier
@@ -260,12 +326,13 @@ export async function giveDocumentToCharacter(document: CampaignDocumentRecord, 
   const container = inventory.containers.find((candidate) => candidate.category === "Inventaire")
     ?? inventory.containers.find((candidate) => candidate.category !== "Bourse" && candidate.category !== "Esthétique" && candidate.category !== GROUND_CATEGORY)
   if (!container) throw new Error("INVENTORY_NO_COMPATIBLE_CONTAINER")
-  return createCharacterInventoryItem(characterId, container.id, {
-    name: document.title,
-    description: "Un document remis par le MJ : « Lire » l’ouvre en grand.",
-    type: DOCUMENT_ITEM_TYPE,
-    subtype: "",
-    effect: "",
-    modifiers: documentItemModifiers(document.campaignId, document.id),
-  })
+  return createCharacterInventoryItem(characterId, container.id, documentItem(document))
+}
+
+/**
+ * Le document donné à un PNJ (un marchand ou un autre) : il arrive dans son Sac à dos, d'où le MJ
+ * le lit, le garde pour une scène ou le fait passer à un joueur comme tout objet.
+ */
+export async function giveDocumentToNpc(document: CampaignDocumentRecord, npcId: string) {
+  return createCharacterInventoryItem(npcId, "", documentItem(document), "npc")
 }

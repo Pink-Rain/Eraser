@@ -514,8 +514,9 @@ n'est pas compilé et garde son comportement.
 
 L'éditeur des documents d'une campagne vit dans l'extension **Eraser Doc** (`Pink-Rain/Eraser_doc`,
 `/extension/doc/campagne/<id>`, menu › Dossier › Document ; l'ancienne `/campagne/[id]/document`
-y renvoie). Il écrit des documents : un fond (fourni avec l'extension, envoyé depuis l'ordinateur
-ou une adresse) et, posés dessus dans l'ordre des calques (`order`), des zones de texte (police
+y renvoie). Il écrit des documents d'une ou plusieurs pages (30 au plus), chaque page avec son fond
+(fourni avec l'extension, envoyé depuis l'ordinateur ou une adresse : le même ou un autre) et, posés
+dessus dans l'ordre des calques (`order`), des zones de texte (police
 dans l'extension, licence OFL, taille, encre, inclinaison), des lignes droites, des formes
 (contour, remplissage uni ou en dégradé), des images et des calques de dessin (tracés à la plume
 dans l'éditeur, enregistrés comme images), chacun avec son mode de fusion (`documentBlendModes`).
@@ -525,30 +526,44 @@ auteur dans toutes ses campagnes. Eraser garde :
 - le modèle pur (`lib/document-model.ts`) : mesures en unités du document (largeur 1000), texte en
   paragraphes de morceaux stylés, clés des polices et des fonds (`documentFontKeys`,
   `builtinBackgroundKeys`, des modes de fusion, des formes, vérifiées à l'enregistrement),
-  nettoyage (zones, lignes, formes, images et calques de dessin, ordre des calques), marque
-  d'inventaire, adresses (`documentImageUrl`, `documentPartUrl`, `documentPdfUrl`,
-  `documentStudioHref`) ; prêté à l'extension ;
+  nettoyage (zones, lignes, formes, images et calques de dessin, ordre des calques, pages :
+  `cleanDocumentPages`), marque d'inventaire, destinataires (`documentRecipients` : joueurs,
+  marchands, PNJ), adresses (`documentImageUrl`, avec la page, `documentPartUrl`,
+  `documentPdfUrl`, `documentStudioHref`) ; prêté à l'extension ;
 - une ligne par document dans la feuille « Documents de campagne » (`lib/campaign-documents.ts`),
-  créée au premier document enregistré ; « ID session » le range dans une session, « Dossier »
-  dans un dossier de l'éditeur, « Modèle » (`oui`) en fait un modèle ;
-- les API : `GET /api/campaigns/[id]/documents` (`?atelier=1` : la campagne, ses sessions, ses
-  joueurs, les modèles du compte et `features`, ce que ce serveur sait garder, pour l'éditeur),
-  `POST` (enregistrer : le rendu WebP et l'impression JPEG sur fond blanc, dessinés dans le
-  navigateur par l'extension, vont dans Drive avec le fond envoyé et les pièces `piece-<nom>` :
-  images posées et calques de dessin, envoyées ensemble vers Drive ; tout est facultatif sauf le
-  document : un éditeur face à un Eraser d'avant l'alpha 286, qui refusait plus de 1 Mo par envoi,
+  créée au premier document enregistré ; « Fond (JSON) » et « Contenu (JSON) » sont la première
+  page (ce que lisent les versions sans pages), « Pages (JSON) » les suivantes (`id`, fond,
+  contenu ; vide pour une page) ; « ID session » le range dans une session, « Dossier » dans un
+  dossier de l'éditeur, « Modèle » (`oui`) en fait un modèle. Dans Drive, la première page garde
+  ses noms d'avant (`fond`, `rendu`, `impression`) ; la n-ième a `rendu-<n>` et `impression-<n>`,
+  et son fond importé `fond-<id de la page>` ;
+- les API : `GET /api/campaigns/[id]/documents` (`?atelier=1` : la campagne, ses sessions, à qui
+  donner — `players`, `merchants`, `npcs` —, les modèles du compte et `features`, ce que ce
+  serveur sait garder, pour l'éditeur : « pages » depuis l'alpha 288),
+  `POST` (enregistrer : le rendu WebP et l'impression JPEG sur fond blanc de chaque page, dessinés
+  dans le navigateur par l'extension — `render`/`print` pour la première, `render-<n>`/`print-<n>`
+  ensuite —, vont dans Drive avec les fonds envoyés — `background`, `background-<id de la
+  page>` — et les pièces `piece-<nom>` : images posées et calques de dessin, envoyées ensemble
+  vers Drive ; tout est facultatif sauf le document, et un document sans `pages` garde celles
+  d'avant : un éditeur face à un Eraser d'avant l'alpha 286, qui refusait plus de 1 Mo par envoi,
   envoie un gros document en plusieurs fois ; depuis, `features` dit « envoi-unique »),
-  `PATCH` (session, dossier, modèle : seuls les champs envoyés changent), `DELETE`, `give`, `image`
-  (`?part=fond` et `?part=piece-<nom>` : au MJ, et à l'auteur d'un modèle depuis ses autres
-  campagnes), `pdf` (une page, `lib/document-pdf.ts`, faite à la demande) ;
-- la lecture : `components/eraser/document-viewer.tsx` (prêté), l'inventaire et le Créateur de
-  session (`session-documents.tsx`, dont « Écrire » et « Modifier » ouvrent l'extension).
+  `GET .../documents/[documentId]` (titre, nombre de pages et version du rendu, pour le lecteur
+  ouvert depuis un inventaire), `PATCH` (session, dossier, modèle : seuls les champs envoyés
+  changent), `DELETE`, `give`, `image` (`?page=<n>` : le rendu d'une page ; `?part=fond`,
+  `?part=fond-<id>` et `?part=piece-<nom>` : au MJ, et à l'auteur d'un modèle depuis ses autres
+  campagnes), `pdf` (une page par page, `lib/document-pdf.ts`, fait à la demande) ;
+- la lecture : `components/eraser/document-viewer.tsx` (prêté : page par page, flèches et ← →),
+  l'inventaire et le Créateur de session (`session-documents.tsx`, dont « Écrire » et
+  « Modifier » ouvrent l'extension).
 
 - Donner un document (`.../documents/[documentId]/give`) pose un item personnalisé dans le sac
-  du personnage ; l’entrée `{"target":"document"}` du JSON de l’exemplaire le désigne, et
-  l’inventaire l’ouvre d’un clic. `keepItemCharges` et `setCharacterInventoryItemModifiers`
-  gardent cette entrée.
-- Roll20 reçoit les documents en handouts (image) et en PDF du Journal (voir plus bas).
+  d'un personnage joueur (`characterId`) ou dans le Sac à dos d'un PNJ (`npcId` : un marchand,
+  c'est-à-dire le PNJ lié à un magasin sauvegardé, ou un autre PNJ de la campagne). « Donner à… »
+  les propose dans cet ordre : joueurs, marchands, PNJ. L’entrée `{"target":"document"}` du JSON
+  de l’exemplaire le désigne, et l’inventaire l’ouvre d’un clic. `keepItemCharges` et
+  `setCharacterInventoryItemModifiers` gardent cette entrée.
+- Roll20 reçoit les documents en handouts (l'image de la première page) et en PDF du Journal
+  (toutes les pages ; voir plus bas).
 
 ## Chat (et ancien tabletop)
 

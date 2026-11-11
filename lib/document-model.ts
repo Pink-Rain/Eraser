@@ -1,6 +1,7 @@
 /**
- * Les documents d'une campagne : une image de fond et, posés dessus, des zones de texte (chacune
- * avec sa police, sa taille, sa couleur et son inclinaison), des lignes droites, des formes
+ * Les documents d'une campagne, d'une ou plusieurs pages : chaque page a son image de fond (la
+ * même ou une autre) et, posés dessus, des zones de texte (chacune avec sa police, sa taille, sa
+ * couleur et son inclinaison), des lignes droites, des formes
  * (contour, remplissage uni ou en dégradé), des images et des calques de dessin (tracés à la main,
  * gardés comme images), chacun avec son mode de fusion. Règle pure, sans navigateur : le
  * serveur (enregistrement, PDF, Roll20), l'inventaire (un document donné) et l'extension Eraser
@@ -148,14 +149,29 @@ export type DocumentContent = {
   order: string[]
 }
 
+/** Un document a 30 pages au plus, la première comprise. */
+export const MAX_DOCUMENT_PAGES = 30
+
+/**
+ * Une page après la première, avec son propre fond (le même ou un autre) et son propre contenu.
+ * La première page reste le fond et le contenu du document : les versions d'Eraser qui ne
+ * connaissent pas les pages la lisent toujours, et un document d'une page n'a pas de `pages`.
+ * Le fond importé d'une page est rangé dans Drive sous `fond-<id>`, son rendu sous `rendu-<n>`
+ * et son impression sous `impression-<n>` (n : son numéro, 2 pour la deuxième page).
+ */
+export type DocumentPage = { id: string; background: DocumentBackground; content: DocumentContent }
+
 export type CampaignDocumentRecord = {
   id: string
   campaignId: string
   /** La session où le document sert (Créateur de session), ou vide. */
   sessionId: string
   title: string
+  /** Le fond et le contenu de la première page. */
   background: DocumentBackground
   content: DocumentContent
+  /** Les pages suivantes, dans l'ordre (vide : un document d'une page). */
+  pages: DocumentPage[]
   /** Change à chaque enregistrement du rendu : sert de version aux images et au PDF. */
   renderVersion: string
   createdByUid: string
@@ -334,9 +350,31 @@ export function cleanDocumentContent(value: unknown): DocumentContent {
   return { version: 1, height, zones, lines, shapes, pictures, order }
 }
 
-/** Les fichiers d'images d'un document (images posées, calques de dessin). */
-export function documentAssets(content: DocumentContent) {
-  return [...new Set(content.pictures.map((picture) => picture.asset))]
+/**
+ * Les pages suivantes d'un document : chacune son fond et son contenu nettoyés, un identifiant
+ * qu'aucune autre ne porte, et pas plus de `MAX_DOCUMENT_PAGES` pages en tout.
+ */
+export function cleanDocumentPages(value: unknown): DocumentPage[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  return value.slice(0, MAX_DOCUMENT_PAGES - 1).flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return []
+    const raw = entry as Record<string, unknown>
+    let id = elementId(raw.id)
+    if (seen.has(id)) id = crypto.randomUUID()
+    seen.add(id)
+    return [{ id, background: cleanDocumentBackground(raw.background), content: cleanDocumentContent(raw.content) }]
+  })
+}
+
+/** Le nombre de pages d'un document (au moins une). */
+export function documentPageCount(document: { pages?: readonly unknown[] }) {
+  return 1 + (Array.isArray(document.pages) ? document.pages.length : 0)
+}
+
+/** Les fichiers d'images d'un document (images posées, calques de dessin), toutes pages comprises. */
+export function documentAssets(content: DocumentContent, pages: readonly DocumentPage[] = []) {
+  return [...new Set([content, ...pages.map((page) => page.content)].flatMap((page) => page.pictures.map((picture) => picture.asset)))]
 }
 
 /** Le texte brut d'un document (recherche, accessibilité). */
@@ -378,20 +416,52 @@ export function documentItemEntries(modifiers: string): Array<{ target: string; 
   return found ? [{ target: DOCUMENT_ITEM_TARGET, value: `${found.campaignId}/${found.documentId}` }] : []
 }
 
+/* ---------- à qui donner un document ---------- */
+
+/** Un destinataire de « Donner à… » : un personnage joueur ou un PNJ (marchand ou non). */
+export type DocumentRecipient = { id: string; name: string; /** Le ou les magasins d'un marchand. */ detail?: string }
+export type DocumentRecipients = { players: DocumentRecipient[]; merchants: DocumentRecipient[]; npcs: DocumentRecipient[] }
+
+/**
+ * Les destinataires d'un document, dans l'ordre où « Donner à… » les propose : les joueurs (dans
+ * l'ordre de la campagne), les marchands (le PNJ lié à un magasin sauvegardé, avec le nom de son
+ * magasin), puis les autres PNJ de la campagne. Un marchand reçoit le document dans son Sac à dos,
+ * comme tout PNJ ; un magasin sans PNJ lié n'a pas de sac où le ranger.
+ */
+export function documentRecipients(players: ReadonlyArray<{ id: string; name: string }>, npcs: ReadonlyArray<{ id: string; name: string }>, shops: ReadonlyArray<{ name: string; npcId: string }>): DocumentRecipients {
+  const shopsOf = new Map<string, string[]>()
+  for (const shop of shops) if (shop.npcId) shopsOf.set(shop.npcId, [...new Set([...(shopsOf.get(shop.npcId) ?? []), shop.name.trim() || "Magasin"])])
+  const named = npcs.filter((npc) => npc.id && npc.name.trim())
+  const byName = (left: DocumentRecipient, right: DocumentRecipient) => left.name.localeCompare(right.name, "fr")
+  return {
+    players: players.map(({ id, name }) => ({ id, name })),
+    merchants: named.filter((npc) => shopsOf.has(npc.id)).map((npc) => ({ id: npc.id, name: npc.name, detail: shopsOf.get(npc.id)!.join(", ") })).sort(byName),
+    npcs: named.filter((npc) => !shopsOf.has(npc.id)).map(({ id, name }) => ({ id, name })).sort(byName),
+  }
+}
+
 /** Le dossier d'un document : un nom court, sans espaces superflus. */
 export function cleanDocumentFolder(value: unknown) {
   return text(value, 200).replace(/\s+/g, " ").trim().slice(0, 80)
 }
 
-/** Un fichier d'image du document (fond importé, image posée, calque de dessin), pour l'éditeur. */
-export function documentPartUrl(campaignId: string, documentId: string, part: "fond" | `piece-${string}`, version = "") {
+/**
+ * Un fichier d'image du document (fond importé de la première page ou d'une autre, `fond-<id>` ;
+ * image posée, calque de dessin), pour l'éditeur.
+ */
+export function documentPartUrl(campaignId: string, documentId: string, part: "fond" | `fond-${string}` | `piece-${string}`, version = "") {
   const query = new URLSearchParams({ part })
   if (version) query.set("v", version.replace(/[^0-9A-Za-z]/g, ""))
   return `/api/campaigns/${encodeURIComponent(campaignId)}/documents/${encodeURIComponent(documentId)}/image?${query}`
 }
 
-export function documentImageUrl(campaignId: string, documentId: string, version = "") {
-  return `/api/campaigns/${encodeURIComponent(campaignId)}/documents/${encodeURIComponent(documentId)}/image${version ? `?v=${encodeURIComponent(version.replace(/[^0-9A-Za-z]/g, ""))}` : ""}`
+/** Le rendu d'une page du document (la première par défaut), lu dans l'application et par Roll20. */
+export function documentImageUrl(campaignId: string, documentId: string, version = "", page = 1) {
+  const query = [
+    ...(version ? [`v=${encodeURIComponent(version.replace(/[^0-9A-Za-z]/g, ""))}`] : []),
+    ...(Number.isInteger(page) && page > 1 ? [`page=${page}`] : []),
+  ].join("&")
+  return `/api/campaigns/${encodeURIComponent(campaignId)}/documents/${encodeURIComponent(documentId)}/image${query ? `?${query}` : ""}`
 }
 
 export function documentPdfUrl(campaignId: string, documentId: string, version = "") {

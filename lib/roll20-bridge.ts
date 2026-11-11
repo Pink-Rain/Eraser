@@ -11,7 +11,8 @@ import { readNpcPortrait } from "@/lib/npc-portraits"
 import type { AuthorizedUser } from "@/lib/server-auth"
 import { listCampaignSessions } from "@/lib/campaign-sessions"
 import { shopForPlayers } from "@/lib/shop-purchase"
-import { documentFileName, documentPdf, listCampaignDocuments, readDocumentImage } from "@/lib/campaign-documents"
+import { documentFileName, documentPdf, listCampaignDocuments, readDocumentRender } from "@/lib/campaign-documents"
+import { documentPageCount } from "@/lib/document-model"
 import { readPortraitFramings } from "@/lib/portrait-framing"
 
 function bytesToBase64Url(bytes: Uint8Array) {
@@ -277,10 +278,11 @@ export async function roll20Image(campaignId: string, kind: string, id: string, 
     const document = (await listCampaignDocuments(campaignId)).find((candidate) => candidate.id === id)
     if (!document) return null
     if (type === "pdf") {
-      const pdf = await documentPdf(campaignId, id, document.title)
+      // Toutes les pages dans le PDF ; le handout montre la première.
+      const pdf = await documentPdf(campaignId, id, document.title, documentPageCount(document))
       return pdf ? { body: pdf, contentType: "application/pdf", fileName: documentFileName(document.title, "pdf") } : null
     }
-    const object = await readDocumentImage(campaignId, id, "rendu")
+    const object = await readDocumentRender(campaignId, id)
     return object ? { body: object.body, contentType: object.httpMetadata?.contentType || "image/webp" } : null
   }
   return null

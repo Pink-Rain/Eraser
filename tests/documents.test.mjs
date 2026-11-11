@@ -4,8 +4,8 @@ import { fileURLToPath } from "node:url";
 
 import { createServer } from "vite";
 
-// Les documents d'une campagne (éditeur : extension Eraser Doc) : leur nettoyage, leur marque dans un inventaire,
-// leur PDF, et le cadrage des tokens par défaut envoyés à Roll20.
+// Les documents d'une campagne (éditeur : extension Eraser Doc) : leur nettoyage (pages comprises), leur marque
+// dans un inventaire, leurs destinataires, leur PDF, et le cadrage des tokens par défaut envoyés à Roll20.
 const root = fileURLToPath(new URL("..", import.meta.url));
 const vite = await createServer({ appType: "custom", configFile: false, root, resolve: { alias: { "@": root } }, server: { middlewareMode: true }, logLevel: "error" });
 after(async () => { await vite.close(); });
@@ -92,6 +92,71 @@ test("le PDF d'un document : une page à l'image du JPEG, table des renvois just
   assert.equal(offsets.length, 6);
   offsets.forEach((offset, index) => assert.ok(text.slice(offset).startsWith(`${index + 1} 0 obj`), `objet ${index + 1}`));
   assert.throws(() => pdf.pdfFromJpeg(new Uint8Array([1, 2, 3]), "x"), /INVALID_JPEG/);
+});
+
+test("les pages après la première : chacune son fond et son contenu nettoyés, des identifiants uniques, 30 pages au plus", () => {
+  const pages = model.cleanDocumentPages([
+    { id: "p2", background: { kind: "builtin", key: "livre" }, content: { height: 800, zones: [{ id: "z1", paragraphs: [[{ text: "Suite" }]] }] } },
+    { id: "p2", background: { kind: "url", url: "javascript:alert(1)" }, content: null },
+    "pas une page",
+    { id: "<script>", background: { kind: "upload" }, content: { height: 1000 } },
+  ]);
+  assert.equal(pages.length, 3);
+  assert.deepEqual(pages[0].background, { kind: "builtin", key: "livre" });
+  assert.equal(pages[0].content.height, 800);
+  assert.equal(pages[0].content.zones[0].paragraphs[0][0].text, "Suite");
+  // Deux pages ne partagent jamais un identifiant, et un identifiant douteux est remplacé.
+  assert.equal(new Set(pages.map((page) => page.id)).size, 3);
+  assert.notEqual(pages[1].id, "p2");
+  assert.match(pages[2].id, /^[\w-]+$/);
+  assert.deepEqual(pages[1].background, { kind: "builtin", key: "parchemin" });
+  assert.deepEqual(pages[2].background, { kind: "upload" });
+  assert.deepEqual(model.cleanDocumentPages("rien"), []);
+  assert.equal(model.cleanDocumentPages(Array.from({ length: 50 }, (_, index) => ({ id: `p${index}` }))).length, model.MAX_DOCUMENT_PAGES - 1);
+  // Une page nettoyée l'est une fois pour toutes.
+  assert.deepEqual(model.cleanDocumentPages(pages), pages);
+  assert.equal(model.documentPageCount({ pages }), 4);
+  assert.equal(model.documentPageCount({}), 1);
+  // Les pièces de toutes les pages sont gardées avec le document.
+  const first = model.cleanDocumentContent({ height: 1000, pictures: [{ id: "a", asset: "sceau" }] });
+  const second = model.cleanDocumentPages([{ id: "p2", content: { height: 1000, pictures: [{ id: "b", asset: "carte" }, { id: "c", asset: "sceau" }] } }]);
+  assert.deepEqual(model.documentAssets(first, second), ["sceau", "carte"]);
+  assert.deepEqual(model.documentAssets(first), ["sceau"]);
+  // Le rendu d'une page : la première garde son adresse d'avant.
+  assert.equal(model.documentImageUrl("c1", "d1", "2026-11-11T10:00:00Z"), "/api/campaigns/c1/documents/d1/image?v=20261111T100000Z");
+  assert.equal(model.documentImageUrl("c1", "d1", "2026-11-11T10:00:00Z", 3), "/api/campaigns/c1/documents/d1/image?v=20261111T100000Z&page=3");
+  assert.equal(model.documentImageUrl("c1", "d1", "", 2), "/api/campaigns/c1/documents/d1/image?page=2");
+  assert.equal(model.documentImageUrl("c1", "d1", "", 1), "/api/campaigns/c1/documents/d1/image");
+  assert.equal(model.documentPartUrl("c1", "d1", "fond-p2", "v1"), "/api/campaigns/c1/documents/d1/image?part=fond-p2&v=v1");
+});
+
+test("« Donner à… » : les joueurs, puis les marchands des magasins sauvegardés, puis les autres PNJ", () => {
+  const players = [{ id: "c2", name: "Zélie", ownerUid: "u1" }, { id: "c1", name: "Arno" }];
+  const npcs = [{ id: "n1", name: "Orla" }, { id: "n2", name: "Bertrand" }, { id: "n3", name: "  " }, { id: "n4", name: "Édouard" }];
+  const shops = [{ name: "La Forge", npcId: "n2" }, { name: "L’Échoppe", npcId: "n2" }, { name: "Sans vendeur", npcId: "" }, { name: "Ailleurs", npcId: "inconnu" }];
+  const recipients = model.documentRecipients(players, npcs, shops);
+  // Les joueurs gardent l'ordre de la campagne ; les PNJ sont rangés par nom.
+  assert.deepEqual(recipients.players, [{ id: "c2", name: "Zélie" }, { id: "c1", name: "Arno" }]);
+  assert.deepEqual(recipients.merchants, [{ id: "n2", name: "Bertrand", detail: "La Forge, L’Échoppe" }]);
+  assert.deepEqual(recipients.npcs, [{ id: "n4", name: "Édouard" }, { id: "n1", name: "Orla" }]);
+  assert.deepEqual(model.documentRecipients([], [], []), { players: [], merchants: [], npcs: [] });
+});
+
+test("le PDF d'un document de plusieurs pages : une page par JPEG, chacune à ses proportions", () => {
+  const tall = Uint8Array.from(jpeg);
+  // Le même JPEG, déclaré 6 × 12 (marqueur SOF) : une page deux fois plus haute que large.
+  const sof = [...tall].findIndex((byte, index) => byte === 0xff && tall[index + 1] === 0xc0);
+  tall[sof + 5] = 0; tall[sof + 6] = 12;
+  const bytes = pdf.pdfFromJpegs([jpeg, tall, jpeg], "Grimoire");
+  const text = Buffer.from(bytes).toString("latin1");
+  assert.match(text, /\/Type \/Pages \/Kids \[3 0 R 6 0 R 9 0 R\] \/Count 3/);
+  assert.deepEqual([...text.matchAll(/\/MediaBox \[0 0 595\.28 ([\d.]+)\]/g)].map((match) => match[1]), ["396.85", "1190.56", "396.85"]);
+  const start = Number(/startxref\n(\d+)/.exec(text)[1]);
+  const offsets = [...text.slice(start).matchAll(/(\d{10}) 00000 n /g)].map((match) => Number(match[1]));
+  assert.equal(offsets.length, 12);
+  offsets.forEach((offset, index) => assert.ok(text.slice(offset).startsWith(`${index + 1} 0 obj`), `objet ${index + 1}`));
+  assert.match(text, /\/Size 13 \/Root 1 0 R \/Info 12 0 R/);
+  assert.throws(() => pdf.pdfFromJpegs([], "x"), /INVALID_JPEG/);
 });
 
 test("le token par défaut du compagnon Roll20 reprend le cadrage enregistré dans Eraser", () => {

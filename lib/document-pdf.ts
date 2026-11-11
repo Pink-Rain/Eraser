@@ -1,5 +1,5 @@
 /**
- * Le PDF d'un document : une seule page, l'image du document (JPEG) à pleine page. Roll20
+ * Le PDF d'un document : une page par page du document, son image (JPEG) à pleine page. Roll20
  * accepte les PDF dans son Journal ; l'application les ouvre dans le lecteur du système.
  * Écrit à la main (quelques objets PDF) : pas de bibliothèque à embarquer pour une image.
  */
@@ -42,13 +42,23 @@ function pdfText(value: string) {
 
 /** Le PDF d'une page dont l'image est ce JPEG ; la page garde ses proportions (largeur A4). */
 export function pdfFromJpeg(jpeg: Uint8Array, title: string): Uint8Array {
-  const size = jpegSize(jpeg)
-  if (!size) throw new Error("INVALID_JPEG")
+  return pdfFromJpegs([jpeg], title)
+}
+
+/**
+ * Le PDF d'un document de plusieurs pages : une page par JPEG, dans l'ordre, chacune à pleine page
+ * et à ses propres proportions (largeur A4) : deux pages sur des fonds différents gardent chacune
+ * leur forme.
+ */
+export function pdfFromJpegs(jpegs: Uint8Array[], title: string): Uint8Array {
+  if (!jpegs.length) throw new Error("INVALID_JPEG")
+  const pages = jpegs.map((jpeg) => {
+    const size = jpegSize(jpeg)
+    if (!size) throw new Error("INVALID_JPEG")
+    return { jpeg, size }
+  })
   const pageWidth = 595.28
-  const pageHeight = Math.round((pageWidth * size.height / size.width) * 100) / 100
-  const colorSpace = size.components === 1 ? "/DeviceGray" : size.components === 4 ? "/DeviceCMYK" : "/DeviceRGB"
   const encoder = new TextEncoder()
-  const drawing = `q ${pageWidth} 0 0 ${pageHeight} 0 0 cm /Im0 Do Q`
   const parts: Uint8Array[] = []
   const offsets: number[] = []
   let length = 0
@@ -63,16 +73,25 @@ export function pdfFromJpeg(jpeg: Uint8Array, title: string): Uint8Array {
     for (const piece of Array.isArray(body) ? body : [body]) push(piece)
     push("\nendobj\n")
   }
+  // 1 : le catalogue, 2 : l'arbre des pages, puis trois objets par page (page, image, dessin), puis les informations.
+  const pageObject = (index: number) => 3 + index * 3
+  const info = 3 + pages.length * 3
   push("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n")
   object(1, "<< /Type /Catalog /Pages 2 0 R >>")
-  object(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
-  object(3, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>`)
-  object(4, [`<< /Type /XObject /Subtype /Image /Width ${size.width} /Height ${size.height} /ColorSpace ${colorSpace} /BitsPerComponent 8 /Filter /DCTDecode${size.components === 4 ? " /Decode [1 0 1 0 1 0 1 0]" : ""} /Length ${jpeg.length} >>\nstream\n`, jpeg, "\nendstream"])
-  object(5, `<< /Length ${encoder.encode(drawing).length} >>\nstream\n${drawing}\nendstream`)
-  object(6, `<< /Title ${pdfText(title || "Document")} /Producer ${pdfText("Eraser")} /Creator ${pdfText("Eraser")} >>`)
+  object(2, `<< /Type /Pages /Kids [${pages.map((_, index) => `${pageObject(index)} 0 R`).join(" ")}] /Count ${pages.length} >>`)
+  pages.forEach(({ jpeg, size }, index) => {
+    const page = pageObject(index)
+    const pageHeight = Math.round((pageWidth * size.height / size.width) * 100) / 100
+    const colorSpace = size.components === 1 ? "/DeviceGray" : size.components === 4 ? "/DeviceCMYK" : "/DeviceRGB"
+    const drawing = `q ${pageWidth} 0 0 ${pageHeight} 0 0 cm /Im0 Do Q`
+    object(page, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /XObject << /Im0 ${page + 1} 0 R >> >> /Contents ${page + 2} 0 R >>`)
+    object(page + 1, [`<< /Type /XObject /Subtype /Image /Width ${size.width} /Height ${size.height} /ColorSpace ${colorSpace} /BitsPerComponent 8 /Filter /DCTDecode${size.components === 4 ? " /Decode [1 0 1 0 1 0 1 0]" : ""} /Length ${jpeg.length} >>\nstream\n`, jpeg, "\nendstream"])
+    object(page + 2, `<< /Length ${encoder.encode(drawing).length} >>\nstream\n${drawing}\nendstream`)
+  })
+  object(info, `<< /Title ${pdfText(title || "Document")} /Producer ${pdfText("Eraser")} /Creator ${pdfText("Eraser")} >>`)
   const xref = length
-  push(`xref\n0 7\n0000000000 65535 f \n${offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("")}`)
-  push(`trailer\n<< /Size 7 /Root 1 0 R /Info 6 0 R >>\nstartxref\n${xref}\n%%EOF\n`)
+  push(`xref\n0 ${info + 1}\n0000000000 65535 f \n${offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("")}`)
+  push(`trailer\n<< /Size ${info + 1} /Root 1 0 R /Info ${info} 0 R >>\nstartxref\n${xref}\n%%EOF\n`)
   const output = new Uint8Array(length)
   let position = 0
   for (const part of parts) { output.set(part, position); position += part.length }
