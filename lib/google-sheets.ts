@@ -3055,7 +3055,8 @@ export const campaignEventSheetHeaders = ["ID", "ID campagne", "Type", "Référe
 // Les documents d'une campagne (page Document) : le fond et les zones de texte (JSON), le rendu dans Drive.
 // « Dossier » et « Modèle » : rangement et modèles de l'éditeur (Eraser Doc), ajoutés à droite.
 // « Pages (JSON) » : les pages après la première (fond et contenu de chacune), ajoutée à droite.
-export const campaignDocumentSheetHeaders = ["ID", "ID campagne", "ID session", "Titre", "Fond (JSON)", "Contenu (JSON)", "Version du rendu", "Créé par", "Créé le", "Modifié le", "Dossier", "Modèle", "Pages (JSON)"]
+// « Journal » : la session dont le journal montre le document aux joueurs, ajoutée à droite.
+export const campaignDocumentSheetHeaders = ["ID", "ID campagne", "ID session", "Titre", "Fond (JSON)", "Contenu (JSON)", "Version du rendu", "Créé par", "Créé le", "Modifié le", "Dossier", "Modèle", "Pages (JSON)", "Journal"]
 export const sessionNoteSheetHeaders = ["ID", "ID campagne", "ID session", "Visibilité", "ID personnage", "Type", "Titre", "Texte", "Moment", "Liens (JSON)", "Quête (JSON)", "Auteur", "UID auteur", "Créé le", "Modifié le", "Ordre"]
 // « Ordre » : la place d'un événement dans la frise de sa session, ajoutée à droite.
 // « Cachés (JSON) » : ce que le MJ n'a pas encore révélé aux joueurs (lib/session-reveal.ts), ajouté à droite.
@@ -4671,6 +4672,25 @@ export async function takeFromShop(pageLinked: string, shopId: string, itemId: s
     const sales = [...(shop.sales ?? []), sale].slice(-200)
     await writeShopSale(sheet, columns, rowNumber, items, sales)
     return { shop: { ...shop, items, sales }, item, position: index }
+  })
+}
+
+/**
+ * Une ligne mise en rayon par le MJ hors du générateur (un document à vendre) : relue juste
+ * avant d'écrire, sous le verrou des magasins. La même ligne déjà en vente reçoit le nouveau prix
+ * (s'il y en a un) et ses exemplaires s'ajoutent ; sinon elle s'ajoute au stock (30 lignes au plus, comme
+ * l'enregistrement d'un magasin). Les ventes du magasin restent.
+ */
+export async function addShopLine(pageLinked: string, shopId: string, line: GeneratedShop["items"][number]) {
+  return withAsyncLock("shops", async () => {
+    const { sheet, columns, shop, rowNumber } = await shopRowFor(pageLinked, shopId)
+    const current = shop.items.find((item) => item.id === line.id)
+    if (!current && shop.items.length >= 30) throw new Error("SHOP_FULL")
+    const items = current
+      ? shop.items.map((item) => item.id === line.id ? { ...item, ...line, price: line.price || item.price, quantity: Math.min(9999, (item.quantity ?? item.maxQuantity ?? 1) + (line.quantity ?? 1)) } : item)
+      : [...shop.items, line]
+    await writeShopSale(sheet, columns, rowNumber, items, shop.sales ?? [])
+    return { shop: { ...shop, items }, added: !current }
   })
 }
 

@@ -17,7 +17,8 @@ const failed = (code: string) => (error: unknown) => {
  */
 // « envoi-unique » : ce serveur accepte un document entier en un envoi (avant, 1 Mo au plus).
 // « pages » : ce serveur garde les pages après la première (« pages » du document, leurs fonds et leurs rendus).
-const DOCUMENT_FEATURES = ["dossiers", "modeles", "calques", "formes", "envoi-unique", "pages"]
+// « journal » : un document se montre ou se cache dans le journal de sa session (`PATCH { journal }`).
+const DOCUMENT_FEATURES = ["dossiers", "modeles", "calques", "formes", "envoi-unique", "pages", "journal"]
 
 /**
  * Les documents de la campagne (éditeur de l'extension Eraser Doc, Créateur de session) : MJ et
@@ -40,7 +41,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       listSavedShops(id).catch(failed("DOCUMENT_STUDIO_SHOPS_FAILED")),
       listDocumentTemplates(manager.account.uid).catch(failed("DOCUMENT_STUDIO_TEMPLATES_FAILED")),
     ])
-    // Joueurs, puis marchands (le PNJ d'un magasin sauvegardé), puis les autres PNJ.
+    // Joueurs, puis marchands (les magasins sauvegardés : le document s'y vend), puis les PNJ.
     const recipients = documentRecipients(members ?? [], npcs ?? [], shops ?? [])
     return NextResponse.json({
       campaign: { id: manager.campaign.id, name: manager.campaign.name },

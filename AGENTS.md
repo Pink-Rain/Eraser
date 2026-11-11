@@ -187,7 +187,8 @@
   `builtinBackgroundKeys` (sinon Eraser la refuse à l'enregistrement) : Eraser d'abord, puis
   l'extension.
 - Ne jamais renommer les clés enregistrées (colonnes de la feuille, dont « Dossier »,
-  « Modèle » et « Pages (JSON) », noms des images dans Drive — `fond`, `rendu`, `impression` pour la
+  « Modèle », « Pages (JSON) » et « Journal », la ligne d'un document en magasin —
+  `source: "document"`, `id: "document:<id>"` —, noms des images dans Drive — `fond`, `rendu`, `impression` pour la
   première page, `fond-<id>`, `rendu-<n>`, `impression-<n>` pour les suivantes —, champs du JSON des
   zones, lignes, formes et images, modes de fusion
   `documentBlendModes`, `{"target":"document"}` dans le JSON d'un exemplaire d'inventaire).

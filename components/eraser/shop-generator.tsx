@@ -27,6 +27,7 @@ import { itemFieldStyle, knownItemField } from "@/lib/item-display"
 import { fetchPersistedShops, persistShops } from "@/components/eraser/shop-persistence"
 import { newNpc, persistNpcs } from "@/components/eraser/npc-manager"
 import { shopItemQuantity, type ShopSale } from "@/lib/shop-purchase"
+import { DOCUMENT_SHOP_SOURCE, documentOfShopItem, documentShopLine } from "@/lib/document-model"
 import { ShopBuyDialog, type ShopPurchaseBinding } from "@/components/eraser/shop-buy-dialog"
 import { builtinShopTypes, findLabels, isShopTypePlace, itemSourceOf, shopPlaceMatcher, shopTypeAllows, shopTypeIcons, shopTypeOf, type ShopTypeDefinition } from "@/lib/shop-types"
 
@@ -882,7 +883,10 @@ export function SavedShopCollection({ initialShops, pageLinked, npcs = [], gener
   /** Un objet vendu remis en vente (le même, au « Nombre max ») ou relancé : une ligne s'ajoute. */
   async function refillSale(shop: GeneratedShop, sale: ShopSale, rarity?: ShopRarity | "same") {
     const source = rarity === "same" ? generatorItems.find((item) => item.id === sale.itemId) : null
-    const line = rarity === "same" ? source && pickedShopItem(source, shop.key, types) : rerollShopItem(generatorItems, shop, rarity, types)
+    // Un document vendu revient en rayon tel quel (au prix payé s'il n'a pas été négocié).
+    const documentId = rarity === "same" ? documentOfShopItem({ id: sale.itemId, source: DOCUMENT_SHOP_SOURCE }) : null
+    const line = documentId ? documentShopLine({ id: documentId, title: sale.name }, sale.quantity === 1 && !sale.negotiated ? sale.price : "", 1)
+      : rarity === "same" ? source && pickedShopItem(source, shop.key, types) : rerollShopItem(generatorItems, shop, rarity, types)
     if (!line) { setNotice(""); setError(rarity === "same" ? `${sale.name} n’est plus dans l’index des items.` : noReplacement(shop, rarity)); return }
     const saved = shop as SavedShopRecord
     const updated = { ...saved, items: [...shop.items, line], sales: (saved.sales ?? []).map((candidate) => candidate.at === sale.at && candidate.itemId === sale.itemId ? { ...candidate, restocked: true } : candidate) }

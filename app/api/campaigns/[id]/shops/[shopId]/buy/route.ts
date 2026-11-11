@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server"
 
+import { getCampaignDocument, giveDocumentToCharacter } from "@/lib/campaign-documents"
+import { documentOfShopItem } from "@/lib/document-model"
 import { addCharacterInventoryItem, readCharacterPurse, replaceCharacterPurse, takeFromShop, undoShopSale } from "@/lib/google-sheets"
 import { notifyItemReceived } from "@/lib/item-notifications"
 import { isPositionalObjectId, positionalFromShopObjectId } from "@/lib/object-item-id"
@@ -32,7 +34,8 @@ export async function GET(request: Request, { params }: Params) {
  * Un achat : le prix (celui du magasin, ou celui négocié à l'oral avec le MJ) sort de la bourse
  * du personnage, les exemplaires entrent dans son inventaire et quittent le magasin, et la
  * vente y est notée. Les exemplaires sont retenus d'abord : si la bourse ou l'inventaire
- * refuse ensuite, tout revient comme avant.
+ * refuse ensuite, tout revient comme avant. Un document en vente (mis en rayon par le MJ depuis
+ * « Donner à… ») arrive comme un document donné : prêt à être lu depuis l'inventaire.
  */
 export async function POST(request: Request, { params }: Params) {
   const { id, shopId } = await params
@@ -56,6 +59,10 @@ export async function POST(request: Request, { params }: Params) {
   if (!item) return refused("Cet item n’est plus en vente.", 409)
   if (quantity > shopItemQuantity(item)) return refused(`Il n’en reste que ${shopItemQuantity(item)}.`, 409)
   if (!negotiated && typeof body.expectedPrice === "string" && body.expectedPrice !== item.price) return refused("Le prix vient de changer : regarde-le avant d’acheter.", 409)
+  // Un document en vente : il doit encore exister (et avoir son image) avant que l'argent ne parte.
+  const documentId = documentOfShopItem(item)
+  const document = documentId ? await getCampaignDocument(id, documentId).catch(() => null) : null
+  if (documentId && !document?.renderVersion) return refused("Ce document n’existe plus : le MJ doit le retirer du magasin.", 409)
 
   const unit = negotiated ? null : priceInCopper(item.price)
   const cost = negotiated ? amountInCopper(typeof negotiated.amount === "number" || typeof negotiated.amount === "string" ? negotiated.amount : "", pay) : unit === null ? null : unit * quantity
@@ -92,21 +99,26 @@ export async function POST(request: Request, { params }: Params) {
 
   let landedOnGround = false
   try {
-    let added
-    try {
-      added = await addCharacterInventoryItem(characterId, itemId, undefined, "character", quantity)
-    } catch (error) {
-      // Un objet sans colonne ID a deux identifiants selon qu'il vient des magasins ou des inventaires.
-      if (!(error instanceof Error) || error.message !== "INVENTORY_ITEM_NOT_FOUND" || isPositionalObjectId(itemId)) throw error
-      added = await addCharacterInventoryItem(characterId, positionalFromShopObjectId(itemId), undefined, "character", quantity)
+    if (document) {
+      // Un exemplaire par document acheté, chacun lisible depuis l'inventaire.
+      for (let copy = 0; copy < quantity; copy += 1) landedOnGround = Boolean((await giveDocumentToCharacter(document, characterId)).landedOnGround) || landedOnGround
+    } else {
+      let added
+      try {
+        added = await addCharacterInventoryItem(characterId, itemId, undefined, "character", quantity)
+      } catch (error) {
+        // Un objet sans colonne ID a deux identifiants selon qu'il vient des magasins ou des inventaires.
+        if (!(error instanceof Error) || error.message !== "INVENTORY_ITEM_NOT_FOUND" || isPositionalObjectId(itemId)) throw error
+        added = await addCharacterInventoryItem(characterId, positionalFromShopObjectId(itemId), undefined, "character", quantity)
+      }
+      landedOnGround = Boolean(added.landedOnGround)
     }
-    landedOnGround = Boolean(added.landedOnGround)
   } catch (error) {
     // L'objet n'est pas entré : l'argent revient et les exemplaires retournent en vitrine.
     await replaceCharacterPurse(characterId, plan.after, purse).catch((refund) => console.error("SHOP_REFUND_FAILED", refund instanceof Error ? refund.message : "UNKNOWN_ERROR"))
     await putBack()
     const code = error instanceof Error ? error.message : ""
-    return refused(code === "INVENTORY_ITEM_NOT_FOUND" ? "Cet item n’est pas dans l’Index des items lu par les inventaires : rien n’a été acheté." : code === "INVENTORY_FULL" ? "L’inventaire est plein : rien n’a été acheté." : "L’item n’a pas pu entrer dans l’inventaire : rien n’a été acheté.", 409)
+    return refused(code === "INVENTORY_ITEM_NOT_FOUND" ? "Cet item n’est pas dans l’Index des items lu par les inventaires : rien n’a été acheté." : code === "INVENTORY_FULL" || code === "INVENTORY_NO_COMPATIBLE_CONTAINER" ? "L’inventaire est plein : rien n’a été acheté." : "L’item n’a pas pu entrer dans l’inventaire : rien n’a été acheté.", 409)
   }
 
   // Le MJ qui fait acheter un joueur : son joueur est prévenu (et son inventaire se relit).

@@ -14,6 +14,8 @@
  * facteur : une zone et son texte gardent leur place sur tous les écrans.
  */
 
+import type { GeneratedShopItem } from "@/lib/shop-schema"
+
 export const DOCUMENT_WIDTH = 1000
 /** Largeur du rendu enregistré (image lue dans l'application, envoyée à Roll20, PDF). */
 export const DOCUMENT_RENDER_WIDTH = 2000
@@ -181,6 +183,12 @@ export type CampaignDocumentRecord = {
   folder: string
   /** Un modèle : proposé à son auteur dans « Nouveau document », dans toutes ses campagnes. */
   template: boolean
+  /**
+   * La session dont le journal montre le document aux joueurs (catégorie Objets) : son « ID
+   * session » quand le MJ l'y a révélé, vide sinon. Un document rangé dans une autre session y
+   * est de nouveau caché (`documentInJournal`).
+   */
+  journal: string
 }
 
 const clamp = (value: unknown, min: number, max: number, fallback: number) => {
@@ -416,27 +424,83 @@ export function documentItemEntries(modifiers: string): Array<{ target: string; 
   return found ? [{ target: DOCUMENT_ITEM_TARGET, value: `${found.campaignId}/${found.documentId}` }] : []
 }
 
+/** Le document est-il dans le journal de sa session, visible des joueurs ? */
+export function documentInJournal(document: Pick<CampaignDocumentRecord, "sessionId"> & { journal?: string }) {
+  return Boolean(document.sessionId) && document.journal === document.sessionId
+}
+
 /* ---------- à qui donner un document ---------- */
 
-/** Un destinataire de « Donner à… » : un personnage joueur ou un PNJ (marchand ou non). */
-export type DocumentRecipient = { id: string; name: string; /** Le ou les magasins d'un marchand. */ detail?: string }
+/**
+ * Un destinataire de « Donner à… » : un personnage joueur, un marchand (un magasin sauvegardé :
+ * le document y est mis en vente) ou un PNJ. `detail` : ce qui le situe (le vendeur et la ville
+ * d'un magasin).
+ */
+export type DocumentRecipient = { id: string; name: string; detail?: string }
 export type DocumentRecipients = { players: DocumentRecipient[]; merchants: DocumentRecipient[]; npcs: DocumentRecipient[] }
 
 /**
  * Les destinataires d'un document, dans l'ordre où « Donner à… » les propose : les joueurs (dans
- * l'ordre de la campagne), les marchands (le PNJ lié à un magasin sauvegardé, avec le nom de son
- * magasin), puis les autres PNJ de la campagne. Un marchand reçoit le document dans son Sac à dos,
- * comme tout PNJ ; un magasin sans PNJ lié n'a pas de sac où le ranger.
+ * l'ordre de la campagne), les marchands (les magasins sauvegardés, avec leur vendeur et leur
+ * ville : le document y entre dans le stock, à vendre), puis les PNJ de la campagne (le document
+ * va dans leur Sac à dos).
  */
-export function documentRecipients(players: ReadonlyArray<{ id: string; name: string }>, npcs: ReadonlyArray<{ id: string; name: string }>, shops: ReadonlyArray<{ name: string; npcId: string }>): DocumentRecipients {
-  const shopsOf = new Map<string, string[]>()
-  for (const shop of shops) if (shop.npcId) shopsOf.set(shop.npcId, [...new Set([...(shopsOf.get(shop.npcId) ?? []), shop.name.trim() || "Magasin"])])
+export function documentRecipients(players: ReadonlyArray<{ id: string; name: string }>, npcs: ReadonlyArray<{ id: string; name: string }>, shops: ReadonlyArray<{ id: string; name: string; npcId: string; cityName?: string }>): DocumentRecipients {
   const named = npcs.filter((npc) => npc.id && npc.name.trim())
+  const nameOf = new Map(named.map((npc) => [npc.id, npc.name]))
   const byName = (left: DocumentRecipient, right: DocumentRecipient) => left.name.localeCompare(right.name, "fr")
   return {
     players: players.map(({ id, name }) => ({ id, name })),
-    merchants: named.filter((npc) => shopsOf.has(npc.id)).map((npc) => ({ id: npc.id, name: npc.name, detail: shopsOf.get(npc.id)!.join(", ") })).sort(byName),
-    npcs: named.filter((npc) => !shopsOf.has(npc.id)).map(({ id, name }) => ({ id, name })).sort(byName),
+    merchants: shops.filter((shop) => shop.id).map((shop) => {
+      const detail = [nameOf.get(shop.npcId) ?? "", shop.cityName?.trim() ?? ""].filter(Boolean).join(" · ")
+      return { id: shop.id, name: shop.name.trim() || "Magasin", ...(detail ? { detail } : {}) }
+    }).sort(byName),
+    npcs: named.map(({ id, name }) => ({ id, name })).sort(byName),
+  }
+}
+
+/* ---------- un document en vente ---------- */
+
+/** La ligne d'un document dans le stock d'un magasin : `source` « document », identifiant « document:<id> ». */
+export const DOCUMENT_SHOP_SOURCE = "document"
+
+export function documentShopItemId(documentId: string) {
+  return `document:${documentId}`
+}
+
+/** Le document qu'une ligne de magasin met en vente, ou `null` pour un item de l'index. */
+export function documentOfShopItem(item: { id: string; source?: string }) {
+  if (item.source !== DOCUMENT_SHOP_SOURCE) return null
+  return /^document:([\w-]{1,80})$/.exec(item.id)?.[1] ?? null
+}
+
+/** Un prix de magasin écrit par le MJ (« 5 PO », « 2 PA 5 PC ») : court, sans retour à la ligne. */
+export function cleanDocumentPrice(value: unknown) {
+  return text(value, 200).replace(/\s+/g, " ").trim().slice(0, 60)
+}
+
+/**
+ * Le document en vente dans un magasin, comme une ligne du stock : son titre, son prix et ses
+ * exemplaires (le MJ les change ensuite comme ceux de tout item). Acheté, il arrive dans
+ * l'inventaire de l'acheteur, prêt à être lu ; avant, on n'en voit que le titre.
+ */
+export function documentShopLine(document: { id: string; title: string }, price: string, quantity: number): GeneratedShopItem {
+  return {
+    id: documentShopItemId(document.id),
+    name: document.title.slice(0, 160) || "Document",
+    description: "Un document : une fois acheté, il se lit depuis l’inventaire.",
+    effect: "",
+    nameHtml: "",
+    descriptionHtml: "",
+    effectHtml: "",
+    type: DOCUMENT_ITEM_TYPE,
+    subtype: "",
+    price: cleanDocumentPrice(price),
+    icon: "📜",
+    source: DOCUMENT_SHOP_SOURCE,
+    locations: [],
+    rarity: "common",
+    quantity: Math.max(1, Math.min(99, Math.floor(quantity) || 1)),
   }
 }
 

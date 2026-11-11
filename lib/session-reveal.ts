@@ -7,7 +7,11 @@
  * d'avant cette colonne n'a rien de caché, son journal reste tel qu'il était.
  * Sans dépendance : le Créateur de session et le journal (serveur) la lisent tous deux.
  */
-export type SessionRevealKind = "character" | "npc" | "shop" | "event" | "place"
+/**
+ * « document » : un document de la session (éditeur Eraser Doc). Lui ne vit pas dans les listes de
+ * la session mais dans sa propre ligne (case « Journal ») : caché tant que le MJ ne l'a pas révélé.
+ */
+export type SessionRevealKind = "character" | "npc" | "shop" | "event" | "place" | "document"
 
 /** La clé d'une chose de la session dans la liste des cachées : « npc:ID », « event:shop:ID »… */
 export function sessionItemKey(kind: SessionRevealKind, id: string) {

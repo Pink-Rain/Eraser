@@ -1,7 +1,9 @@
 import { notFound, redirect } from "next/navigation"
 
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
-import { CampaignJournal, type JournalAuthor, type JournalSessionDetail, type JournalVisual } from "@/components/eraser/campaign-journal"
+import { CampaignJournal, type JournalAuthor, type JournalDocument, type JournalSessionDetail, type JournalVisual } from "@/components/eraser/campaign-journal"
+import { listCampaignDocuments } from "@/lib/campaign-documents"
+import { documentInJournal, documentPageCount } from "@/lib/document-model"
 import { OBJECT_REFERENCE_INDEX, referenceKey, type ReferenceRequest } from "@/lib/index-references"
 import { resolveReferences } from "@/lib/index-references-server"
 import type { SessionNote } from "@/lib/session-note-rules"
@@ -88,7 +90,7 @@ export default async function CampaignJournalPage({ params, searchParams }: { pa
   const viewer = { uid: account.uid, manager: reader.manager }
   // Chaque lecture peut manquer (feuille pas encore créée, Google indisponible) : le reste s'affiche.
   // Les sessions sont lues avec le reste : avant, toutes les autres lectures les attendaient.
-  const [sessions, notes, listedMembers, mine, npcs, shops, events, hiddenCharacters] = await Promise.all([
+  const [sessions, notes, listedMembers, mine, npcs, shops, events, hiddenCharacters, campaignDocuments] = await Promise.all([
     listCampaignSessionsForDisplay(id).catch((error) => {
       console.error("JOURNAL_SESSIONS_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
       return null
@@ -101,6 +103,8 @@ export default async function CampaignJournalPage({ params, searchParams }: { pa
     listSavedShops(id).catch(() => []),
     listCampaignEvents(id).catch(() => []),
     hiddenCampaignCharacters(id),
+    // Les documents des sessions (catégorie Objets) : une feuille illisible n'en montre aucun.
+    listCampaignDocuments(id).catch(() => []),
   ])
   // Un joueur ne voit que ce que le MJ a révélé dans chaque session (Créateur de session), et
   // pas les personnages que le MJ cache aux autres joueurs (les siens restent visibles).
@@ -123,6 +127,12 @@ export default async function CampaignJournalPage({ params, searchParams }: { pa
   // Un joueur ne voit que ce qui est entré dans une session ; la préparation du MJ reste à lui.
   const inSessions = { npcs: new Set(list.flatMap((session) => session.npcIds)), shops: new Set(list.flatMap((session) => [...session.shopIds, ...session.eventIds.filter((entry) => entry.startsWith("shop:")).map((entry) => entry.slice(5))])), events: new Set(list.flatMap((session) => session.eventIds)) }
   const shown = <T extends { id: string }>(items: T[], set: Set<string>) => reader.manager ? items : items.filter((item) => set.has(item.id))
+  // Les documents rangés dans une session et déjà dessinés : le MJ les voit tous (avec leur œil),
+  // un joueur seulement ceux que le MJ a révélés dans le journal de leur session.
+  const sessionIds = new Set(list.map((session) => session.id))
+  const documents: JournalDocument[] = campaignDocuments
+    .filter((document) => document.sessionId && sessionIds.has(document.sessionId) && document.renderVersion && (reader.manager || documentInJournal(document)))
+    .map((document) => ({ id: document.id, title: document.title, sessionId: document.sessionId, version: document.renderVersion, pages: documentPageCount(document), visible: documentInJournal(document) }))
   const detail: JournalSessionDetail[] = list.map((session) => ({
     id: session.id,
     name: session.name,
@@ -173,6 +183,7 @@ export default async function CampaignJournalPage({ params, searchParams }: { pa
             shops={shown(shops, inSessions.shops).map((shop) => ({ id: shop.id, name: shop.name, hint: shop.cityName, items: shop.items.slice(0, 6).map((item) => ({ name: item.name, icon: item.icon, type: item.type, subtype: item.subtype })) }))}
             visuals={visuals}
             authors={authors}
+            documents={documents}
             events={shown(events, inSessions.events).map((event) => ({ id: event.id, name: event.name, image: safeImage(event.image), kind: event.kind, tag: event.tag, tagColor: event.tagColor, description: reader.manager ? event.description : "" }))}
           />}
     </AuthenticatedShell>

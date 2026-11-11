@@ -24,18 +24,20 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
 /**
  * Range le document sans le redessiner : dans une session de la campagne (`sessionId`, vide pour
- * l'en sortir), dans un dossier de l'éditeur (`folder`, vide pour aucun), en modèle (`template`).
- * Seuls les champs envoyés changent.
+ * l'en sortir), dans un dossier de l'éditeur (`folder`, vide pour aucun), en modèle (`template`),
+ * visible ou non des joueurs dans le journal de sa session (`journal`). Seuls les champs envoyés
+ * changent.
  */
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string; documentId: string }> }) {
   const { id, documentId } = await params
   if (!await sessionManager(id)) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
-    const body = (await request.json()) as { sessionId?: unknown; folder?: unknown; template?: unknown }
-    const change: { sessionId?: string; folder?: string; template?: boolean } = {}
+    const body = (await request.json()) as { sessionId?: unknown; folder?: unknown; template?: unknown; journal?: unknown }
+    const change: { sessionId?: string; folder?: string; template?: boolean; journal?: boolean } = {}
     if ("sessionId" in body) change.sessionId = typeof body.sessionId === "string" ? body.sessionId : ""
     if (typeof body.folder === "string") change.folder = body.folder
     if (typeof body.template === "boolean") change.template = body.template
+    if (typeof body.journal === "boolean") change.journal = body.journal
     // Les anciens appels n'envoyaient que la session (éventuellement absente pour « aucune »).
     if (!Object.keys(change).length) change.sessionId = ""
     if (change.sessionId && !(await listCampaignSessions(id)).some((session) => session.id === change.sessionId)) throw new Error("SESSION_NOT_FOUND")

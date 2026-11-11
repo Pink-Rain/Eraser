@@ -9,7 +9,8 @@ import { createServer } from "vite";
 
 // Un document de plusieurs pages enregistré pour de vrai (lib/campaign-documents.ts, sur un Google
 // Sheets en mémoire et des visuels en mémoire) : la colonne « Pages (JSON) » s'ajoute à une feuille
-// d'avant, chaque page garde son fond, son rendu et son impression, et le PDF les met toutes.
+// d'avant, chaque page garde son fond, son rendu et son impression, et le PDF les met toutes. Un
+// document se montre au journal de sa session, et se met en vente dans un magasin.
 const root = fileURLToPath(new URL("..", import.meta.url));
 const dataDir = mkdtempSync(join(tmpdir(), "eraser-documents-"));
 process.env.ERASER_DESKTOP_DATA_DIR = dataDir;
@@ -31,6 +32,8 @@ const google = await vite.ssrLoadModule(fake);
 const shared = await vite.ssrLoadModule(mediaFake);
 const jdr = await vite.ssrLoadModule("/lib/jdr-sheets.ts");
 const documents = await vite.ssrLoadModule("/lib/campaign-documents.ts");
+const sheets = await vite.ssrLoadModule("/lib/google-sheets.ts");
+const model = await vite.ssrLoadModule("/lib/document-model.ts");
 
 const jpeg = Buffer.from("/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAEAAYDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDqaKKK+ZPoT//Z", "base64");
 const file = (name, type = "image/jpeg") => new File([jpeg], name, { type });
@@ -86,4 +89,52 @@ test("un document de trois pages : fonds, rendus et impressions de chaque page, 
   // Rangé sans être redessiné, il garde ses pages.
   const placed = await documents.updateCampaignDocumentPlace("CAMP", "lettre", { folder: "Courrier" });
   assert.deepEqual(placed.pages.map((page) => page.id), ["p2", "p3"]);
+});
+
+test("le journal : un document révélé dans sa session, de nouveau caché dans une autre", async () => {
+  const saved = await documents.saveCampaignDocument("CAMP", { id: "affiche", title: "Avis de recherche", sessionId: "S1", background: { kind: "builtin", key: "parchemin" }, content: content("Recherché") }, { render: file("r.webp", "image/webp") }, "mj");
+  assert.equal(saved.journal, "");
+  const shown = await documents.updateCampaignDocumentPlace("CAMP", "affiche", { journal: true });
+  assert.equal(shown.journal, "S1");
+  assert.equal(model.documentInJournal(await documents.getCampaignDocument("CAMP", "affiche")), true);
+  // Redessiné dans la même session, il y reste ; rangé ailleurs, il y est caché.
+  const redrawn = await documents.saveCampaignDocument("CAMP", { id: "affiche", title: "Avis de recherche", sessionId: "S1", background: { kind: "builtin", key: "parchemin" }, content: content("Recherché !") }, {}, "mj");
+  assert.equal(redrawn.journal, "S1");
+  const moved = await documents.updateCampaignDocumentPlace("CAMP", "affiche", { sessionId: "S2" });
+  assert.equal(moved.journal, "");
+  assert.equal(model.documentInJournal(await documents.getCampaignDocument("CAMP", "affiche")), false);
+  // Le dossier ne touche pas à la visibilité.
+  await documents.updateCampaignDocumentPlace("CAMP", "affiche", { journal: true });
+  assert.equal((await documents.updateCampaignDocumentPlace("CAMP", "affiche", { folder: "Affiches" })).journal, "S2");
+  assert.equal((await documents.updateCampaignDocumentPlace("CAMP", "affiche", { journal: false })).journal, "");
+});
+
+test("un document mis en vente : une ligne du stock, ses exemplaires s'ajoutent, 30 lignes au plus", async () => {
+  const headers = ["ID", "Page lié", "Ville", "Taille de ville", "Type de magasin", "Nom du magasin", "Taille du magasin", "Objets JSON", "Ajouté à la campagne", "ID PNJ lié", "Créé le", "Modifié le", "Ventes JSON"];
+  const item = (id) => ({ id, name: `Item ${id}`, description: "", effect: "", type: "Objet", subtype: "", price: "1 PO", icon: "", locations: [], rarity: "common" });
+  const sale = [{ itemId: "x", name: "Corde", quantity: 1, price: "1 PA", negotiated: false, characterId: "c1", characterName: "Lina", sessionId: "S1", at: "2026-11-11T10:00:00.000Z" }];
+  const row = (id, items, sales = "") => [id, "CAMP", "Brumeval", "village", "market", `Magasin ${id}`, "Petit", JSON.stringify(items), "Oui", "", "", "", sales];
+  google.addSpreadsheet("shops", [{ title: "Magasins", grid: [headers, row("echoppe", [item("a")], JSON.stringify(sale)), row("plein", Array.from({ length: 30 }, (_, index) => item(`p${index}`)))] }]);
+  await jdr.saveJdrSheet({ key: "shops", spreadsheetId: "shops", name: "Magasins", tabName: "Magasins", webViewLink: "" });
+  const letter = await documents.getCampaignDocument("CAMP", "affiche");
+  const first = await documents.sellDocumentInShop(letter, "echoppe", "5 PO", 1);
+  assert.equal(first.added, true);
+  let shop = (await sheets.listSavedShops("CAMP")).find((candidate) => candidate.id === "echoppe");
+  const line = shop.items.find((candidate) => candidate.id === "document:affiche");
+  // Relue dans la feuille, la ligne reste un document (l'achat le reconnaît), et les ventes restent.
+  assert.equal(model.documentOfShopItem(line), "affiche");
+  assert.deepEqual([line.name, line.price, line.quantity], ["Avis de recherche", "5 PO", 1]);
+  assert.equal(shop.sales.length, 1);
+  // Remis en vente : le prix change, les exemplaires s'ajoutent ; sans prix, l'ancien reste.
+  assert.equal((await documents.sellDocumentInShop(letter, "echoppe", "7 PO", 2)).added, false);
+  await documents.sellDocumentInShop(letter, "echoppe", "", 1);
+  shop = (await sheets.listSavedShops("CAMP")).find((candidate) => candidate.id === "echoppe");
+  const again = shop.items.filter((candidate) => candidate.id === "document:affiche");
+  assert.deepEqual(again.map((candidate) => [candidate.price, candidate.quantity]), [["7 PO", 4]]);
+  // Un rayon plein refuse ; un magasin d'une autre campagne aussi.
+  await assert.rejects(documents.sellDocumentInShop(letter, "plein", "1 PO", 1), /SHOP_FULL/);
+  await assert.rejects(documents.sellDocumentInShop({ ...letter, campaignId: "AUTRE" }, "echoppe", "1 PO", 1), /SHOP_NOT_FOUND/);
+  // Vendu : la ligne quitte le stock comme celle de tout item.
+  const sold = await sheets.takeFromShop("CAMP", "echoppe", "document:affiche", 4, { ...sale[0], itemId: "document:affiche", name: "Avis de recherche", quantity: 4, at: "2026-11-11T11:00:00.000Z" });
+  assert.equal(sold.shop.items.some((candidate) => candidate.id === "document:affiche"), false);
 });

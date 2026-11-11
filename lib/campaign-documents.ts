@@ -1,4 +1,5 @@
 import {
+  addShopLine,
   appendRows,
   campaignDocumentSheetHeaders,
   canonicalRow,
@@ -17,7 +18,7 @@ import {
   updateRanges,
 } from "@/lib/google-sheets"
 import { withAsyncLock } from "@/lib/async-lock"
-import { cleanDocumentBackground, cleanDocumentContent, cleanDocumentFolder, cleanDocumentPages, DOCUMENT_ITEM_TYPE, documentAssets, documentItemModifiers, documentPageCount, MAX_DOCUMENT_PAGES, type CampaignDocumentRecord, type DocumentBackground, type DocumentPage } from "@/lib/document-model"
+import { cleanDocumentBackground, cleanDocumentContent, cleanDocumentFolder, cleanDocumentPages, DOCUMENT_ITEM_TYPE, documentAssets, documentItemModifiers, documentPageCount, documentShopLine, MAX_DOCUMENT_PAGES, type CampaignDocumentRecord, type DocumentBackground, type DocumentPage } from "@/lib/document-model"
 import { GROUND_CATEGORY } from "@/lib/inventory-schema"
 import { pdfFromJpegs } from "@/lib/document-pdf"
 import { getSharedMedia, putSharedMedia } from "@/lib/shared-media"
@@ -69,11 +70,12 @@ function documentFromRow(row: string[]): CampaignDocumentRecord | null {
     folder: cleanDocumentFolder(row[10]),
     template: row[11] === "oui",
     pages: cleanDocumentPages(parsed(row[12])),
+    journal: (row[13] || "").slice(0, 200),
   }
 }
 
 function documentRow(document: CampaignDocumentRecord) {
-  return [document.id, document.campaignId, document.sessionId, document.title, JSON.stringify(document.background), JSON.stringify(document.content), document.renderVersion, document.createdByUid, document.createdAt, document.updatedAt, document.folder, document.template ? "oui" : "", document.pages.length ? JSON.stringify(document.pages) : ""]
+  return [document.id, document.campaignId, document.sessionId, document.title, JSON.stringify(document.background), JSON.stringify(document.content), document.renderVersion, document.createdByUid, document.createdAt, document.updatedAt, document.folder, document.template ? "oui" : "", document.pages.length ? JSON.stringify(document.pages) : "", document.journal]
 }
 
 function documentCells(document: CampaignDocumentRecord): Record<string, string> {
@@ -211,6 +213,8 @@ export async function saveCampaignDocument(campaignId: string, input: { id?: unk
       // Absents de l'envoi (une version de l'éditeur qui ne les connaît pas) : ceux d'avant restent.
       folder: input.folder === undefined ? current?.folder ?? "" : cleanDocumentFolder(input.folder),
       template: input.template === undefined ? current?.template ?? false : input.template === true,
+      // Révélé au journal de sa session ; rangé dans une autre session, il y est de nouveau caché.
+      journal: current?.journal && current.journal === sessionId ? current.journal : "",
     }
     if (index >= 0) {
       await updateRanges(sheet.spreadsheetId, namedRowWrites(sheet.tabName, columns, startRow + index, documentCells(document)), { valueInputOption: "RAW" })
@@ -230,10 +234,11 @@ export async function saveCampaignDocument(campaignId: string, input: { id?: unk
 }
 
 /**
- * Range un document sans le redessiner : sa session (ou aucune), son dossier, s'il est un modèle.
- * Seules les cases données changent.
+ * Range un document sans le redessiner : sa session (ou aucune), son dossier, s'il est un modèle,
+ * s'il est visible dans le journal de sa session (`journal`). Seules les cases données changent ;
+ * un document qui change de session y est caché tant que le MJ ne l'a pas révélé.
  */
-export async function updateCampaignDocumentPlace(campaignId: string, documentId: string, change: { sessionId?: string; folder?: string; template?: boolean }) {
+export async function updateCampaignDocumentPlace(campaignId: string, documentId: string, change: { sessionId?: string; folder?: string; template?: boolean; journal?: boolean }) {
   return withAsyncLock("campaign-documents", async () => {
     const { sheet, columns, rows, startRow } = await readDocumentRows()
     const index = rows.findIndex((row) => row[0] === documentId && row[1] === campaignId)
@@ -246,10 +251,13 @@ export async function updateCampaignDocumentPlace(campaignId: string, documentId
       ...(change.template === undefined ? {} : { template: change.template }),
       updatedAt: new Date().toISOString(),
     }
+    const journal = change.journal !== undefined ? change.journal && next.sessionId ? next.sessionId : "" : current.journal === next.sessionId ? current.journal : ""
+    if (journal !== current.journal) next.journal = journal
     const cells: Record<string, string> = { "Modifié le": next.updatedAt }
     if (change.sessionId !== undefined) cells["ID session"] = next.sessionId
     if (change.folder !== undefined) cells.Dossier = next.folder
     if (change.template !== undefined) cells["Modèle"] = next.template ? "oui" : ""
+    if (journal !== current.journal) cells.Journal = journal
     await updateRanges(sheet.spreadsheetId, namedRowWrites(sheet.tabName, columns, startRow + index, cells), { valueInputOption: "RAW" })
     clearSpreadsheetReadCache(sheet.spreadsheetId)
     return next
@@ -335,4 +343,13 @@ export async function giveDocumentToCharacter(document: CampaignDocumentRecord, 
  */
 export async function giveDocumentToNpc(document: CampaignDocumentRecord, npcId: string) {
   return createCharacterInventoryItem(npcId, "", documentItem(document), "npc")
+}
+
+/**
+ * Le document mis en vente dans un magasin sauvegardé de sa campagne : une ligne du stock, à son
+ * prix, avec ses exemplaires (le même document déjà en rayon reçoit le prix et les exemplaires en
+ * plus). Un joueur qui l'achète le reçoit dans son inventaire, prêt à être lu.
+ */
+export async function sellDocumentInShop(document: CampaignDocumentRecord, shopId: string, price: string, quantity: number) {
+  return addShopLine(document.campaignId, shopId, documentShopLine(document, price, quantity))
 }

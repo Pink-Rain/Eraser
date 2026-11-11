@@ -528,13 +528,16 @@ auteur dans toutes ses campagnes. Eraser garde :
   `builtinBackgroundKeys`, des modes de fusion, des formes, vérifiées à l'enregistrement),
   nettoyage (zones, lignes, formes, images et calques de dessin, ordre des calques, pages :
   `cleanDocumentPages`), marque d'inventaire, destinataires (`documentRecipients` : joueurs,
-  marchands, PNJ), adresses (`documentImageUrl`, avec la page, `documentPartUrl`,
+  marchands — les magasins sauvegardés —, PNJ), ligne de magasin (`documentShopLine`,
+  `documentOfShopItem`), visibilité au journal (`documentInJournal`), adresses (`documentImageUrl`, avec la page, `documentPartUrl`,
   `documentPdfUrl`, `documentStudioHref`) ; prêté à l'extension ;
 - une ligne par document dans la feuille « Documents de campagne » (`lib/campaign-documents.ts`),
   créée au premier document enregistré ; « Fond (JSON) » et « Contenu (JSON) » sont la première
   page (ce que lisent les versions sans pages), « Pages (JSON) » les suivantes (`id`, fond,
   contenu ; vide pour une page) ; « ID session » le range dans une session, « Dossier » dans un
-  dossier de l'éditeur, « Modèle » (`oui`) en fait un modèle. Dans Drive, la première page garde
+  dossier de l'éditeur, « Modèle » (`oui`) en fait un modèle, « Journal » (l'ID de la session où
+  le MJ l'a révélé) le montre aux joueurs dans le journal de cette session : rangé dans une autre
+  session, il y est caché. Dans Drive, la première page garde
   ses noms d'avant (`fond`, `rendu`, `impression`) ; la n-ième a `rendu-<n>` et `impression-<n>`,
   et son fond importé `fond-<id de la page>` ;
 - les API : `GET /api/campaigns/[id]/documents` (`?atelier=1` : la campagne, ses sessions, à qui
@@ -548,8 +551,9 @@ auteur dans toutes ses campagnes. Eraser garde :
   d'avant : un éditeur face à un Eraser d'avant l'alpha 286, qui refusait plus de 1 Mo par envoi,
   envoie un gros document en plusieurs fois ; depuis, `features` dit « envoi-unique »),
   `GET .../documents/[documentId]` (titre, nombre de pages et version du rendu, pour le lecteur
-  ouvert depuis un inventaire), `PATCH` (session, dossier, modèle : seuls les champs envoyés
-  changent), `DELETE`, `give`, `image` (`?page=<n>` : le rendu d'une page ; `?part=fond`,
+  ouvert depuis un inventaire), `PATCH` (session, dossier, modèle, `journal` : seuls les champs
+  envoyés changent), `DELETE`, `give`, `shop` (mettre en vente : `shopId`, `price`, `quantity`),
+  `image` (`?page=<n>` : le rendu d'une page ; `?part=fond`,
   `?part=fond-<id>` et `?part=piece-<nom>` : au MJ, et à l'auteur d'un modèle depuis ses autres
   campagnes), `pdf` (une page par page, `lib/document-pdf.ts`, fait à la demande) ;
 - la lecture : `components/eraser/document-viewer.tsx` (prêté : page par page, flèches et ← →),
@@ -557,9 +561,14 @@ auteur dans toutes ses campagnes. Eraser garde :
   « Modifier » ouvrent l'extension).
 
 - Donner un document (`.../documents/[documentId]/give`) pose un item personnalisé dans le sac
-  d'un personnage joueur (`characterId`) ou dans le Sac à dos d'un PNJ (`npcId` : un marchand,
-  c'est-à-dire le PNJ lié à un magasin sauvegardé, ou un autre PNJ de la campagne). « Donner à… »
-  les propose dans cet ordre : joueurs, marchands, PNJ. L’entrée `{"target":"document"}` du JSON
+  d'un personnage joueur (`characterId`) ou dans le Sac à dos d'un PNJ (`npcId`). Le mettre en
+  vente (`.../shop`) ajoute au stock d'un magasin sauvegardé une ligne `source: "document"`,
+  `id: "document:<id>"` (`addShopLine`, sous le verrou des magasins) ; l'achat
+  (`shops/[shopId]/buy`) la reconnaît (`documentOfShopItem`) et pose le document comme un don.
+  « Donner à… » propose dans cet ordre : joueurs, marchands (magasins), PNJ.
+- Le journal d'une campagne range les documents révélés de chaque session dans sa catégorie
+  Objets (lecture page par page) ; le MJ les voit tous, avec leur œil (`SessionRevealKind`
+  « document »), comme le Créateur de session. L’entrée `{"target":"document"}` du JSON
   de l’exemplaire le désigne, et l’inventaire l’ouvre d’un clic. `keepItemCharges` et
   `setCharacterInventoryItemModifiers` gardent cette entrée.
 - Roll20 reçoit les documents en handouts (l'image de la première page) et en PDF du Journal

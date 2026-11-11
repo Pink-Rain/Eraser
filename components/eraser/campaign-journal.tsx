@@ -34,6 +34,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { canEditSessionNote, sessionNoteLabel, sessionNoteType, sessionNotesOf, type SessionLinkKind, type SessionNote, type SessionNoteType } from "@/lib/session-note-rules"
 import type { SessionRevealKind } from "@/lib/session-reveal"
 import { ObjectIcon } from "@/components/eraser/object-icon"
+import { DocumentViewerDialog, type ViewedDocument } from "@/components/eraser/document-viewer"
+import { documentImageUrl } from "@/lib/document-model"
 import { cn } from "@/lib/utils"
 
 // La vitrine d'un magasin n'est chargée qu'à son ouverture : le journal reste léger.
@@ -64,6 +66,11 @@ export type JournalNpc = JournalEntity & { playerNotes?: string }
 /** Un magasin et quelques objets de sa vitrine (icônes de l'Index des items). */
 export type JournalShop = JournalEntity & { items?: Array<{ name: string; icon: string; type: string; subtype: string }> }
 export type JournalEvent = JournalEntity & { kind: string; tag: string; tagColor: string; description: string }
+/**
+ * Un document d'une session (éditeur Eraser Doc), rangé parmi les objets : un joueur ne reçoit
+ * que ceux que le MJ a révélés (`visible`) ; le MJ les reçoit tous, avec leur œil.
+ */
+export type JournalDocument = { id: string; title: string; sessionId: string; version: string; pages: number; visible: boolean }
 
 const dateFormat = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "long", year: "numeric" })
 
@@ -467,7 +474,9 @@ function BannerArrow({ side, session, number, onClick }: { side: "prev" | "next"
  * sessions. À gauche, les notes publiques de la session ; au centre, son récit : bilan,
  * groupe, lieux, PNJs, créatures, objets, magasins, quêtes et frise des événements.
  */
-export function CampaignJournal({ campaignId, campaignName, accentColor, sessions, initialSessionId, initialNotes, notesError = false, viewer, members, npcs, shops, events, visuals = {}, authors = {} }: {
+export function CampaignJournal({ campaignId, campaignName, accentColor, sessions, initialSessionId, initialNotes, notesError = false, viewer, members, npcs, shops, events, visuals = {}, authors = {}, documents = [] }: {
+  /** Les documents des sessions, lus page par page depuis la catégorie Objets. */
+  documents?: JournalDocument[]
   /** Qui a écrit les notes (par compte) : leur étiquette dans le panneau des notes. */
   authors?: Record<string, JournalAuthor>
   campaignId: string
@@ -516,6 +525,9 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
     setHiddenState((state) => ({ sessions, bySession: update(state.sessions === sessions ? state.bySession : {}) }))
   const [openSummaries, setOpenSummaries] = useState<Set<string>>(new Set())
   const [savingReveal, setSavingReveal] = useState<string | null>(null)
+  // Les documents que le MJ vient de révéler ou de cacher (la page n'est pas relue pour si peu).
+  const [documentShown, setDocumentShown] = useState<Record<string, boolean>>({})
+  const [reading, setReading] = useState<ViewedDocument | null>(null)
   const toastTimer = useRef(0)
   const board = useRef<SessionNotesHandle>(null)
   const menu = useRef<HTMLDivElement>(null)
@@ -664,6 +676,8 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
   const creatures = namesIn("creature").filter((name) => !creatureNames.has(same(name)))
   const items = namesIn("item").filter((name) => !lootNames.has(same(name)))
   const summaries = here.filter((note) => note.type === "resume")
+  const documentVisible = (document: JournalDocument) => documentShown[document.id] ?? document.visible
+  const sessionDocuments = documents.filter((document) => document.sessionId === current.id)
   const isNew = (key: string) => firstSeen.get(key) === index
   // La fenêtre « Notes » d'un PNJ : chaque session où il apparaît ou qu'une note lui lie, dans l'ordre.
   const npcHistoryRows: NpcHistoryRow[] = npcHistory ? sessions.flatMap((session, position) => {
@@ -676,10 +690,24 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
   // ambulant (rangé parmi les événements) se cache sous « event:shop:ID ».
   const hiddenKeys = hiddenBySession[current.id] ?? current.hidden ?? []
   const markets = new Set(current.marketIds ?? [])
-  const isHidden = (kind: SessionRevealKind, id: string) => kind === "shop" ? hiddenKeys.includes(`shop:${id}`) || hiddenKeys.includes(`event:shop:${id}`) : hiddenKeys.includes(`${kind}:${id}`)
+  const isHidden = (kind: SessionRevealKind, id: string) => kind === "document" ? !sessionDocuments.some((document) => document.id === id && documentVisible(document))
+    : kind === "shop" ? hiddenKeys.includes(`shop:${id}`) || hiddenKeys.includes(`event:shop:${id}`) : hiddenKeys.includes(`${kind}:${id}`)
+  // Un document se montre ou se cache dans sa propre ligne (case « Journal »), pas dans la session.
+  const toggleDocument = (id: string) => {
+    const document = sessionDocuments.find((candidate) => candidate.id === id)
+    if (!document) return
+    const show = !documentVisible(document)
+    setDocumentShown((all) => ({ ...all, [id]: show }))
+    setSavingReveal(`document:${id}`)
+    fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/documents/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ journal: show }) })
+      .then((response) => { if (!response.ok) throw new Error("JOURNAL_NOT_SAVED") })
+      .catch(() => { setDocumentShown((all) => ({ ...all, [id]: !show })); say("La visibilité n’a pas pu être enregistrée.") })
+      .finally(() => setSavingReveal(null))
+  }
   const reveal = viewer.manager ? {
     isHidden,
     toggle: (kind: SessionRevealKind, id: string) => {
+      if (kind === "document") { toggleDocument(id); return }
       const key = kind === "shop" && markets.has(id) ? `event:shop:${id}` : `${kind}:${id}`
       const hide = !isHidden(kind, id)
       const sessionId = current.id
@@ -722,7 +750,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
     { to: "journal-lieux", label: "Lieux", value: places.length, sub: newPlaces ? plural(newPlaces, "nouveau", "nouveaux") : undefined, kind: "place" },
     { to: "journal-pnjs", label: "PNJs", value: npcCount, sub: newNpcs ? plural(newNpcs, "nouveau", "nouveaux") : undefined, kind: "npc" },
     { to: "journal-creatures", label: "Créatures", value: creatureEvents.length + creatures.length, kind: "creature" },
-    { to: "journal-objets", label: "Objets", value: loot.length + items.length, sub: loot.length ? plural(loot.length, "butin", "butins") : undefined, kind: "item" },
+    { to: "journal-objets", label: "Objets", value: loot.length + items.length + sessionDocuments.length, sub: loot.length ? plural(loot.length, "butin", "butins") : sessionDocuments.length ? plural(sessionDocuments.length, "document", "documents") : undefined, kind: "item" },
     { to: "journal-magasins", label: "Magasins", value: sessionShops.length, kind: "shop" },
     { to: "journal-evenements", label: "Événements", value: otherEvents.length + timeline.length, sub: timeline.length ? `${timeline.length} dans la frise` : undefined, kind: "event" },
   ]
@@ -901,8 +929,18 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
               </div> : <EmptyHint icon={linkKindLabels.creature.icon}>Aucune créature dans cette session.</EmptyHint>}
             </Section>
 
-            <Section id="journal-objets" icon={linkKindLabels.item.icon} title="Objets" count={loot.length + items.length}>
-              {loot.length + items.length ? <div className={cardGrid}>
+            <Section id="journal-objets" icon={linkKindLabels.item.icon} title="Objets" count={loot.length + items.length + sessionDocuments.length}>
+              {loot.length + items.length + sessionDocuments.length ? <div className={cardGrid}>
+                {sessionDocuments.map((document) => {
+                  const read = () => setReading({ campaignId, documentId: document.id, title: document.title, version: document.version, pages: document.pages })
+                  return <EntityCard key={`document:${document.id}`} kind="item" name={document.title} hint={document.pages > 1 ? `${document.pages} pages` : undefined} square reveal={{ kind: "document", id: document.id }}
+                    // eslint-disable-next-line @next/next/no-img-element -- le rendu du document, servi par l'app
+                    media={<img src={documentImageUrl(campaignId, document.id, document.version)} alt="" loading="lazy" className="size-full object-contain" />}
+                    action={<CornerButton icon={BookOpen} label={`Lire ${document.title}`} onClick={read} />}
+                    tags={<Tag dot={linkKindLabels.item.color}>Document</Tag>}>
+                    <button type="button" onClick={read} className="mt-1.5 rounded-sm text-[11.5px] font-medium text-journal-ink underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/50">Lire le document</button>
+                  </EntityCard>
+                })}
                 {loot.map((note) => <EntityCard key={note.id} kind="item" name={note.title || sessionNoteLabel(note, 80)} media={lootMedia(note)} icon={LootIcon} color={sessionNoteType("butin").color} square
                   link={[`note:${note.id}`, ...(note.title ? [`item:${note.title}`] : [])]} tags={<><Tag dot={sessionNoteType("butin").color}>Butin</Tag>{authorLabel(note) && <Tag>noté par {authorLabel(note)}</Tag>}</>}>
                   {note.title && note.text && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{note.text}</p>}
@@ -910,6 +948,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
                 </EntityCard>)}
                 {items.map((name) => <EntityCard key={name} kind="item" name={name} hint={[visualOf(`item:${name}`)?.object?.type, visualOf(`item:${name}`)?.object?.subtype].filter(Boolean).join(" · ") || undefined} media={objectMedia(`item:${name}`, name)} image={visualOf(`item:${name}`)?.image} icon={linkKindLabels.item.icon} square link={`item:${name}`} tags={seenTag(`item:${name}`)} />)}
               </div> : <EmptyHint icon={linkKindLabels.item.icon}>Aucun objet noté. Ajoute une note « Butin » ou lie un objet à une note.</EmptyHint>}
+              <DocumentViewerDialog document={reading} onClose={() => setReading(null)} />
             </Section>
 
             <Section id="journal-magasins" icon={linkKindLabels.shop.icon} title="Magasins" count={sessionShops.length}>

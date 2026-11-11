@@ -130,16 +130,42 @@ test("les pages après la première : chacune son fond et son contenu nettoyés,
   assert.equal(model.documentPartUrl("c1", "d1", "fond-p2", "v1"), "/api/campaigns/c1/documents/d1/image?part=fond-p2&v=v1");
 });
 
-test("« Donner à… » : les joueurs, puis les marchands des magasins sauvegardés, puis les autres PNJ", () => {
+test("« Donner à… » : les joueurs, puis les marchands (les magasins sauvegardés), puis les PNJ", () => {
   const players = [{ id: "c2", name: "Zélie", ownerUid: "u1" }, { id: "c1", name: "Arno" }];
   const npcs = [{ id: "n1", name: "Orla" }, { id: "n2", name: "Bertrand" }, { id: "n3", name: "  " }, { id: "n4", name: "Édouard" }];
-  const shops = [{ name: "La Forge", npcId: "n2" }, { name: "L’Échoppe", npcId: "n2" }, { name: "Sans vendeur", npcId: "" }, { name: "Ailleurs", npcId: "inconnu" }];
+  const shops = [{ id: "s1", name: "La Forge", npcId: "n2", cityName: "Brumeval" }, { id: "s2", name: "Bazar sans vendeur", npcId: "", cityName: "" }, { id: "s3", name: "  ", npcId: "inconnu", cityName: "Ost" }];
   const recipients = model.documentRecipients(players, npcs, shops);
-  // Les joueurs gardent l'ordre de la campagne ; les PNJ sont rangés par nom.
+  // Les joueurs gardent l'ordre de la campagne ; les magasins et les PNJ sont rangés par nom.
   assert.deepEqual(recipients.players, [{ id: "c2", name: "Zélie" }, { id: "c1", name: "Arno" }]);
-  assert.deepEqual(recipients.merchants, [{ id: "n2", name: "Bertrand", detail: "La Forge, L’Échoppe" }]);
-  assert.deepEqual(recipients.npcs, [{ id: "n4", name: "Édouard" }, { id: "n1", name: "Orla" }]);
+  assert.deepEqual(recipients.merchants, [
+    { id: "s2", name: "Bazar sans vendeur" },
+    { id: "s1", name: "La Forge", detail: "Bertrand · Brumeval" },
+    { id: "s3", name: "Magasin", detail: "Ost" },
+  ]);
+  // Un vendeur reste aussi un PNJ, à qui on peut donner le document directement.
+  assert.deepEqual(recipients.npcs.map((npc) => npc.name), ["Bertrand", "Édouard", "Orla"]);
   assert.deepEqual(model.documentRecipients([], [], []), { players: [], merchants: [], npcs: [] });
+});
+
+test("un document en vente : une ligne de magasin à son prix, reconnue à l'achat", () => {
+  const line = model.documentShopLine({ id: "lettre-1", title: "Lettre du baron" }, "  5   PO ", 2);
+  assert.equal(line.id, "document:lettre-1");
+  assert.equal(line.source, model.DOCUMENT_SHOP_SOURCE);
+  assert.deepEqual([line.name, line.price, line.quantity, line.type, line.rarity], ["Lettre du baron", "5 PO", 2, model.DOCUMENT_ITEM_TYPE, "common"]);
+  assert.equal(model.documentOfShopItem(line), "lettre-1");
+  // Un item de l'index, même nommé comme un document, n'en est pas un.
+  assert.equal(model.documentOfShopItem({ id: "document:lettre-1" }), null);
+  assert.equal(model.documentOfShopItem({ id: "../etc", source: "document" }), null);
+  assert.equal(model.documentShopLine({ id: "d", title: "" }, "", 500).quantity, 99);
+  assert.equal(model.cleanDocumentPrice("2 PA\n5 PC"), "2 PA 5 PC");
+  assert.equal(model.cleanDocumentPrice(42), "");
+});
+
+test("un document n'est dans le journal que de la session où le MJ l'a révélé", () => {
+  assert.equal(model.documentInJournal({ sessionId: "s1", journal: "s1" }), true);
+  assert.equal(model.documentInJournal({ sessionId: "s2", journal: "s1" }), false);
+  assert.equal(model.documentInJournal({ sessionId: "", journal: "" }), false);
+  assert.equal(model.documentInJournal({ sessionId: "s1" }), false);
 });
 
 test("le PDF d'un document de plusieurs pages : une page par JPEG, chacune à ses proportions", () => {
