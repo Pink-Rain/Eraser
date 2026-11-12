@@ -1506,6 +1506,12 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   }, [specOf, tables])
   const statValueOf = useCallback((rowKey: string, column: string) => column === TAB_PSEUDO && !locate(rowKey)?.table.headers.some((header) => foldName(header) === foldName(TAB_PSEUDO)) ? parseRowKey(rowKey).tabName : valueOf(rowKey, column), [locate, valueOf])
   const statTabOf = useCallback((rowKey: string) => parseRowKey(rowKey).tabName, [])
+  // Les conditions d'une vue : les valeurs d'une colonne à liste (options, et valeurs déjà écrites d'une liste à ajout libre).
+  const viewValuesOf = useCallback((source: string, header: string) => {
+    const owners = source === ALL_SOURCES ? tables : tables.filter((candidate) => candidate.tabName === source)
+    const owner = owners.find((candidate) => candidate.headers.some((name) => foldName(name) === foldName(header)))
+    return owner ? (specOf(owner.tabName, header).options ?? []).map((option) => option.value).slice(0, 500) : []
+  }, [specOf, tables])
   const statOptionsOf = useCallback((header: string) => {
     const owner = tables.find((candidate) => candidate.headers.some((name) => foldName(name) === foldName(header)))
     return (owner ? specOf(owner.tabName, header).options ?? [] : []).map((option) => ({ value: option.value, color: option.color }))
@@ -2023,6 +2029,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         sources={[{ value: ALL_SOURCES, label: "Tous les onglets de l’index" }, ...tables.map((candidate) => ({ value: candidate.tabName, label: `L’onglet « ${candidate.tabName} »` }))]}
         columnsOf={(source) => [...new Set((source === ALL_SOURCES ? tables : tables.filter((candidate) => candidate.tabName === source)).flatMap((candidate) => (data?.columns[candidate.tabName] ?? []).map((column) => column.header)).filter((header) => !/^id$/i.test(header)))]}
         tabOf={(source) => source === ALL_SOURCES ? tables[0]?.tabName ?? "" : source}
+        valuesOf={viewValuesOf}
         presentations={settings.presentations}
         presets={presentationPresets}
         cards={settings.cards}

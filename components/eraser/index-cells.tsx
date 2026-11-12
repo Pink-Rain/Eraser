@@ -1246,6 +1246,8 @@ export function indexGridColumn(key: string, label: string, input: IndexColumnSp
       break
     case "choice":
       column.control = (rowKey) => <ChoiceCell label={label} value={valueOf(rowKey, key)} options={spec.options ?? []} allowCustom={spec.allowCustom} multiple={spec.multiple} groups={spec.groups} disabled={off(rowKey)} renderValue={extra.renderValue} onChange={(value) => commit(rowKey, key, value)} />
+      // Le filtre de l'en-tête propose « Parchemin » et « Culture », pas « Parchemin, Culture ».
+      if (spec.multiple) column.filterParts = (text) => splitListValue(text, spec.options ?? [], spec.listSeparator)
       break
     case "linked-choice":
       if (spec.source) { const source = spec.source; column.control = (rowKey) => <LinkedChoicePicker label={label} source={source} moreSources={spec.moreSources} separator={spec.listSeparator} strict={spec.strict} multiple={spec.multiple} value={valueOf(rowKey, key)} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} /> }

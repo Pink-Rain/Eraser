@@ -79,6 +79,8 @@ export type SheetGridColumn = {
   sortKey?: (value: string) => number | string
   /** Colonne calculée : ni collée, ni vidée, ni recopiée. */
   computed?: boolean
+  /** Case à plusieurs choix : ses étiquettes (« Parchemin, Culture » → deux), que le filtre par valeurs propose une à une. */
+  filterParts?: (text: string) => string[]
 }
 
 export type SheetGridRow = { key: string; rowNumber: number }
@@ -476,7 +478,8 @@ export function SheetGrid({
   const plainOf = useCallback((rowKey: string, columnKey: string) => richTextPlainText(valueOf(rowKey, columnKey)).replace(/\s+/g, " ").trim(), [valueOf])
   const activeFilters = useMemo(() => Object.entries(filters).filter(([key, filter]) => filterIsActive(filter) && columns.some((column) => column.key === key)), [columns, filters])
   const rows = useMemo(() => {
-    const filtered = activeFilters.length ? sourceRows.filter((row) => activeFilters.every(([key, filter]) => passesFilter(filter, plainOf(row.key, key)))) : sourceRows
+    const partsOf = new Map(columns.flatMap((column) => column.filterParts ? [[column.key, column.filterParts] as const] : []))
+    const filtered = activeFilters.length ? sourceRows.filter((row) => activeFilters.every(([key, filter]) => { const text = plainOf(row.key, key); return passesFilter(filter, text, partsOf.get(key)?.(text)) })) : sourceRows
     if (onSort || !internalSort) return filtered
     const direction = internalSort.direction === "asc" ? 1 : -1
     const sortKey = columns.find((column) => column.key === internalSort.column)?.sortKey
@@ -494,7 +497,10 @@ export function SheetGrid({
     else delete next[key]
     setFilters(next)
   }, [filters, setFilters])
-  const columnValues = useCallback((key: string) => [...new Set(sourceRows.map((row) => plainOf(row.key, key)))].sort(sortValues), [plainOf, sourceRows])
+  const columnValues = useCallback((key: string) => {
+    const split = columns.find((column) => column.key === key)?.filterParts
+    return [...new Set(sourceRows.flatMap((row) => { const text = plainOf(row.key, key); if (!split || !text) return [text]; const parts = split(text); return parts.length ? parts : [text] }))].sort(sortValues)
+  }, [columns, plainOf, sourceRows])
 
   const activate = useCallback((editor: RichTextTarget) => {
     activeRef.current = editor

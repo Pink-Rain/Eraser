@@ -231,7 +231,7 @@ export function savedViewMark(kind: AllPresentationKind) {
  * `draft` pré-remplit une vue nouvelle (« Enregistrer comme vue »), `notice` dit ce qui n'a pas
  * pu en être repris, `usedBy` les pages qui montrent la vue (prévenues avant de la changer).
  */
-export function SavedViewDialog({ open, onOpenChange, index, view, draft, notice, usedBy = [], stats = [], sources, columnsOf, tabOf, presentations, presets, cards, cardsIndex, nextPosition, allowStats = false, onSave, onDelete }: {
+export function SavedViewDialog({ open, onOpenChange, index, view, draft, notice, usedBy = [], stats = [], sources, columnsOf, tabOf, presentations, presets, cards, cardsIndex, nextPosition, allowStats = false, onSave, onDelete, valuesOf }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   index: string
@@ -255,6 +255,8 @@ export function SavedViewDialog({ open, onOpenChange, index, view, draft, notice
   allowStats?: boolean
   onSave: (view: SavedView) => Promise<SavedView>
   onDelete?: (id: string) => Promise<void>
+  /** Les valeurs d'une colonne à liste (options et valeurs déjà écrites) : la condition les suggère en tapant. */
+  valuesOf?: (source: string, column: string) => string[]
 }) {
   const start = view ?? draft ?? null
   const [name, setName] = useState(start?.name ?? "")
@@ -411,7 +413,15 @@ export function SavedViewDialog({ open, onOpenChange, index, view, draft, notice
                 <NativeSelect value={condition.operator} onChange={(event) => change(position, { operator: event.target.value as FilterCondition["operator"] })} aria-label="Comparaison" className="h-9 text-sm">
                   {filterOperators.map((candidate) => <NativeSelectOption key={candidate.value} value={candidate.value}>{candidate.label}</NativeSelectOption>)}
                 </NativeSelect>
-                {operator?.needsValue ? <Input value={condition.value} onChange={(event) => change(position, { value: event.target.value })} placeholder="Valeur" aria-label="Valeur" className="h-9" /> : <span />}
+                {operator?.needsValue ? (() => {
+                  // « Type est … » : les types de l'index se proposent en tapant (une valeur libre reste possible).
+                  const suggested = condition.column ? valuesOf?.(source, condition.column) ?? [] : []
+                  const listId = suggested.length ? `eraser-view-values-${position}` : undefined
+                  return <span className="contents">
+                    <Input value={condition.value} onChange={(event) => change(position, { value: event.target.value })} list={listId} autoComplete="off" placeholder={suggested.length ? "Valeur (choisis ou tape)" : "Valeur"} aria-label="Valeur" className="h-9" />
+                    {listId && <datalist id={listId}>{suggested.map((value) => <option key={value} value={value} />)}</datalist>}
+                  </span>
+                })() : <span />}
                 <button type="button" onClick={() => setConditions((current) => current.filter((_, at) => at !== position))} className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Retirer la condition"><X className="size-3.5" /></button>
               </div>
             })}

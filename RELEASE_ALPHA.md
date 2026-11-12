@@ -1,12 +1,13 @@
-# Eraser 0.1.1-alpha.288 — Les types partout, pas une fois sur deux
+# Eraser 0.1.1-alpha.289 — Les étiquettes jusque dans les filtres
 
-Cette version arrive **sans réinstallation** (même enveloppe que l'alpha 287) : Eraser la
+Cette version arrive **sans réinstallation** (même enveloppe que l'alpha 288) : Eraser la
 télécharge, redémarre son serveur et recharge la page tout seul. Rien ne change dans Google Sheets.
 
-- **Une Liste à ajout libre (« Type » des items…) propose ses valeurs partout.** Dans l'index,
-  elle proposait les types déjà écrits ; dans une page (fiche-page, bloc d'index, « Ajouter » d'un
-  bloc), elle n'en proposait aucun, comme si aucun type n'existait, et la saisie ne suggérait plus
-  rien. Les pages reçoivent maintenant la même liste que l'index : tous les types déjà écrits,
-  étiquette par étiquette, avec la suggestion en tapant.
-- Un joueur, dans une page, ne se voit proposer que les valeurs des lignes qu'il reçoit.
-- L'index et les pages lisent la même règle : ils ne peuvent plus diverger.
+- **Filtre d'une colonne à plusieurs choix** (menu de l'en-tête « Type » du tableau) : il
+  propose chaque étiquette à part (« Parchemin », « Culture ») au lieu de cases entières
+  (« Parchemin, Culture »). Décocher une étiquette masque toute ligne qui la porte ; « Le texte
+  est exactement Culture » trouve aussi les lignes qui ont Culture parmi d'autres étiquettes.
+  Le tableau et la vue qu'en tire « Enregistrer comme vue » montrent les mêmes lignes.
+- **Conditions d'une vue** (« Type est … ») : les valeurs de la colonne se proposent en tapant
+  (options et valeurs déjà écrites), comme dans l'atelier des pages. Une valeur libre reste possible.
+- Un filtre d'avant qui avait décoché une case entière la masque toujours.
