@@ -47,7 +47,7 @@ import { usePersistentState } from "@/hooks/use-persistent-state"
 import { IN_PLACE_ATTRIBUTE, replaceAppUrl, URL_CHANGE_EVENT } from "@/components/eraser/app-tabs"
 import { IndexTabPicker, useIndexTabParam } from "@/components/eraser/index-tab-picker"
 import { buttonPresets, runActionButton, type ActionRuntime } from "@/lib/index-actions"
-import { choiceCorrection, computeRollup, isCheckedValue, isIdHeader, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type ChoiceSource, type IndexColumnSpec, isOpenChoiceSpec, usedChoiceValues, withUsedChoices } from "@/lib/index-columns"
+import { choiceCorrection, computeRollup, isCheckedValue, isIdHeader, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type ChoiceSource, type IndexColumnSpec, choiceValuesOfCell, isOpenChoiceSpec, usedChoiceValues, withUsedChoices } from "@/lib/index-columns"
 import { numberCorrection } from "@/lib/index-numbers"
 import { positionalObjectId } from "@/lib/object-item-id"
 import { ObjectIcon } from "@/components/eraser/object-icon"
@@ -387,15 +387,19 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     ?? worldColumnSpec(indexKey, tab, header, data?.tables.find((candidate) => candidate.tabName === tab)?.headers), [data, indexKey])
   // Une liste à ajout libre propose aussi les valeurs déjà écrites dans la colonne (tous onglets) :
   // une valeur ajoutée une fois se choisit ensuite. Pas pour « Corriger N fautes », qui lit `baseSpecOf`.
+  // Les valeurs écrites ici depuis la dernière lecture dans une Liste à ajout libre (par en-tête replié) :
+  // proposées aussitôt à toutes les lignes, sans attendre que l'index soit relu.
+  const [typedChoices, setTypedChoices] = useState<Record<string, string[]>>({})
   const customChoiceSpecs = useMemo(() => {
     const used = usedChoiceValues(data?.tables ?? [], (tab) => data?.columns[tab])
+    for (const [header, values] of Object.entries(typedChoices)) { const known = used.get(header) ?? new Set<string>(); for (const value of values) known.add(value); used.set(header, known) }
     const specs = new Map<string, IndexColumnSpec>()
     for (const [tab, list] of Object.entries(data?.columns ?? {})) for (const column of list) {
       const spec = withUsedChoices(column.spec, used.get(foldName(column.header)))
       if (spec !== column.spec) specs.set(`${tab}\u0000${foldName(column.header)}`, spec)
     }
     return specs
-  }, [data])
+  }, [data, typedChoices])
   const specOf = useCallback((tab: string, header: string) => customChoiceSpecs.get(`${tab}\u0000${foldName(header)}`) ?? baseSpecOf(tab, header), [baseSpecOf, customChoiceSpecs])
   const links = useMemo(() => data?.links ?? [], [data])
   const tableByName = useMemo(() => new Map(tables.map((candidate) => [candidate.tabName, candidate])), [tables])
@@ -510,6 +514,12 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     const editKey = `${rowKey}:${columnKey}`
     localEdits.current[editKey] = value
     editsInFlight.current[editKey] = (editsInFlight.current[editKey] ?? 0) + 1
+    // Liste à ajout libre : une valeur nouvelle devient tout de suite un choix pour toutes les lignes.
+    const writtenSpec = specOf(found.table.tabName, columnKey)
+    const choiceKey = foldName(columnKey)
+    const known = new Set((writtenSpec.options ?? []).map((option) => foldName(option.value)))
+    const typedNow = isOpenChoiceSpec(writtenSpec) ? choiceValuesOfCell(value, writtenSpec).filter((choice) => !known.has(foldName(choice))) : []
+    if (typedNow.length) setTypedChoices((current) => ({ ...current, [choiceKey]: [...(current[choiceKey] ?? []), ...typedNow] }))
     // Remplissage automatique : les colonnes réglées d'après celle-ci affichent tout de suite leur
     // nouvelle valeur ; le serveur fait la même chose dans la feuille (`lib/index-autofill.ts`).
     const sourceHeader = found.table.headers[column]
@@ -550,6 +560,12 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       }
     } catch (reason) {
       if (!saved) {
+        // Refusée : la valeur nouvelle ne reste pas proposée comme si elle était écrite.
+        if (typedNow.length) setTypedChoices((current) => {
+          const left = [...(current[choiceKey] ?? [])]
+          for (const choice of typedNow) { const at = left.lastIndexOf(choice); if (at >= 0) left.splice(at, 1) }
+          return { ...current, [choiceKey]: left }
+        })
         editsInFlight.current[editKey] -= 1
         // Refusée : la page ne la tient plus pour la valeur de Sheets. La suivante dira avoir vu
         // la vraie valeur, et ne sera pas refusée à son tour comme « changée entre-temps ».
