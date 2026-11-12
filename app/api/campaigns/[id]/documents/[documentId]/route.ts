@@ -2,12 +2,12 @@ import { NextResponse } from "next/server"
 
 import { deleteCampaignDocument, getCampaignDocument, updateCampaignDocumentPlace } from "@/lib/campaign-documents"
 import { listCampaignSessions } from "@/lib/campaign-sessions"
-import { documentPageCount } from "@/lib/document-model"
+import { documentPageCount, documentPageRolesOf } from "@/lib/document-model"
 import { campaignReader, sessionManager } from "@/lib/session-access"
 
 /**
  * Ce qu'il faut pour lire un document (inventaire d'un joueur ou d'un PNJ) : son titre, son nombre
- * de pages et la version de son rendu. Lu par ceux qui lisent la campagne, comme ses images ; rien
+ * de pages (et leur rôle : couverture, image de fin) et la version de son rendu. Lu par ceux qui lisent la campagne, comme ses images ; rien
  * de son contenu.
  */
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string; documentId: string }> }) {
@@ -16,7 +16,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   try {
     const document = await getCampaignDocument(id, documentId)
     if (!document) return NextResponse.json({ error: "Ce document n’existe plus." }, { status: 404 })
-    return NextResponse.json({ id: document.id, title: document.title, pages: documentPageCount(document), renderVersion: document.renderVersion })
+    return NextResponse.json({ id: document.id, title: document.title, pages: documentPageCount(document), roles: documentPageRolesOf(document), renderVersion: document.renderVersion })
   } catch {
     return NextResponse.json({ error: "Le document n’a pas pu être lu." }, { status: 400 })
   }

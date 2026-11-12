@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 
 import { listCampaignDocuments, listDocumentTemplates, saveCampaignDocument } from "@/lib/campaign-documents"
 import { listCampaignSessionsForDisplay } from "@/lib/campaign-sessions"
+import { readDocumentBackgroundLibrary } from "@/lib/document-backgrounds"
 import { documentRecipients } from "@/lib/document-model"
 import { listCampaignMembers, listNpcs, listSavedShops } from "@/lib/google-sheets"
 import { sessionManager } from "@/lib/session-access"
@@ -18,14 +19,16 @@ const failed = (code: string) => (error: unknown) => {
 // « envoi-unique » : ce serveur accepte un document entier en un envoi (avant, 1 Mo au plus).
 // « pages » : ce serveur garde les pages après la première (« pages » du document, leurs fonds et leurs rendus).
 // « journal » : un document se montre ou se cache dans le journal de sa session (`PATCH { journal }`).
-const DOCUMENT_FEATURES = ["dossiers", "modeles", "calques", "formes", "envoi-unique", "pages", "journal"]
+// « fonds » : la bibliothèque des fonds (`library` ci-dessous, fond `{ kind: "library", id }`) et leurs mots-clés.
+// « couvertures » : la couverture et l'image de fin (`content.role`). « relief » : relief et métal des zones de texte.
+const DOCUMENT_FEATURES = ["dossiers", "modeles", "calques", "formes", "envoi-unique", "pages", "journal", "fonds", "couvertures", "relief"]
 
 /**
  * Les documents de la campagne (éditeur de l'extension Eraser Doc, Créateur de session) : MJ et
  * administrateurs. `?atelier=1` : ce qu'il faut à l'éditeur en plus (la campagne, ses sessions, à
- * qui donner un document — ses joueurs, ses marchands et ses autres PNJ —, les modèles du compte et
- * les capacités du serveur) ; une session, un destinataire ou un modèle illisible laisse son menu
- * vide, pas l'éditeur.
+ * qui donner un document — ses joueurs, ses marchands et ses autres PNJ —, les modèles du compte,
+ * la bibliothèque des fonds et les capacités du serveur) ; une session, un destinataire, un modèle
+ * ou une bibliothèque illisible laisse son menu vide, pas l'éditeur.
  */
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -33,13 +36,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (!manager) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
     if (new URL(request.url).searchParams.get("atelier") !== "1") return NextResponse.json({ documents: await listCampaignDocuments(id) })
-    const [documents, sessions, members, npcs, shops, templates] = await Promise.all([
+    const [documents, sessions, members, npcs, shops, templates, library] = await Promise.all([
       listCampaignDocuments(id),
       listCampaignSessionsForDisplay(id).catch(failed("DOCUMENT_STUDIO_SESSIONS_FAILED")),
       listCampaignMembers(id).catch(failed("DOCUMENT_STUDIO_MEMBERS_FAILED")),
       listNpcs(id).catch(failed("DOCUMENT_STUDIO_NPCS_FAILED")),
       listSavedShops(id).catch(failed("DOCUMENT_STUDIO_SHOPS_FAILED")),
       listDocumentTemplates(manager.account.uid).catch(failed("DOCUMENT_STUDIO_TEMPLATES_FAILED")),
+      readDocumentBackgroundLibrary().catch(failed("DOCUMENT_STUDIO_LIBRARY_FAILED")),
     ])
     // Joueurs, puis marchands (les magasins sauvegardés : le document s'y vend), puis les PNJ.
     const recipients = documentRecipients(members ?? [], npcs ?? [], shops ?? [])
@@ -51,6 +55,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       merchants: recipients.merchants,
       npcs: recipients.npcs,
       templates: templates ?? [],
+      // Les fonds de la bibliothèque et les mots-clés des fonds fournis (une lecture qui échoue : ceux d'office).
+      library: library ?? { backgrounds: [], builtin: null },
       features: DOCUMENT_FEATURES,
     })
   } catch {

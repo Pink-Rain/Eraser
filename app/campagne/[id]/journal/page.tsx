@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation"
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { CampaignJournal, type JournalAuthor, type JournalDocument, type JournalSessionDetail, type JournalVisual } from "@/components/eraser/campaign-journal"
 import { listCampaignDocuments } from "@/lib/campaign-documents"
-import { documentInJournal, documentPageCount } from "@/lib/document-model"
+import { documentInJournal, documentPageCount, documentPageRolesOf } from "@/lib/document-model"
 import { OBJECT_REFERENCE_INDEX, referenceKey, type ReferenceRequest } from "@/lib/index-references"
 import { resolveReferences } from "@/lib/index-references-server"
 import type { SessionNote } from "@/lib/session-note-rules"
@@ -132,7 +132,7 @@ export default async function CampaignJournalPage({ params, searchParams }: { pa
   const sessionIds = new Set(list.map((session) => session.id))
   const documents: JournalDocument[] = campaignDocuments
     .filter((document) => document.sessionId && sessionIds.has(document.sessionId) && document.renderVersion && (reader.manager || documentInJournal(document)))
-    .map((document) => ({ id: document.id, title: document.title, sessionId: document.sessionId, version: document.renderVersion, pages: documentPageCount(document), visible: documentInJournal(document) }))
+    .map((document) => ({ id: document.id, title: document.title, sessionId: document.sessionId, version: document.renderVersion, pages: documentPageCount(document), roles: documentPageRolesOf(document), visible: documentInJournal(document) }))
   const detail: JournalSessionDetail[] = list.map((session) => ({
     id: session.id,
     name: session.name,

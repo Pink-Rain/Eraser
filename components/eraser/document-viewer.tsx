@@ -10,8 +10,16 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { documentImageUrl, documentPdfUrl, type DocumentRecipient } from "@/lib/document-model"
 import { cn } from "@/lib/utils"
 
-/** Un document à lire. `pages` : son nombre de pages, s'il est connu (sinon, le lecteur le demande). */
-export type ViewedDocument = { campaignId: string; documentId: string; title: string; version?: string; pages?: number }
+/**
+ * Un document à lire. `pages` : son nombre de pages, s'il est connu (sinon, le lecteur le demande) ;
+ * `roles` : celui de chaque page (« cover » : la couverture, « end » : l'image de fin).
+ */
+export type ViewedDocument = { campaignId: string; documentId: string; title: string; version?: string; pages?: number; roles?: string[] }
+
+/** Comment s'appelle une page dans le lecteur : « Couverture », « Image de fin », ou son numéro. */
+function pageName(role: string | undefined, page: number, pages: number) {
+  return role === "cover" ? "Couverture" : role === "end" ? "Image de fin" : `Page ${page} sur ${pages}`
+}
 
 /**
  * Lire un document : son image en grand (un clic l'agrandit pour lire les petites lignes), page
@@ -32,20 +40,21 @@ function DocumentReader({ document }: { document: ViewedDocument }) {
   const [failed, setFailed] = useState<number[]>([])
   const [page, setPage] = useState(1)
   // Ouvert depuis un inventaire, le lecteur ne sait pas combien le document a de pages : il le demande.
-  const [found, setFound] = useState<{ pages: number; version: string } | null>(null)
+  const [found, setFound] = useState<{ pages: number; version: string; roles: string[] } | null>(null)
   const { campaignId, documentId } = document
   const known = document.pages !== undefined
   useEffect(() => {
     if (known) return
     let alive = true
     fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/documents/${encodeURIComponent(documentId)}`, { cache: "no-store" })
-      .then(async (response) => response.ok ? await response.json() as { pages?: number; renderVersion?: string } : null)
-      .then((info) => { if (alive && info) setFound({ pages: Math.max(1, Math.floor(Number(info.pages) || 1)), version: typeof info.renderVersion === "string" ? info.renderVersion : "" }) })
+      .then(async (response) => response.ok ? await response.json() as { pages?: number; renderVersion?: string; roles?: unknown } : null)
+      .then((info) => { if (alive && info) setFound({ pages: Math.max(1, Math.floor(Number(info.pages) || 1)), version: typeof info.renderVersion === "string" ? info.renderVersion : "", roles: Array.isArray(info.roles) ? info.roles.map(String) : [] }) })
       .catch(() => { /* la première page reste lisible */ })
     return () => { alive = false }
   }, [campaignId, documentId, known])
   const pages = Math.max(1, document.pages ?? found?.pages ?? 1)
   const version = document.version || found?.version || ""
+  const roles = document.roles ?? found?.roles ?? []
   const shown = Math.min(page, pages)
   const pageFailed = failed.includes(shown)
   const go = (next: number) => setPage(Math.min(pages, Math.max(1, next)))
@@ -76,7 +85,7 @@ function DocumentReader({ document }: { document: ViewedDocument }) {
   return <div className="grid min-h-0 gap-3">
     <DialogHeader>
       <DialogTitle className="flex items-center gap-2 font-display text-2xl"><ScrollText className="size-5 text-primary" />{document.title || "Document"}</DialogTitle>
-      <DialogDescription>{pages > 1 ? `Page ${shown} sur ${pages} : les flèches (ou ← et →) tournent les pages, un clic agrandit la page.` : "Clique sur le document pour l’agrandir."}</DialogDescription>
+      <DialogDescription>{pages > 1 ? `${pageName(roles[shown - 1], shown, pages)} : les flèches (ou ← et →) tournent les pages, un clic agrandit la page.` : "Clique sur le document pour l’agrandir."}</DialogDescription>
     </DialogHeader>
     <div className="relative min-h-0">
       <div className={cn("relative min-h-0 overflow-auto rounded-xl bg-[radial-gradient(circle_at_center,rgb(120_90_50/0.18),transparent_70%)]", zoomed ? "max-h-[72vh]" : "max-h-[68vh]")}>
@@ -86,7 +95,7 @@ function DocumentReader({ document }: { document: ViewedDocument }) {
           : <img
             key={shown}
             src={documentImageUrl(campaignId, documentId, version, shown)}
-            alt={pages > 1 ? `${document.title}, page ${shown} sur ${pages}` : document.title}
+            alt={pages > 1 ? `${document.title}, ${pageName(roles[shown - 1], shown, pages).toLocaleLowerCase("fr")}` : document.title}
             onError={() => setFailed((current) => [...new Set([...current, shown])])}
             onClick={() => setZoomed((current) => !current)}
             className={cn("mx-auto block drop-shadow-[0_12px_24px_rgb(40_25_10/0.35)] transition-[width]", zoomed ? "w-[180%] max-w-none cursor-zoom-out" : "max-h-[66vh] w-auto max-w-full cursor-zoom-in object-contain")}
@@ -99,7 +108,7 @@ function DocumentReader({ document }: { document: ViewedDocument }) {
     </div>
     <div className="flex flex-wrap items-center justify-end gap-2">
       {pages > 1 && <span className="mr-auto flex flex-wrap items-center gap-1" role="group" aria-label={`Page ${shown} sur ${pages}`}>
-        {Array.from({ length: pages }, (_, index) => <button key={index} type="button" title={`Page ${index + 1}`} aria-label={`Page ${index + 1}`} aria-current={index + 1 === shown ? "page" : undefined} onClick={() => go(index + 1)} className={cn("h-2 rounded-full transition-all", index + 1 === shown ? "w-5 bg-primary" : "w-2 bg-muted-foreground/30 hover:bg-muted-foreground/60")} />)}
+        {Array.from({ length: pages }, (_, index) => <button key={index} type="button" title={pageName(roles[index], index + 1, pages)} aria-label={pageName(roles[index], index + 1, pages)} aria-current={index + 1 === shown ? "page" : undefined} onClick={() => go(index + 1)} className={cn("h-2 rounded-full transition-all", index + 1 === shown ? "w-5 bg-primary" : "w-2 bg-muted-foreground/30 hover:bg-muted-foreground/60")} />)}
         <span className="ml-1.5 text-xs tabular-nums text-muted-foreground">{shown} / {pages}</span>
       </span>}
       <Button type="button" variant="ghost" size="sm" onClick={() => setZoomed((current) => !current)} disabled={pageFailed}>{zoomed ? <ZoomOut /> : <ZoomIn />}{zoomed ? "Taille normale" : "Agrandir"}</Button>

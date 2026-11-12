@@ -70,7 +70,7 @@ export type JournalEvent = JournalEntity & { kind: string; tag: string; tagColor
  * Un document d'une session (éditeur Eraser Doc), rangé parmi les objets : un joueur ne reçoit
  * que ceux que le MJ a révélés (`visible`) ; le MJ les reçoit tous, avec leur œil.
  */
-export type JournalDocument = { id: string; title: string; sessionId: string; version: string; pages: number; visible: boolean }
+export type JournalDocument = { id: string; title: string; sessionId: string; version: string; pages: number; visible: boolean; /** Le rôle de chaque page (couverture, image de fin). */ roles?: string[] }
 
 const dateFormat = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "long", year: "numeric" })
 
@@ -932,7 +932,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
             <Section id="journal-objets" icon={linkKindLabels.item.icon} title="Objets" count={loot.length + items.length + sessionDocuments.length}>
               {loot.length + items.length + sessionDocuments.length ? <div className={cardGrid}>
                 {sessionDocuments.map((document) => {
-                  const read = () => setReading({ campaignId, documentId: document.id, title: document.title, version: document.version, pages: document.pages })
+                  const read = () => setReading({ campaignId, documentId: document.id, title: document.title, version: document.version, pages: document.pages, roles: document.roles })
                   return <EntityCard key={`document:${document.id}`} kind="item" name={document.title} hint={document.pages > 1 ? `${document.pages} pages` : undefined} square reveal={{ kind: "document", id: document.id }}
                     // eslint-disable-next-line @next/next/no-img-element -- le rendu du document, servi par l'app
                     media={<img src={documentImageUrl(campaignId, document.id, document.version)} alt="" loading="lazy" className="size-full object-contain" />}

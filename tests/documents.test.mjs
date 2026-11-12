@@ -185,6 +185,38 @@ test("le PDF d'un document de plusieurs pages : une page par JPEG, chacune à se
   assert.throws(() => pdf.pdfFromJpegs([], "x"), /INVALID_JPEG/);
 });
 
+test("relief et métal d'une zone : gardés s'ils sont choisis, réglages bornés ; sinon rien", () => {
+  const [gold, flat, odd] = model.cleanDocumentContent({ height: 1000, zones: [
+    { id: "titre", relief: "raised", reliefLight: -45, reliefDepth: 99, reliefSoftness: -3, reliefContrast: 0.8, metal: "gold", paragraphs: [[{ text: "Le Grimoire" }]] },
+    { id: "texte", paragraphs: [] },
+    { id: "bizarre", relief: "volcan", reliefDepth: 4, metal: "plomb", paragraphs: [] },
+  ] }).zones;
+  assert.deepEqual([gold.relief, gold.reliefLight, gold.reliefDepth, gold.reliefSoftness, gold.reliefContrast, gold.metal], ["raised", 315, 30, 0, 0.8, "gold"]);
+  for (const zone of [flat, odd]) for (const key of ["relief", "reliefLight", "reliefDepth", "reliefSoftness", "reliefContrast", "metal"]) assert.equal(key in zone, false, key);
+  assert.equal(model.cleanDocumentZone({ id: "z", relief: "engraved", paragraphs: [] }, 1000).reliefLight, 315);
+  assert.deepEqual([...model.documentReliefs], ["raised", "engraved"]);
+  assert.deepEqual([...model.documentMetals], ["gold", "silver", "bronze", "copper"]);
+});
+
+test("couverture et image de fin : le rôle d'une page est gardé, et lu page par page", () => {
+  const cover = model.cleanDocumentContent({ height: 1000, role: "cover" });
+  assert.equal(cover.role, "cover");
+  assert.equal("role" in model.cleanDocumentContent({ height: 1000, role: "préface" }), false);
+  const pages = model.cleanDocumentPages([{ id: "p2", content: { height: 1000 } }, { id: "p3", content: { height: 1000, role: "end" } }]);
+  assert.deepEqual(model.documentPageRolesOf({ content: cover, pages }), ["cover", "", "end"]);
+  assert.deepEqual(model.documentPageRolesOf({ content: model.cleanDocumentContent({}) }), [""]);
+});
+
+test("un fond de la bibliothèque et ses mots-clés", () => {
+  assert.deepEqual(model.cleanDocumentBackground({ kind: "library", id: "fond-1" }), { kind: "library", id: "fond-1" });
+  assert.deepEqual(model.cleanDocumentBackground({ kind: "library", id: "../x" }), { kind: "builtin", key: "parchemin" });
+  assert.deepEqual(model.cleanBackgroundKeywords(["  Couverture ", "couverture", "Fin", "", 3, "Très   ancien"]), ["Couverture", "Fin", "Très ancien"]);
+  assert.equal(model.cleanBackgroundKeywords(Array.from({ length: 30 }, (_, index) => `mot ${index}`)).length, 12);
+  assert.equal(model.keywordKey(" COUVERTURE "), model.keywordKey(model.COVER_KEYWORD));
+  assert.equal(model.keywordKey("Énigme"), "enigme");
+  assert.equal(model.documentLibraryImageUrl("fond-1"), "/api/documents/fonds/fond-1/image");
+});
+
 test("le token par défaut du compagnon Roll20 reprend le cadrage enregistré dans Eraser", () => {
   const art = globalThis.EraserTokenArt;
   const image = { naturalWidth: 800, naturalHeight: 1200 };

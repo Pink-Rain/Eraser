@@ -541,12 +541,15 @@ n'est pas compilé et garde son comportement.
 
 L'éditeur des documents d'une campagne vit dans l'extension **Eraser Doc** (`Pink-Rain/Eraser_doc`,
 `/extension/doc/campagne/<id>`, menu › Dossier › Document ; l'ancienne `/campagne/[id]/document`
-y renvoie). Il écrit des documents d'une ou plusieurs pages (30 au plus), chaque page avec son fond
-(fourni avec l'extension, envoyé depuis l'ordinateur ou une adresse : le même ou un autre) et, posés
-dessus dans l'ordre des calques (`order`), des zones de texte (police
+y renvoie). Il écrit des documents d'une ou plusieurs pages (30 au plus ; une couverture et une
+image de fin possibles, `content.role`), chaque page avec son fond (fourni avec l'extension, de la
+bibliothèque, envoyé depuis l'ordinateur ou une adresse : le même ou un autre) et, posés dessus
+dans l'ordre des calques (`order`), des zones de texte (police
 dans l'extension, licence OFL, taille, encre, inclinaison), des lignes droites, des formes
 (contour, remplissage uni ou en dégradé), des images et des calques de dessin (tracés à la plume
-dans l'éditeur, enregistrés comme images), chacun avec son mode de fusion (`documentBlendModes`).
+dans l'éditeur, enregistrés comme images), chacun avec son mode de fusion (`documentBlendModes`) ;
+une zone de texte peut être en relief (`relief` : sortant ou gravé, avec sa lumière) et métallisée
+(`metal` : or, argent, bronze, cuivre).
 Les documents se rangent en dossiers (un niveau) ; un document marqué « modèle » est proposé à son
 auteur dans toutes ses campagnes. Eraser garde :
 
@@ -583,7 +586,15 @@ auteur dans toutes ses campagnes. Eraser garde :
   `image` (`?page=<n>` : le rendu d'une page ; `?part=fond`,
   `?part=fond-<id>` et `?part=piece-<nom>` : au MJ, et à l'auteur d'un modèle depuis ses autres
   campagnes), `pdf` (une page par page, `lib/document-pdf.ts`, fait à la demande) ;
-- la lecture : `components/eraser/document-viewer.tsx` (prêté : page par page, flèches et ← →),
+- la bibliothèque des fonds (`lib/document-backgrounds.ts`, `/api/documents/fonds` : liste pour
+  MJ et administrateurs, ajout, nom, mots-clés et retrait pour les administrateurs, `…/[id]/image`) :
+  la liste et les mots-clés des fonds fournis sur le serveur partagé (portée
+  `document-backgrounds`), les images dans Drive (`documents/fonds/<id>`) ; un fond retiré garde son
+  image pour les documents qui s'en servent. Elle se gère depuis la roue d'Eraser Doc
+  (`administration.extension`) ; « Couverture » et « Fin » (`COVER_KEYWORD`, `END_KEYWORD`)
+  proposent un fond d'abord pour la couverture et pour l'image de fin ;
+- la lecture : `components/eraser/document-viewer.tsx` (prêté : page par page, flèches et ← →,
+  « Couverture » et « Image de fin »),
   l'inventaire et le Créateur de session (`session-documents.tsx`, dont « Écrire » et
   « Modifier » ouvrent l'extension).
 

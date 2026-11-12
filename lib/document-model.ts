@@ -52,8 +52,30 @@ export type DocumentZone = {
   ink: boolean
   /** Le mode de fusion choisi ; absent, celui d'`ink` (produit ou normal). */
   blend?: DocumentBlendMode
+  /**
+   * Le relief du texte (un titre en relief) : `raised`, il sort du papier (éclairé du côté de la
+   * lumière, ombré de l'autre, avec son ombre portée) ; `engraved`, il y est gravé (l'inverse).
+   * Absent : à plat. Ses réglages sont en unités du document.
+   */
+  relief?: DocumentRelief
+  /** D'où vient la lumière, en degrés : 0 en haut, 90 à droite, 180 en bas, 270 à gauche. */
+  reliefLight?: number
+  /** La hauteur du relief (le décalage de la lumière et de l'ombre). */
+  reliefDepth?: number
+  /** Le flou de la lumière et de l'ombre. */
+  reliefSoftness?: number
+  /** La force de la lumière et de l'ombre, de 0,1 à 1. */
+  reliefContrast?: number
+  /** Le texte métallisé (or, argent, bronze, cuivre), avec un reflet sur chaque ligne ; absent : son encre. */
+  metal?: DocumentMetal
   paragraphs: DocumentParagraph[]
 }
+
+/** Les reliefs et les métaux d'une zone de texte. Clés enregistrées : ne jamais en renommer une. */
+export const documentReliefs = ["raised", "engraved"] as const
+export type DocumentRelief = (typeof documentReliefs)[number]
+export const documentMetals = ["gold", "silver", "bronze", "copper"] as const
+export type DocumentMetal = (typeof documentMetals)[number]
 
 /**
  * Les modes de fusion d'un élément avec ce qui est dessous (fond, autres éléments), les mêmes dans
@@ -139,6 +161,36 @@ export type DocumentBackground =
   /** Une image envoyée depuis l'ordinateur, rangée dans Drive avec le document. */
   | { kind: "upload" }
   | { kind: "url"; url: string }
+  /** Un fond de la bibliothèque (ajouté par un administrateur, roue de réglages d'Eraser Doc). */
+  | { kind: "library"; id: string }
+
+/**
+ * Un fond de la bibliothèque : ajouté par un administrateur (Administration › Extensions, roue
+ * d'Eraser Doc), partagé par toutes les campagnes. Ses mots-clés le rangent quand on choisit un
+ * fond ; « Couverture » et « Fin » le proposent d'abord pour la couverture et l'image de fin.
+ */
+export type DocumentLibraryBackground = { id: string; name: string; keywords: string[]; updatedAt: string }
+
+/** Les mots-clés qui proposent un fond pour la couverture et pour l'image de fin d'un document. */
+export const COVER_KEYWORD = "Couverture"
+export const END_KEYWORD = "Fin"
+
+/** Un mot-clé comparé sans majuscules ni accents (« couverture » est « Couverture »). */
+export function keywordKey(value: string) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLocaleLowerCase("fr")
+}
+
+/** Les mots-clés d'un fond : courts, sans doublons (à la casse et aux accents près), douze au plus. */
+export function cleanBackgroundKeywords(value: unknown) {
+  const seen = new Set<string>()
+  return (Array.isArray(value) ? value : []).flatMap((entry) => {
+    const word = text(entry, 80).replace(/\s+/g, " ").trim().slice(0, 40)
+    const key = keywordKey(word)
+    if (!word || seen.has(key)) return []
+    seen.add(key)
+    return [word]
+  }).slice(0, 12)
+}
 
 export type DocumentContent = {
   version: 1
@@ -149,7 +201,12 @@ export type DocumentContent = {
   pictures: DocumentPicture[]
   /** Les identifiants de tous les éléments, du plus bas au plus haut (l'ordre des calques). */
   order: string[]
+  /** La page est la couverture (toujours la première) ou l'image de fin (toujours la dernière). */
+  role?: DocumentPageRole
 }
+
+export const documentPageRoles = ["cover", "end"] as const
+export type DocumentPageRole = (typeof documentPageRoles)[number]
 
 /** Un document a 30 pages au plus, la première comprise. */
 export const MAX_DOCUMENT_PAGES = 30
@@ -254,7 +311,24 @@ export function cleanDocumentZone(value: unknown, height: number): DocumentZone 
     opacity: clamp(raw.opacity, 0.05, 1, 1),
     ink: raw.ink !== false,
     ...(isBlendMode(raw.blend) ? { blend: raw.blend } : {}),
+    ...cleanZoneEffects(raw),
     paragraphs,
+  }
+}
+
+/** Le relief et le métal d'une zone : gardés seulement s'ils sont choisis, leurs réglages bornés. */
+function cleanZoneEffects(raw: Record<string, unknown>): Pick<DocumentZone, "relief" | "reliefLight" | "reliefDepth" | "reliefSoftness" | "reliefContrast" | "metal"> {
+  const relief = (documentReliefs as readonly unknown[]).includes(raw.relief) ? raw.relief as DocumentRelief : null
+  const metal = (documentMetals as readonly unknown[]).includes(raw.metal) ? raw.metal as DocumentMetal : null
+  return {
+    ...(relief ? {
+      relief,
+      reliefLight: ((Math.round(clamp(raw.reliefLight, -360, 720, 315)) % 360) + 360) % 360,
+      reliefDepth: clamp(raw.reliefDepth, 0.2, 30, 2),
+      reliefSoftness: clamp(raw.reliefSoftness, 0, 20, 1),
+      reliefContrast: clamp(raw.reliefContrast, 0.1, 1, 0.6),
+    } : {}),
+    ...(metal ? { metal } : {}),
   }
 }
 
@@ -333,6 +407,7 @@ export function cleanDocumentBackground(value: unknown): DocumentBackground {
       } catch { /* adresse illisible : le fond par défaut */ }
     }
     if (raw.kind === "builtin" && (builtinBackgroundKeys as readonly string[]).includes(text(raw.key, 20))) return { kind: "builtin", key: raw.key as BuiltinBackgroundKey }
+    if (raw.kind === "library" && /^[\w-]{1,80}$/.test(text(raw.id, 80))) return { kind: "library", id: text(raw.id, 80) }
   }
   return { kind: "builtin", key: "parchemin" }
 }
@@ -355,7 +430,8 @@ export function cleanDocumentContent(value: unknown): DocumentContent {
   // L'ordre des calques : ceux qu'il nomme, puis les autres (texte, lignes, formes, images), au-dessus.
   const listed = Array.isArray(raw.order) ? raw.order.filter((id): id is string => typeof id === "string" && seen.has(id)) : []
   const order = [...new Set([...listed, ...zones.map((zone) => zone.id), ...lines.map((line) => line.id), ...shapes.map((shape) => shape.id), ...pictures.map((picture) => picture.id)])]
-  return { version: 1, height, zones, lines, shapes, pictures, order }
+  const role = (documentPageRoles as readonly unknown[]).includes(raw.role) ? raw.role as DocumentPageRole : null
+  return { version: 1, height, zones, lines, shapes, pictures, order, ...(role ? { role } : {}) }
 }
 
 /**
@@ -373,6 +449,11 @@ export function cleanDocumentPages(value: unknown): DocumentPage[] {
     seen.add(id)
     return [{ id, background: cleanDocumentBackground(raw.background), content: cleanDocumentContent(raw.content) }]
   })
+}
+
+/** Le rôle de chaque page d'un document (« » : une page ordinaire), dans l'ordre. */
+export function documentPageRolesOf(document: { content: { role?: DocumentPageRole }; pages?: ReadonlyArray<{ content: { role?: DocumentPageRole } }> }) {
+  return [document.content, ...(document.pages ?? []).map((page) => page.content)].map((content) => content.role ?? "")
 }
 
 /** Le nombre de pages d'un document (au moins une). */
@@ -526,6 +607,11 @@ export function documentImageUrl(campaignId: string, documentId: string, version
     ...(Number.isInteger(page) && page > 1 ? [`page=${page}`] : []),
   ].join("&")
   return `/api/campaigns/${encodeURIComponent(campaignId)}/documents/${encodeURIComponent(documentId)}/image${query ? `?${query}` : ""}`
+}
+
+/** L'image d'un fond de la bibliothèque (versionnée par sa date : une adresse versionnée ne change jamais). */
+export function documentLibraryImageUrl(id: string, version = "") {
+  return `/api/documents/fonds/${encodeURIComponent(id)}/image${version ? `?v=${encodeURIComponent(version.replace(/[^0-9A-Za-z]/g, ""))}` : ""}`
 }
 
 export function documentPdfUrl(campaignId: string, documentId: string, version = "") {

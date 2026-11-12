@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { DocumentViewerDialog, GiveDocumentButton, type ViewedDocument } from "@/components/eraser/document-viewer"
 import { RevealToggle, SessionRevealProvider } from "@/components/eraser/session-reveal"
-import { documentImageUrl, documentInJournal, documentPageCount, documentStudioHref, type CampaignDocumentRecord, type DocumentRecipient } from "@/lib/document-model"
+import { documentImageUrl, documentInJournal, documentPageCount, documentPageRolesOf, documentStudioHref, type CampaignDocumentRecord, type DocumentRecipient } from "@/lib/document-model"
 import { cn } from "@/lib/utils"
 
 /**
@@ -87,7 +87,7 @@ export function SessionDocuments({ campaignId, sessionId, initialDocuments, play
     {message && <p className={cn("rounded-xl border px-4 py-2 text-sm", message.tone === "ok" ? "border-emerald-600/25 bg-emerald-600/8 text-emerald-800 dark:text-emerald-300" : "border-destructive/25 bg-destructive/5 text-destructive")}>{message.text}</p>}
     {inSession.length
       ? <SessionRevealProvider value={reveal}><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{inSession.map((document) => <article key={document.id} className="overflow-hidden rounded-2xl border bg-card/70 shadow-sm">
-        <button type="button" disabled={!document.renderVersion} onClick={() => setViewing({ campaignId, documentId: document.id, title: document.title, version: document.renderVersion, pages: documentPageCount(document) })} className="group relative grid aspect-[4/3] w-full place-items-center bg-[radial-gradient(circle_at_center,rgb(120_90_50/0.16),transparent_72%)] p-3" title={document.renderVersion ? "Lire le document" : "Ce document n’a pas encore été enregistré"}>
+        <button type="button" disabled={!document.renderVersion} onClick={() => setViewing({ campaignId, documentId: document.id, title: document.title, version: document.renderVersion, pages: documentPageCount(document), roles: documentPageRolesOf(document) })} className="group relative grid aspect-[4/3] w-full place-items-center bg-[radial-gradient(circle_at_center,rgb(120_90_50/0.16),transparent_72%)] p-3" title={document.renderVersion ? "Lire le document" : "Ce document n’a pas encore été enregistré"}>
           {document.renderVersion
             // eslint-disable-next-line @next/next/no-img-element
             ? <img src={documentImageUrl(campaignId, document.id, document.renderVersion)} alt="" loading="lazy" className="max-h-full max-w-full object-contain drop-shadow-[0_8px_14px_rgb(40_25_10/0.3)] transition group-hover:scale-[1.03]" />
@@ -104,7 +104,7 @@ export function SessionDocuments({ campaignId, sessionId, initialDocuments, play
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             <GiveDocumentButton campaignId={campaignId} documentId={document.id} title={document.title} players={players} merchants={merchants} npcs={npcs} disabledReason={document.renderVersion ? "" : "Enregistre d’abord le document"} onGiven={(text) => setMessage({ tone: "ok", text })} />
-            <Button type="button" variant="ghost" size="sm" disabled={!document.renderVersion} onClick={() => setViewing({ campaignId, documentId: document.id, title: document.title, version: document.renderVersion, pages: documentPageCount(document) })}><BookOpen />Lire</Button>
+            <Button type="button" variant="ghost" size="sm" disabled={!document.renderVersion} onClick={() => setViewing({ campaignId, documentId: document.id, title: document.title, version: document.renderVersion, pages: documentPageCount(document), roles: documentPageRolesOf(document) })}><BookOpen />Lire</Button>
             <Button asChild variant="ghost" size="sm"><Link href={documentStudioHref(campaignId, { document: document.id })}><PenLine />Modifier</Link></Button>
             <Button type="button" variant="ghost" size="icon-sm" className="ml-auto text-muted-foreground" title="Retirer de la session (le document reste dans la campagne)" aria-label={`Retirer ${document.title} de la session`} disabled={Boolean(pending)} onClick={() => void move(document, "")}>{pending === document.id ? <LoaderCircle className="animate-spin" /> : <CircleMinus />}</Button>
           </div>
