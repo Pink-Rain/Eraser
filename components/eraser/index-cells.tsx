@@ -129,10 +129,19 @@ function ChoicePill({ value, option, group, outside, renderValue, boxed = false,
  * hors liste reste affichée en italique, pour ne jamais être effacée par mégarde.
  * À choix multiple, un clic coche ou décoche une option et le menu reste ouvert.
  */
-export function ChoicePicker({ label, value, options, onChange, disabled = false, loading = false, allowCustom = false, multiple = false, groups = [], onCreate, createLabel, compact = true, renderValue, separator, strict = false, trusted = false, onOpenChange, emptyLabel = "—" }: PickerProps) {
+export function ChoicePicker({ label, value, options: givenOptions, onChange, disabled = false, loading = false, allowCustom = false, multiple = false, groups = [], onCreate, createLabel, compact = true, renderValue, separator, strict = false, trusted = false, onOpenChange, emptyLabel = "—" }: PickerProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [creating, setCreating] = useState(false)
+  // Les noms ajoutés librement dans ce menu : des choix comme les autres, tout de suite (ni en italique ni
+  // « hors de la liste »), le temps que la page qui l'accueille les reçoive à son tour.
+  const [made, setMade] = useState<string[]>([])
+  const options = useMemo(() => {
+    if (!made.length) return givenOptions
+    const known = new Set(givenOptions.flatMap((option) => [option.value, ...(option.aliases ?? [])]).map(foldName))
+    const extra = made.filter((name) => !known.has(foldName(name)))
+    return extra.length ? [...givenOptions, ...extra.map((name) => ({ value: name }))] : givenOptions
+  }, [givenOptions, made])
   // L'entrée surlignée au clavier (↑↓) ; `null` : celle qu'Entrée prendrait d'elle-même.
   const [active, setActive] = useState<number | null>(null)
   const trimmed = value.trim()
@@ -205,7 +214,7 @@ export function ChoicePicker({ label, value, options, onChange, disabled = false
   }
 
   async function create(name: string) {
-    if (!onCreate) return add([name])
+    if (!onCreate) { setMade((current) => [...current, name]); return add([name]) }
     setCreating(true)
     try { await onCreate(name); add([name]) } finally { setCreating(false) }
   }
@@ -232,6 +241,8 @@ export function ChoicePicker({ label, value, options, onChange, disabled = false
         else if (allowCustom) names.push(name)
       }
     } finally { setCreating(false) }
+    const fresh = names.filter((name) => !options.some((option) => foldName(option.value) === foldName(name)))
+    if (fresh.length && !onCreate) setMade((current) => [...current, ...fresh])
     add(names)
   }
 
