@@ -93,12 +93,14 @@ import {
   type InventoryCategory,
   type InventoryContainerTypeRecord,
   type InventoryItemRecord,
+  type InventoryRecycleProduct,
   type InventorySlotExpectation,
   type InventoryTransferTarget,
 } from "@/lib/inventory-schema"
 import { objectItemId, positionalObjectId } from "@/lib/object-item-id"
 import { parseItemAttachments, parseItemCharges, parseItemModifiers, parseItemOverrides, serializeItemLinks } from "@/lib/item-modifiers"
-import { documentImageUrl, documentItemEntries, documentOfItem } from "@/lib/document-model"
+import { consumeItemReserve, parseItemRecycleNames, serializeItemInstance, withKeptItemEntries, type ItemInstanceInput, type ItemReserve } from "@/lib/item-instance"
+import { documentImageUrl, documentOfItem } from "@/lib/document-model"
 import { ownedBy, ownersCell, ownersOf } from "@/lib/ownership"
 import { companionsOfTabs, isCompanionInventoryOwner } from "@/lib/companions"
 import { displayedMultipleValue } from "@/lib/multiple-values"
@@ -6380,8 +6382,7 @@ function objectRecycleNames(table: ObjectIndexTable, row: ObjectIndexRow): Pick<
  */
 function withRecycleProducts(items: InventoryItemRecord[]) {
   if (!items.some((item) => item.recycle?.length)) return items
-  const byName = new Map<string, InventoryItemRecord>()
-  for (const item of items) if (item.active && !byName.has(foldName(item.name))) byName.set(foldName(item.name), item)
+  const byName = catalogItemsByName(items)
   return items.map((item) => {
     if (!item.recycle?.length) return item
     const recycle = item.recycle.flatMap((product) => {
@@ -6390,6 +6391,28 @@ function withRecycleProducts(items: InventoryItemRecord[]) {
     })
     return { ...item, recycle: recycle.length ? recycle : undefined }
   })
+}
+
+/** Les items actifs du catalogue par nom replié (le premier du nom), pour retrouver un item nommé. */
+function catalogItemsByName(items: InventoryItemRecord[]) {
+  const byName = new Map<string, InventoryItemRecord>()
+  for (const item of items) if (item.active && !byName.has(foldName(item.name))) byName.set(foldName(item.name), item)
+  return byName
+}
+
+/**
+ * Ce en quoi un exemplaire se recycle : les produits de son item (« Se recycle en ») et ceux qu'il
+ * porte en propre (lib/item-instance.ts, un plat qui rend son bocal), retrouvés dans le catalogue.
+ */
+function contentRecycleProducts(content: StoredInventoryContent, item: InventoryItemRecord | null | undefined, byName: () => Map<string, InventoryItemRecord>): InventoryRecycleProduct[] {
+  const own = parseItemRecycleNames(content.modifiers)
+  const products = [...(item?.recycle ?? [])]
+  if (!own.length) return products
+  for (const name of own) {
+    const found = byName().get(foldName(name))
+    if (found && found.id !== content.itemId && !products.some((product) => product.id === found.id)) products.push({ id: found.id, name: found.name })
+  }
+  return products
 }
 
 /** Compétence, Distance, Action, Valeur, Attributs d'un objet (les cases vides sont omises). */
@@ -7056,6 +7079,15 @@ function inventoryItemForContent(content: StoredInventoryContent, indexedItem: I
 function buildCharacterInventory(characterId: string, workbook: InventoryWorkbook): CharacterInventoryRecord {
   const typeById = new Map(workbook.containerTypes.map((type) => [type.id, type]))
   const itemById = new Map(workbook.items.map((item) => [item.id, item]))
+  let byName: Map<string, InventoryItemRecord> | null = null
+  const itemsByName = () => byName ??= catalogItemsByName(workbook.items)
+  // L'item d'une case, avec ce en quoi cet exemplaire se recycle (son item et ce qu'il porte en propre).
+  const slotItem = (content: StoredInventoryContent) => {
+    const item = inventoryItemForContent(content, itemById.get(content.itemId))
+    if (!item || !content.modifiers.includes('"recyclage"')) return item
+    const recycle = contentRecycleProducts(content, item, itemsByName)
+    return recycle.length ? { ...item, recycle } : item
+  }
   const isGround = (container: StoredInventoryContainer) => inventoryContainerCategory(container, typeById) === GROUND_CATEGORY
   const containers = workbook.containers
     .filter((container) => container.characterId === characterId && !container.deletedAt)
@@ -7080,7 +7112,7 @@ function buildCharacterInventory(characterId: string, workbook: InventoryWorkboo
           quantity: content.quantity,
           equipped: content.equipped,
           modifiers: content.modifiers,
-          item: inventoryItemForContent(content, itemById.get(content.itemId)),
+          item: slotItem(content),
         }))
       const used = category === "Bourse"
         ? slots.reduce((total, slot) => total + slot.quantity, 0)
@@ -7398,7 +7430,13 @@ export async function addCharacterInventoryItem(characterId: string, itemId: str
 export async function createCharacterInventoryItem(
   characterId: string,
   requestedContainerId: string,
-  input: { name: string; description: string; type: string; subtype: string; effect: string; /** Le JSON de l'exemplaire (un document donné : lib/document-model.ts). */ modifiers?: string },
+  input: {
+    name: string; description: string; type: string; subtype: string; effect: string
+    /** Le JSON de l'exemplaire (un document donné : lib/document-model.ts). */
+    modifiers?: string
+    /** Sa réserve, ce en quoi il se recycle, les lignes de son effet (lib/item-instance.ts). */
+    instance?: ItemInstanceInput
+  },
   mode: InventoryOwnerMode = "character",
 ): Promise<InventoryChangeResult> {
   return withInventoryLock(async () => {
@@ -7410,6 +7448,18 @@ export async function createCharacterInventoryItem(
     const name = input.name.trim()
     const type = input.type.trim() || "Objet"
     if (!container || !name || name.length > 160 || input.description.length > 1200 || input.effect.length > 1200) throw new Error("INVALID_INVENTORY_ITEM")
+    // Chaque ligne d'effet garde le type de l'item qui l'apporte, retrouvé dans le catalogue (un
+    // effet d'un type caché reste inconnu tant que le personnage ne l'a pas débloqué).
+    const byName = input.instance?.effectSources?.length ? catalogItemsByName(workbook.items) : null
+    const instance = input.instance ? serializeItemInstance({
+      ...input.instance,
+      ...(input.instance.effectSources ? { effectSources: input.instance.effectSources.map((line) => {
+        const type = byName?.get(foldName(line.source))?.type?.trim()
+        return { source: line.source, text: line.text, ...(type ? { type } : {}) }
+      }) } : {}),
+    }) : ""
+    const modifiers = instance ? withKeptItemEntries(input.modifiers ?? "", instance) : input.modifiers
+    if (modifiers && modifiers.length > 40_000) throw new Error("INVALID_INVENTORY_INSTANCE")
     const typeById = new Map(workbook.containerTypes.map((candidate) => [candidate.id, candidate]))
     const category = inventoryContainerCategory(container, typeById)
     if (!isCampaignInventoryOwner(characterId) && !itemFitsInventoryContainer({ name, type, subtype: input.subtype }, container, typeById)) throw new Error("INVENTORY_ITEM_WRONG_CATEGORY")
@@ -7437,7 +7487,7 @@ export async function createCharacterInventoryItem(
       type,
       subtype: input.subtype.trim(),
       effect: input.effect.trim(),
-      ...(input.modifiers !== undefined ? { modifiers: input.modifiers } : {}),
+      ...(modifiers !== undefined ? { modifiers } : {}),
       nameHtml: "",
       descriptionHtml: "",
       effectHtml: "",
@@ -7476,6 +7526,31 @@ export async function setCharacterInventoryItemQuantity(characterId: string, slo
 }
 
 /**
+ * Consomme une unité de la réserve d'un exemplaire (une portion d'un plat, une dose d'une potion,
+ * lib/item-instance.ts). La dernière consomme l'exemplaire : la case se vide comme à quantité 0,
+ * ou, dans une pile, perd un exemplaire et le suivant repart plein. `used` : la réserve telle
+ * qu'elle était consommée (son unité et sa Nutrition, pour la barre de rassasiement).
+ */
+export async function consumeCharacterInventoryReserve(ownerId: string, slotId: string, mode: InventoryOwnerMode = "character", expected?: InventorySlotExpectation): Promise<{ inventory: CharacterInventoryRecord; used: ItemReserve }> {
+  return withInventoryLock(async () => {
+    const workbook = await inventoryStorageFor(ownerId, true, mode, { fresh: true })
+    const content = workbook.contents.find((candidate) => candidate.id === slotId && candidate.characterId === ownerId)
+    assertExpectedSlot(content, expected)
+    if (!content || (!content.itemId && !content.customName) || content.quantity < 1) throw new Error("INVENTORY_SLOT_NOT_FOUND")
+    const container = workbook.containers.find((candidate) => candidate.id === content.containerId && !candidate.deletedAt)
+    const typeById = new Map(workbook.containerTypes.map((type) => [type.id, type]))
+    if (!container || inventoryContainerCategory(container, typeById) === "Bourse") throw new Error("INVENTORY_SLOT_NOT_FOUND")
+    const consumed = consumeItemReserve(content.modifiers)
+    if (!consumed) throw new Error("INVENTORY_NO_RESERVE")
+    const now = new Date().toISOString()
+    const updated: StoredInventoryContent = !consumed.emptied
+      ? { ...content, modifiers: consumed.modifiers, updatedAt: now }
+      : content.quantity > 1 ? { ...content, quantity: content.quantity - 1, modifiers: consumed.modifiers, updatedAt: now } : emptiedInventorySlot(content, now)
+    return { inventory: buildCharacterInventory(ownerId, await writeInventoryChanges(workbook, { contents: [[content, updated]] })), used: consumed.reserve }
+  })
+}
+
+/**
  * Recycle `count` exemplaires d'une case : ils sont retirés, et les produits choisis (parmi ceux
  * de « Se recycle en », relus dans le catalogue à jour) arrivent comme un item ajouté à la main.
  * Le tout sous le même verrou. Si le premier produit ne trouve pas de place, la case est remise
@@ -7486,11 +7561,12 @@ export async function recycleCharacterInventoryItem(ownerId: string, slotId: str
     const workbook = await inventoryStorageFor(ownerId, true, mode, { fresh: true, currentCatalog: true })
     const content = workbook.contents.find((candidate) => candidate.id === slotId && candidate.characterId === ownerId)
     assertExpectedSlot(content, expected)
-    if (!content || !content.itemId || content.quantity < 1) throw new Error("INVENTORY_SLOT_NOT_FOUND")
+    if (!content || (!content.itemId && !content.customName) || content.quantity < 1) throw new Error("INVENTORY_SLOT_NOT_FOUND")
     const container = workbook.containers.find((candidate) => candidate.id === content.containerId && !candidate.deletedAt)
     const typeById = new Map(workbook.containerTypes.map((type) => [type.id, type]))
     if (!container || inventoryContainerCategory(container, typeById) === "Bourse") throw new Error("INVENTORY_SLOT_NOT_FOUND")
-    const recycle = workbook.items.find((candidate) => candidate.id === content.itemId)?.recycle ?? []
+    // Les produits de son item (« Se recycle en ») et ceux que l'exemplaire porte en propre.
+    const recycle = contentRecycleProducts(content, content.itemId ? workbook.items.find((candidate) => candidate.id === content.itemId) : null, () => catalogItemsByName(workbook.items))
     const allowed = new Set(recycle.map((product) => product.id))
     const wanted = new Map<string, number>()
     for (const product of products) wanted.set(product.itemId, (wanted.get(product.itemId) ?? 0) + product.quantity)
@@ -7513,7 +7589,7 @@ export async function recycleCharacterInventoryItem(ownerId: string, slotId: str
         // Rien n'est arrivé : la case reprend l'item recyclé, telle qu'elle était.
         const reread = await inventoryStorageFor(ownerId, true, mode, { fresh: true })
         const current = reread.contents.find((candidate) => candidate.id === content.id)
-        if (current && current.itemId === (left > 0 ? content.itemId : "") && current.quantity === Math.max(0, left)) {
+        if (current && current.itemId === (left > 0 ? content.itemId : "") && current.customName === (left > 0 ? content.customName : "") && current.quantity === Math.max(0, left)) {
           await writeInventoryChanges(reread, { contents: [[current, { ...content, rowNumber: current.rowNumber, updatedAt: new Date().toISOString() }]] })
         }
         throw error
@@ -7550,9 +7626,9 @@ export async function setCharacterInventoryItemModifiers(characterId: string, sl
   if (normalized.length > 4000) throw new Error("INVALID_INVENTORY_MODIFIERS")
   return withInventoryLock(async () => {
     const { workbook, content } = await characterItemSlot(characterId, slotId)
-    // Un document donné reste un document : sa marque n'est pas un lien chiffré.
-    const documents = documentOfItem(normalized) ? [] : documentItemEntries(content.modifiers)
-    const modifiers = documents.length ? JSON.stringify([...(normalized ? JSON.parse(normalized) as unknown[] : []), ...documents]) : normalized
+    // Un document donné reste un document : sa marque n'est pas un lien chiffré. La réserve, le
+    // recyclage et les lignes d'effet de l'exemplaire restent aussi, tels que la feuille les a.
+    const modifiers = withKeptItemEntries(normalized, content.modifiers)
     return buildCharacterInventory(characterId, await writeInventoryChanges(workbook, { contents: [[content, { ...content, modifiers, updatedAt: new Date().toISOString() }]] }))
   })
 }

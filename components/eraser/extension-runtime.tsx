@@ -23,6 +23,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { announceInventoryReceived } from "@/components/eraser/item-notifications"
 import type { SiteRole } from "@/lib/auth-types"
 import type { Dispose, Eraser, ExtensionAccount, ExtensionBootModule, ExtensionDialogProps, ExtensionEvents, ExtensionPageState, ExtensionSlotProps } from "@/lib/extension-api"
 import { EXTENSION_API_VERSION, extensionSlots, type ExtensionSlotName } from "@/lib/extensions"
@@ -208,6 +209,7 @@ export function extensionToolbox(extension: { id: string; version: string }, acc
     },
     server: (path, init) => fetch(`/api/extensions/${encodeURIComponent(id)}/serveur/${path.replace(/^\/+/, "")}`, init),
     eraser: (path, init) => path.startsWith("/api/") ? fetch(path, init) : Promise.reject(new Error("Une API d'Eraser commence par « /api/ ».")),
+    inventory: { changed: (ownerId) => announceInventoryReceived(ownerId) },
     slots: {
       add(slot, component, options) {
         if (!Object.hasOwn(extensionSlots, slot)) {

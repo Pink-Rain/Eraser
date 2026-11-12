@@ -75,6 +75,7 @@ test("les extensions liées : identifiants stables, dépôts du propriétaire", 
     ["doc", "Pink-Rain/Eraser_doc"],
     ["map", "Pink-Rain/Eraser_map"],
     ["page", "Pink-Rain/Eraser_page"],
+    ["craft", "Pink-Rain/Eraser_craft"],
   ]);
   assert.equal(extensions.linkedExtension("map")?.name, "Eraser Map");
   assert.equal(extensions.linkedExtension("autre"), null);
@@ -234,8 +235,8 @@ test("API 3 : une extension sans page, lancée au démarrage sur toutes les page
 test("le contrat des extensions : emplacements et boîte à outils jamais retirés ni renommés, chaque emplacement rendu", async () => {
   const { readFile } = await import("node:fs/promises");
   // Ajouter un emplacement ou un outil : l'ajouter aussi ici. Ne jamais rien retirer de ces listes.
-  const slots = ["page.avant", "page.apres", "page.en-tete", "barre-laterale", "barre-laterale.pied", "calque", "index.fiche", "index.fiche.actions"];
-  const tools = ["api", "extension", "account", "require", "file", "page", "go", "server", "eraser", "slots", "ui", "styles", "on"];
+  const slots = ["page.avant", "page.apres", "page.en-tete", "barre-laterale", "barre-laterale.pied", "calque", "index.fiche", "index.fiche.actions", "inventaire.bourse", "administration.extension"];
+  const tools = ["api", "extension", "account", "require", "file", "page", "go", "server", "eraser", "slots", "ui", "styles", "on", "inventory"];
   const uiTools = ["dialog", "toast", "confirm"];
   assert.ok(extensions.EXTENSION_API_VERSION >= 3);
   for (const slot of slots) assert.ok(extensions.extensionSlotNames.includes(slot), `emplacement retiré : ${slot}`);

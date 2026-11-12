@@ -84,6 +84,12 @@ export type Eraser = {
    * l'affichage, le déclarer plutôt dans `globalStyles` du manifeste.
    */
   styles: { add: (css: string, options?: { href?: boolean }) => Dispose }
+  /**
+   * L'inventaire (API 4). `changed(id)` : l'extension vient de modifier l'inventaire de ce
+   * personnage (ou de ce PNJ, ou `CAMPAGNE:<id>`) par une API d'Eraser ; la page qui l'affiche le
+   * relit, comme pour un item reçu (le nouvel item reçoit sa pastille).
+   */
+  inventory: { changed: (ownerId: string) => void }
   /** Écoute un événement d'Eraser. */
   on: <K extends keyof ExtensionEvents>(event: K, listener: (value: ExtensionEvents[K]) => void) => Dispose
 }

@@ -161,7 +161,7 @@ try {
   const extensionsList = await fetch(`${origin}/api/extensions`, { headers: { cookie: loginCookie } })
   const extensionsBody = extensionsList.ok ? await extensionsList.json() : null
   const fakeMap = extensionsBody?.extensions?.find((extension) => extension.id === "map")
-  if (!extensionsBody?.installable || extensionsBody.extensions.length !== 3 || fakeMap?.installed?.version !== "0.1.0") {
+  if (!extensionsBody?.installable || !["doc", "map", "page", "craft"].every((id) => extensionsBody.extensions.some((extension) => extension.id === id)) || fakeMap?.installed?.version !== "0.1.0") {
     throw new Error(`Administration › Extensions ne voit pas l'extension installée (${extensionsList.status} ${JSON.stringify(extensionsBody)}).`)
   }
   const extensionPage = await fetch(`${origin}/extension/map/carte`, { headers: { cookie: loginCookie } })
@@ -192,7 +192,7 @@ try {
   const fluidity = await fetch(`${origin}/api/fluidity`, { headers: { cookie: loginCookie } })
   const fluidityBody = fluidity.ok ? await fluidity.json() : null
   const fluidityMap = fluidityBody?.extensions?.find?.((extension) => extension.id === "map")
-  if (fluidityMap?.version !== "0.1.0" || fluidityBody.extensions.length !== 3) throw new Error(`Le relevé de fluidité ne donne pas les versions des extensions (${fluidity.status} ${JSON.stringify(fluidityBody?.extensions)}).`)
+  if (fluidityMap?.version !== "0.1.0" || !fluidityBody.extensions.some((extension) => extension.id === "craft")) throw new Error(`Le relevé de fluidité ne donne pas les versions des extensions (${fluidity.status} ${JSON.stringify(fluidityBody?.extensions)}).`)
   console.log(`Serveur local Eraser vérifié (HTTP ${status}), formulaires, mot de passe, compte administrateur, flux OAuth et extensions opérationnels.`)
 } catch (error) {
   if (logs.trim()) console.error(logs.trim())

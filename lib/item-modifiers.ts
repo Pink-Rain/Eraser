@@ -10,7 +10,7 @@ import {
 } from "@/lib/character-catalog"
 import { characterValueHeaders } from "@/lib/character-sheet-schema"
 import type { InventoryContainerRecord } from "@/lib/inventory-schema"
-import { documentItemEntries, documentOfItem } from "@/lib/document-model"
+import { withKeptItemEntries } from "@/lib/item-instance"
 
 /**
  * Un lien chiffré vers une caractéristique ou une compétence. `from` : l'attribut, le
@@ -312,15 +312,16 @@ function chargeEntries(charges: ItemCharges) {
 /** Le même exemplaire, avec la charge restante de cet attribut, matériau ou rune changée. */
 export function withItemCharge(raw: string, kind: ItemAttachmentKind, name: string, count: number) {
   const charges = { ...parseItemCharges(raw), [itemChargeKey(kind, name)]: Math.max(0, Math.trunc(count)) }
-  return serializeItemLinks(parseItemModifiers(raw), parseItemAttachments(raw), parseItemOverrides(raw), charges)
+  // Ce que l'exemplaire porte en propre (document, réserve, recyclage, effets) reste.
+  return withKeptItemEntries(serializeItemLinks(parseItemModifiers(raw), parseItemAttachments(raw), parseItemOverrides(raw), charges), raw)
 }
 
 /** Garde les charges d'un exemplaire dans des liens réécrits (fenêtre de l'enclume). */
 export function keepItemCharges(serialized: string, previous: string) {
   const links = serializeItemLinks(parseItemModifiers(serialized), parseItemAttachments(serialized), parseItemOverrides(serialized), { ...parseItemCharges(previous), ...parseItemCharges(serialized) })
-  // Un document donné (lib/document-model.ts) reste un document quand l'exemplaire est réécrit.
-  const documents = documentOfItem(links) ? [] : documentItemEntries(previous)
-  return documents.length ? JSON.stringify([...(links ? JSON.parse(links) as unknown[] : []), ...documents]) : links
+  // Un document donné (lib/document-model.ts) reste un document quand l'exemplaire est réécrit ;
+  // sa réserve, ses produits de recyclage et ses lignes d'effet restent aussi (lib/item-instance.ts).
+  return withKeptItemEntries(links, previous)
 }
 
 /** Ce qui apporte un lien : « attribut:Lourde ». */

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 import {
   addCharacterInventoryContainer,
   addCharacterInventoryItem,
+  consumeCharacterInventoryReserve,
   createCharacterInventoryItem,
   createCharacterInventoryContainer,
   deleteCharacterInventoryContainer,
@@ -26,9 +27,12 @@ import {
   updateCharacterInventoryItem,
   recycleCharacterInventoryItem,
 } from "@/lib/google-sheets"
-import { INVENTORY_CHANGED_MESSAGE, inventoryRecycleErrorMessage, inventoryRecycleRequest, inventorySlotExpectation } from "@/lib/inventory-schema"
+import { readCharacterSatiety, satietyAvailable, updateCharacterSatiety } from "@/lib/character-satiety"
+import { INVENTORY_CHANGED_MESSAGE, inventoryInstanceErrorMessage, inventoryRecycleErrorMessage, inventoryRecycleRequest, inventorySlotExpectation } from "@/lib/inventory-schema"
+import { requestedItemInstance } from "@/lib/item-instance"
 import { transferWithNotification } from "@/lib/item-notifications"
 import { companionInventoryOwnerId } from "@/lib/companions"
+import type { SatietyState } from "@/lib/satiety"
 import { authorizedAccount } from "@/lib/server-auth"
 
 async function authorizedCharacter(id: string) {
@@ -99,6 +103,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try {
     const body = (await request.json()) as Record<string, unknown>
     let inventory
+    // Une portion mangée (« use-reserve ») : la barre de rassasiement telle qu'elle est ensuite.
+    let satiety: { state: SatietyState | null; error?: string } | undefined
     if (body.action === "add-container" && typeof body.typeId === "string") {
       inventory = await addCharacterInventoryContainer(id, body.typeId)
     } else if (body.action === "create-container" && typeof body.name === "string" && typeof body.category === "string" && typeof body.capacity === "number" && Number.isFinite(body.capacity)) {
@@ -110,11 +116,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     } else if (body.action === "add-item" && typeof body.itemId === "string") {
       inventory = await addCharacterInventoryItem(id, body.itemId, typeof body.containerId === "string" ? body.containerId : undefined)
     } else if (body.action === "create-item" && typeof body.containerId === "string" && typeof body.name === "string" && typeof body.description === "string" && typeof body.type === "string" && typeof body.subtype === "string" && typeof body.effect === "string") {
-      inventory = await createCharacterInventoryItem(id, body.containerId, { name: body.name, description: body.description, type: body.type, subtype: body.subtype, effect: body.effect })
+      inventory = await createCharacterInventoryItem(id, body.containerId, { name: body.name, description: body.description, type: body.type, subtype: body.subtype, effect: body.effect, instance: requestedItemInstance(body) })
     } else if (body.action === "recycle-item") {
       const recycle = inventoryRecycleRequest(body)
       if (!recycle) throw new Error("INVALID_INVENTORY_RECYCLE")
       inventory = await recycleCharacterInventoryItem(id, recycle.slotId, recycle.count, recycle.products, "character", inventorySlotExpectation(body))
+    } else if (body.action === "use-reserve" && typeof body.slotId === "string") {
+      const consumed = await consumeCharacterInventoryReserve(id, body.slotId, "character", inventorySlotExpectation(body))
+      inventory = consumed.inventory
+      // Une portion nourrit : sa Nutrition remplit la barre de rassasiement (bornée), comme
+      // /api/characters/satiety. La portion est déjà mangée : un échec ici est dit, pas annulé.
+      if (consumed.used.unit === "portion" && consumed.used.nutrition) {
+        satiety = !satietyAvailable()
+          ? { state: null, error: "Le serveur partagé est injoignable : la barre de rassasiement n’a pas été remplie." }
+          : await updateCharacterSatiety(id, { kind: "add", charges: consumed.used.nutrition }).then((state) => ({ state }), async (error: unknown) => {
+            console.error("CHARACTER_SATIETY_WRITE_FAILED", id, error instanceof Error ? error.message : "UNKNOWN_ERROR")
+            return { state: await readCharacterSatiety(id).catch(() => null), error: "La barre de rassasiement n’a pas pu être remplie." }
+          })
+      }
     } else if (body.action === "set-quantity" && typeof body.slotId === "string" && typeof body.quantity === "number" && Number.isFinite(body.quantity)) {
       inventory = await setCharacterInventoryItemQuantity(id, body.slotId, body.quantity, "character", inventorySlotExpectation(body))
     } else if (body.action === "set-equipped" && typeof body.slotId === "string" && typeof body.equipped === "boolean") {
@@ -134,12 +153,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     } else {
       throw new Error("INVALID_INVENTORY_ACTION")
     }
-    return NextResponse.json({ inventory: { ...inventory, items: [] } })
+    return NextResponse.json({ inventory: { ...inventory, items: [] }, ...(satiety ? { satiety: satiety.state, ...(satiety.error ? { satietyError: satiety.error } : {}) } : {}) })
   } catch (error) {
     const code = error instanceof Error ? error.message : ""
     // La case n'est plus celle que la page montrait : rien n'a été écrit, la page se relit.
     if (code === "INVENTORY_CHANGED") return NextResponse.json({ error: INVENTORY_CHANGED_MESSAGE }, { status: 409 })
-    const message = inventoryRecycleErrorMessage(code) ?? (code === "INVENTORY_FULL" ? "Il n’y a plus d’emplacement compatible disponible."
+    const message = inventoryRecycleErrorMessage(code) ?? inventoryInstanceErrorMessage(code) ?? (code === "INVENTORY_FULL" ? "Il n’y a plus d’emplacement compatible disponible."
       : code === "INVENTORY_NO_COMPATIBLE_CONTAINER" ? "Ajoute d’abord un contenant compatible avec cet item."
         : code === "INVALID_INVENTORY_MODIFIERS" ? "Ces liens vers des caractéristiques sont trop nombreux."
         : code === "INVENTORY_SLOT_NOT_FOUND" ? "Cet item n’est plus dans cet inventaire."

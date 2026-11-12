@@ -71,7 +71,8 @@ export type ExtensionOverview = ExtensionDefinition & {
     | { status: "published"; version: string; api: number }
     | { status: "none" }
     | { status: "unreachable" | "invalid"; error: string }
-  installed: { version: string; installedAt: string } | null
+  /** `page` : l'extension a des pages à ouvrir (une extension API 3 peut n'avoir qu'un module de démarrage). */
+  installed: { version: string; installedAt: string; page: boolean } | null
   needsNewerEraser: boolean
   lastError: string | null
 }
@@ -83,7 +84,7 @@ export async function extensionsOverview(options: { force?: boolean } = {}) {
     return {
       ...extension,
       published: published.status === "published" ? { status: "published", version: published.version, api: published.api } : published,
-      installed: installed ? { version: installed.version, installedAt: installed.installedAt } : null,
+      installed: installed ? { version: installed.version, installedAt: installed.installedAt, page: Boolean(installed.entry) } : null,
       needsNewerEraser: published.status === "published" && published.api > EXTENSION_API_VERSION,
       lastError: lastExtensionCheck(extension.id)?.error ?? null,
     }

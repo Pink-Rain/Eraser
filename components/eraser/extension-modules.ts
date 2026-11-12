@@ -85,6 +85,7 @@ import * as libIndexSavedViews from "@/lib/index-saved-views"
 import * as libIndexSchemaShared from "@/lib/index-schema-shared"
 import * as libIndexStats from "@/lib/index-stats"
 import * as libIndexWindows from "@/lib/index-windows"
+import * as libObjectIcons from "@/lib/object-icons"
 import * as libPageFolders from "@/lib/page-folders"
 import * as libPageReplacements from "@/lib/page-replacements"
 import * as libPagesIndexShared from "@/lib/pages-index-shared"
@@ -170,6 +171,7 @@ const modules: Record<string, Readonly<Record<string, unknown>>> = {
   "@/lib/index-schema-shared": lent(libIndexSchemaShared),
   "@/lib/index-stats": lent(libIndexStats),
   "@/lib/index-windows": lent(libIndexWindows),
+  "@/lib/object-icons": lent(libObjectIcons),
   "@/lib/page-folders": lent(libPageFolders),
   "@/lib/page-replacements": lent(libPageReplacements),
   "@/lib/pages-index-shared": lent(libPagesIndexShared),

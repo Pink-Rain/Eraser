@@ -33,7 +33,8 @@ export const satietyMeals: ReadonlyArray<{ key: SatietyMeal; label: string; char
 /** Passer une nuit, ou une ellipse de `days` jours ; avec ou sans repas offert. */
 export type SatietyRest = { mode: "night" | "ellipse"; days?: number; meal?: SatietyMeal | null; campaignId?: string | null }
 
-export type SatietyAction = ({ kind: "rest" } & SatietyRest) | { kind: "set"; charges: number }
+/** `add` : des charges rendues (ou ôtées) d'un coup, une portion mangée dans l'inventaire par exemple. */
+export type SatietyAction = ({ kind: "rest" } & SatietyRest) | { kind: "set"; charges: number } | { kind: "add"; charges: number }
 
 export function emptySatiety(): SatietyState {
   return { charges: SATIETY_DEFAULT, days: {} }
@@ -91,6 +92,7 @@ export function chargesAfterRest(charges: number, rest: SatietyRest) {
 
 export function applySatietyAction(state: SatietyState, action: SatietyAction, now = new Date().toISOString()): SatietyState {
   if (action.kind === "set") return { ...state, charges: boundedCharges(action.charges), updatedAt: now }
+  if (action.kind === "add") return { ...state, charges: boundedCharges(boundedCharges(state.charges) + (Number.isFinite(action.charges) ? Math.trunc(action.charges) : 0)), updatedAt: now }
   const days = { ...state.days }
   if (action.campaignId) days[action.campaignId] = (days[action.campaignId] ?? 0) + restDays(action)
   return { charges: chargesAfterRest(state.charges, action), days, updatedAt: now }

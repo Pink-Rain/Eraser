@@ -23,7 +23,7 @@
  * attend qu'Eraser soit à jour. À incrémenter quand on ajoute quelque chose dont une extension
  * aura besoin ; ne jamais retirer ce qu'une version précédente offrait.
  */
-export const EXTENSION_API_VERSION = 3
+export const EXTENSION_API_VERSION = 4
 
 export const EXTENSION_MANIFEST_ASSET = "eraser-extension.json"
 export const EXTENSION_PACK_ASSET = "eraser-extension.pack.gz"
@@ -43,6 +43,7 @@ export const linkedExtensions: ExtensionDefinition[] = [
   { id: "doc", name: "Eraser Doc", description: "Les documents de campagne : lettres, affiches, parchemins à donner aux joueurs.", repository: "Pink-Rain/Eraser_doc" },
   { id: "map", name: "Eraser Map", description: "Le tabletop : cartes, tokens et table partagée en direct.", repository: "Pink-Rain/Eraser_map" },
   { id: "page", name: "Eraser Page", description: "L'atelier des pages : créer et modifier les pages d'Eraser et le menu.", repository: "Pink-Rain/Eraser_page" },
+  { id: "craft", name: "Eraser Craft", description: "Les ateliers de fabrication des personnages : cuisine, alchimie et les autres à venir.", repository: "Pink-Rain/Eraser_craft" },
 ]
 
 export function linkedExtension(id: string): ExtensionDefinition | null {
@@ -129,6 +130,18 @@ export const extensionSlots = {
   "index.fiche": "Dans la fiche d'une ligne d'index, sous ses champs",
   /** Dans le pied de la fiche d'une ligne de n'importe quel index (petits boutons). `context` : comme `index.fiche`. */
   "index.fiche.actions": "Dans le pied de la fiche d'une ligne d'index",
+  /**
+   * Dans l'onglet Inventaire d'un personnage, à côté de la bourse et à sa hauteur (des ateliers de
+   * fabrication, par exemple). Vide, il ne prend aucune place. `context` :
+   * `{ characterId, readOnly }` (`readOnly` : le compte regarde sans pouvoir modifier).
+   */
+  "inventaire.bourse": "Dans l'inventaire d'un personnage, à côté de la bourse",
+  /**
+   * Sur la ligne d'une extension, dans Administration › Extensions (sa roue de réglages, par
+   * exemple). `context` : `{ id, version }` (`version` : celle installée sur cet ordinateur, ou
+   * `null`). Chaque extension vérifie `id` et ne s'affiche que sur sa propre ligne.
+   */
+  "administration.extension": "Sur la ligne d'une extension, dans Administration › Extensions",
 } as const
 
 export type ExtensionSlotName = keyof typeof extensionSlots

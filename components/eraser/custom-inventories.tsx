@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Anvil, Apple, Archive, Backpack, BookOpen, Briefcase, Brush, Check, CookingPot, Feather, FlaskConical, Gem, Hammer, Key, Leaf, Map as MapIcon, Music, Package, Plus, Scissors, Scroll, Shirt, ShoppingBag, Skull, Sparkles, Wrench, type LucideIcon } from "lucide-react"
+import { Apple, Archive, Backpack, BookOpen, Briefcase, Check, Feather, FlaskConical, Gem, Hammer, Key, Leaf, Map as MapIcon, Music, Package, Plus, Scroll, Shirt, ShoppingBag, Skull, Sparkles, Wrench, type LucideIcon } from "lucide-react"
 
 import { ColorSwatches } from "@/components/eraser/editor-controls"
 import { Button } from "@/components/ui/button"
@@ -120,37 +120,4 @@ function CustomInventoryForm({ container, side, pending, onCancel, onSave }: { c
       </div>
     </div>
   </>
-}
-
-const craftKinds = [
-  { key: "maquillage", label: "Maquillage", icon: Brush },
-  { key: "couture", label: "Couture", icon: Scissors },
-  { key: "artisanat", label: "Artisanat", icon: Hammer },
-  { key: "alchimie", label: "Alchimie", icon: FlaskConical },
-  { key: "cuisine", label: "Cuisine", icon: CookingPot },
-  { key: "ouvrages", label: "Ouvrages", icon: BookOpen },
-] as const
-
-const craftColor = "#9a5f3c"
-
-/** Le coin « Craft », à côté de la bourse : un bouton par savoir-faire, chacun ouvre son popup (vides pour l'instant). */
-export function CraftCorner() {
-  const [opened, setOpened] = useState<(typeof craftKinds)[number]["key"] | null>(null)
-  const current = craftKinds.find((kind) => kind.key === opened)
-  // Étiré à la hauteur de la bourse, à côté d'elle : les boutons restent centrés dans la place.
-  return <div className="flex flex-col rounded-[1.4rem] border p-3" style={{ borderColor: `${craftColor}42`, background: `linear-gradient(145deg, ${craftColor}12, rgba(255,255,255,.015))` }}>
-    <div className="mb-3 flex items-center gap-3 px-1"><div className="flex size-9 items-center justify-center rounded-xl" style={{ color: craftColor, backgroundColor: `${craftColor}18` }}><Anvil className="size-4.5" /></div><h3 className="font-display flex-1 text-xl font-semibold" style={{ color: craftColor }}>Craft</h3></div>
-    <div className="flex flex-1 items-center justify-center"><div className="grid grid-cols-3 gap-2">
-      {craftKinds.map((kind) => {
-        const Icon = kind.icon
-        return <button key={kind.key} type="button" onClick={() => setOpened(kind.key)} aria-label={kind.label} title={kind.label} className="flex size-11 items-center justify-center rounded-xl border bg-card/70 shadow-sm transition hover:-translate-y-px hover:shadow-md focus-visible:outline-none focus-visible:ring-2" style={{ color: craftColor, borderColor: `${craftColor}40` }}><Icon className="size-5" /></button>
-      })}
-    </div></div>
-    <Dialog open={current !== undefined} onOpenChange={(open) => { if (!open) setOpened(null) }}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader><DialogTitle className="flex items-center gap-2">{current && <current.icon className="size-5" style={{ color: craftColor }} />}{current?.label}</DialogTitle><DialogDescription className="sr-only">{current?.label}</DialogDescription></DialogHeader>
-        <div className="min-h-40" />
-      </DialogContent>
-    </Dialog>
-  </div>
 }
