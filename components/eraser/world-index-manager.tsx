@@ -47,7 +47,7 @@ import { usePersistentState } from "@/hooks/use-persistent-state"
 import { IN_PLACE_ATTRIBUTE, replaceAppUrl, URL_CHANGE_EVENT } from "@/components/eraser/app-tabs"
 import { IndexTabPicker, useIndexTabParam } from "@/components/eraser/index-tab-picker"
 import { buttonPresets, runActionButton, type ActionRuntime } from "@/lib/index-actions"
-import { choiceCorrection, computeRollup, isCheckedValue, isIdHeader, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type ChoiceSource, type IndexColumnSpec, usedChoiceValues, withUsedChoices } from "@/lib/index-columns"
+import { choiceCorrection, computeRollup, isCheckedValue, isIdHeader, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type ChoiceSource, type IndexColumnSpec, isOpenChoiceSpec, usedChoiceValues, withUsedChoices } from "@/lib/index-columns"
 import { numberCorrection } from "@/lib/index-numbers"
 import { positionalObjectId } from "@/lib/object-item-id"
 import { ObjectIcon } from "@/components/eraser/object-icon"
@@ -952,11 +952,14 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     return all.filter((source) => !source.onlyTab || !all.some((other) => !other.onlyTab && other.index === source.index))
   }, [indexKey, links])
   /** Le réglage d'une colonne tel que le tableau et les fiches le dessinent : une colonne liée y reçoit ses onglets d'en face. */
-  const shownSpec = useCallback((tab: string, header: string, spec: IndexColumnSpec): IndexColumnSpec => {
+  const shownSpec = useCallback((tab: string, header: string, input: IndexColumnSpec): IndexColumnSpec => {
+    // Toute Liste à ajout libre, dans le tableau, la fiche, l'ajout et chaque formulaire : ses valeurs
+    // déjà écrites en plus de ses options. Les formulaires lisaient le réglage brut : 0 option.
+    const spec = isOpenChoiceSpec(input) ? customChoiceSpecs.get(`${tab}\u0000${foldName(header)}`) ?? input : input
     if (spec.kind !== "linked") return spec
     const linkedFrom = linkedSourcesOf(tab, header)
     return linkedFrom.length ? { ...spec, linkedFrom } : spec
-  }, [linkedSourcesOf])
+  }, [customChoiceSpecs, linkedSourcesOf])
   // L'index affiché prête ses lignes à jour aux listes qui le lisent (colonne liée vers lui-même) : rien n'est relu.
   useEffect(() => data ? provideWorldIndexData(indexKey, { tables, columns: data.columns }) : undefined, [data, indexKey, tables])
   const relatedKeys = useMemo(() => {
@@ -1451,11 +1454,11 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     const found = locate(rowKey)
     if (!found) return null
     const tab = found.table.tabName
-    const columns = (data?.columns[tab] ?? []).filter((column) => !isIdHeader(column.header))
+    const columns = (data?.columns[tab] ?? []).filter((column) => !isIdHeader(column.header)).map((column) => ({ ...column, spec: shownSpec(tab, column.header, column.spec) }))
     const layout = tabFormOrBuiltin(settings.layouts, indexKey, tab, formId) ?? automaticLayoutFor("form", columns)
     const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
     return <IndexFormView layout={layout} columns={columns} valueOf={(header) => rawOf(rowKey, header)} row={id ? { index: indexKey, id, tab } : undefined} inventoryEndpoint={indexKey === "npcs" ? (row) => `/api/npcs/${encodeURIComponent(row.id)}/inventory` : undefined} />
-  }, [data, indexKey, locate, rawOf, settings.layouts])
+  }, [data, indexKey, locate, rawOf, settings.layouts, shownSpec])
   const layoutHeaders = useMemo(() => (table?.headers ?? []).filter((header) => header.trim() && !isIdHeader(header) && specOf(table!.tabName, header).kind !== "archived"), [specOf, table])
   // La forme de la vue choisie : l'onglet stat, les cartes, ou sa présentation (liste, kanban…),
   // choisie comme le fait le serveur des pages pour un bloc (la sienne, la version, le preset,
