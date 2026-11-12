@@ -324,7 +324,34 @@ pour tout index. Sa page est `WorldIndexPage`. Il n’a **pas d’autre lecteur*
   d'exemplaires de la pile, quels produits et combien de chacun (le MJ décide) ; l'action
   `recycle-item` (`recycleCharacterInventoryItem`) revérifie tout dans le catalogue à jour, retire
   d'abord les exemplaires puis ajoute les produits comme un ajout à la main, sous le même verrou.
-  Si le premier produit n'a pas de place, la case est remise telle qu'elle était.
+  Si le premier produit n'a pas de place, la case est remise telle qu'elle était. Un exemplaire
+  propose aussi les noms qu'il porte en propre (`recycle`, ci-dessous, retrouvés dans le catalogue
+  par `contentRecycleProducts`) : un item créé (sans ID d'item) se recycle ainsi.
+- **ce qu'un exemplaire porte en propre** (`lib/item-instance.ts`), rangé dans son JSON
+  (« Modificateurs ») comme la marque d'un document, sous des cibles que les liens ignorent :
+  sa **réserve** (`reserve` : `{ count, total, unit: "portion" | "dose", nutrition? }`, 1 à 99),
+  ce qu'il donne en plus au recyclage (`recyclage`, 1 à 10 noms) et les **lignes de son effet**
+  avec l'item qui les apporte (`effet` : source, texte, et le type de la source, retrouvé par le
+  serveur à la création). `create-item` les accepte (`reserve`, `recycle`, `effectSources`,
+  facultatifs, vérifiés strictement : `INVALID_INVENTORY_INSTANCE`). Toute réécriture du JSON
+  les garde (`withKeptItemEntries` : enclume, charges, `set-modifiers` qui reprend ceux de la
+  feuille) ; déplacement, transfert et recyclage partiel copient le JSON tel quel.
+  La réserve s'affiche en une rangée d'icônes (bol, fiole ; les consommées pâles) ; un clic,
+  l'action `use-reserve` (`consumeCharacterInventoryReserve`, case protégée comme les autres), en
+  consomme une ; la dernière consomme l'exemplaire (la case se vide, ou une pile perd un exemplaire
+  et le suivant repart plein). Une portion qui a une Nutrition remplit la barre de rassasiement
+  (`updateCharacterSatiety`, action `add`, bornée) : sur une fiche seulement, la barre change tout
+  de suite (`previewSatiety`) et la réponse donne `satiety`.
+- les **effets cachés** (`lib/hidden-effects.ts`, `lib/hidden-effects-store.ts`, sur le Worker) :
+  Administration › Effets cachés règle les types d'items dont l'effet est caché (portée
+  `item-effects`, clé `hidden-types`, lue par `sharedSnapshot` ; vide : rien de caché). Chaque
+  personnage garde les items dont il a débloqué l'effet (portée `character-effects`, noms
+  repliés). Sur sa fiche, l'effet d'un tel item est « Effet verrouillé » et une ligne d'effet
+  venue de lui « Effet inconnu » ; clic droit sur l'item (ou la touche menu) : « Débloquer
+  l'effet » / « Reverrouiller l'effet » (son joueur, son MJ, un admin ; jamais en lecture seule).
+  `GET/POST /api/characters/[id]/effects` (droits de l'inventaire) sert la page et les extensions ;
+  la page relit les déblocages quand l'inventaire du personnage change ailleurs
+  (`eraser:inventory-received`, donc `eraser.inventory.changed(id)` d'une extension).
 Les vues d’avant désignaient un onglet par « fichier:sheetId » : la page les lit sous son nom.
 
 ### Affichage des items (inventaire, magasin, fouille)
@@ -622,7 +649,9 @@ réversible.
 Une extension est un morceau d'Eraser qui vit dans son propre dépôt GitHub public, se publie
 seul et arrive sur chaque installation sans réinstaller Eraser. Liées : `doc` (Pink-Rain/Eraser_doc,
 **l'éditeur des documents de campagne**, depuis l'alpha 278), `map` (Pink-Rain/Eraser_map,
-tabletop, encore vide), `page` (Pink-Rain/Eraser_page, **l'atelier des pages**, depuis l'alpha 275).
+tabletop, encore vide), `page` (Pink-Rain/Eraser_page, **l'atelier des pages**, depuis l'alpha 275),
+`craft` (Pink-Rain/Eraser_craft, **les ateliers de fabrication** : cuisine, alchimie… ; il crée ses
+items par `create-item` avec réserve, recyclage et lignes d'effet, voir « L'Index des items »).
 
 - **Liaison** : `linkedExtensions` dans `lib/extensions.ts`, dans le code seulement. L'identifiant
   nomme le dossier d'installation, l'adresse `/extension/<id>` et ses données : il ne se renomme
@@ -670,12 +699,17 @@ tabletop, encore vide), `page` (Pink-Rain/Eraser_page, **l'atelier des pages**, 
     `extensionSlots` (`lib/extensions.ts`) les nomme et dit ce que reçoit `context`. Aujourd'hui :
     `page.avant`, `page.apres`, `page.en-tete` (toutes les pages), `barre-laterale`,
     `barre-laterale.pied`, `calque` (au-dessus de tout), `index.fiche` et `index.fiche.actions`
-    (la fiche d'une ligne de **tous** les index). Un emplacement est un `<ExtensionSlot name=… />` ;
+    (la fiche d'une ligne de **tous** les index) ; API 4 : `inventaire.bourse` (à côté de la bourse
+    d'un personnage : `characterId`, `readOnly` ; là où vivait le coin « Craft », qui appartient
+    désormais à l'extension `craft`) et `administration.extension` (la ligne d'une extension dans
+    Administration › Extensions : `id`, `version` ; une extension y pose sa roue de réglages). Un emplacement est un `<ExtensionSlot name=… />` ;
     sans ajout il ne rend rien et ne charge rien.
   - `eraser.ui.dialog / toast / confirm` (fenêtres, messages, confirmations, avec les composants
     d'Eraser), `eraser.styles.add` (CSS ou feuille à la volée), `eraser.on("page", …)` (la page
     affichée et le rôle de vue), `eraser.page()`, `eraser.go(adresse)`, `eraser.file(chemin)`, et
-    comme avant `server`, `eraser` (API d'Eraser), `require`, `account`.
+    comme avant `server`, `eraser` (API d'Eraser), `require`, `account`. API 4 :
+    `eraser.inventory.changed(id)`, après une modification d'inventaire par une API d'Eraser : la
+    fiche qui l'affiche le relit (même signal qu'un item reçu, `eraser:inventory-received`).
   - Repères stables pour le CSS des extensions : `data-eraser-part` (`barre-laterale`, `en-tete`,
     `page`, `messages` ; dans une présentation : `vue-en-tete`, `vue-outils`, `vue-section`,
     `vue-pied`) et `data-eraser-slot` ; jamais les classes Tailwind d'Eraser, qui changent.
@@ -708,9 +742,14 @@ tabletop, encore vide), `page` (Pink-Rain/Eraser_page, **l'atelier des pages**, 
   `server` du disque (import natif de Node) et lui confie la requête : `default.fetch(requête,
   eraser)`, ou `handle`. `eraser` y donne le compte, le chemin et `store` (`get`, `set`,
   `remove`, `list`), ses données sur le Worker, portée `extension:<id>`, 20 000 caractères par
-  entrée. Google n'est pas encore prêté : une extension qui en a besoin passe par une API
-  d'Eraser, ou l'API de l'extension s'agrandit (porte du quota comprise).
-- **Version de l'API** : `EXTENSION_API_VERSION` (3 depuis l'alpha 281 : démarrage, styles globaux,
+  entrée. API 4 : `indexes.list()` (les index lisibles, l'Index des items d'abord : clé, titre,
+  onglets et colonnes) et `indexes.read(clé)` (leurs valeurs en texte), `lib/extensions-indexes.ts`,
+  d'après les copies gardées en mémoire ; jamais les index d'entités. Eraser lit Google ;
+  l'extension choisit ce qu'elle en sert à ses pages (un joueur n'ouvre pas les index, mais
+  l'atelier lui donne la Nutrition de ses ingrédients). Le reste de Google passe par une API
+  d'Eraser.
+- **Version de l'API** : `EXTENSION_API_VERSION` (4 depuis l’alpha 290 : emplacements de
+  l'inventaire et de l'administration, `inventory.changed`, `indexes` côté serveur ; 3 depuis l'alpha 281 : démarrage, styles globaux,
   emplacements, fenêtres ; 2 : `Page` ; 1 : `mount`). On ne retire jamais rien de ce qu'elle
   offre ; on l'incrémente quand on ajoute ce dont une extension aura besoin. Une extension qui
   demande plus attend la mise à jour d'Eraser.

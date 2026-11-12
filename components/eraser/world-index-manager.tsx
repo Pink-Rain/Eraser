@@ -47,7 +47,7 @@ import { usePersistentState } from "@/hooks/use-persistent-state"
 import { IN_PLACE_ATTRIBUTE, replaceAppUrl, URL_CHANGE_EVENT } from "@/components/eraser/app-tabs"
 import { IndexTabPicker, useIndexTabParam } from "@/components/eraser/index-tab-picker"
 import { buttonPresets, runActionButton, type ActionRuntime } from "@/lib/index-actions"
-import { choiceCorrection, choiceValuesOfCell, computeRollup, isCheckedValue, isIdHeader, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type ChoiceSource, type IndexColumnSpec } from "@/lib/index-columns"
+import { choiceCorrection, computeRollup, isCheckedValue, isIdHeader, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type ChoiceSource, type IndexColumnSpec, usedChoiceValues, withUsedChoices } from "@/lib/index-columns"
 import { numberCorrection } from "@/lib/index-numbers"
 import { positionalObjectId } from "@/lib/object-item-id"
 import { ObjectIcon } from "@/components/eraser/object-icon"
@@ -77,9 +77,6 @@ import {
 } from "@/lib/world-index-definitions"
 import type { WorldIndexData, WorldIndexRow, WorldIndexRowRef, WorldIndexTable } from "@/lib/world-indexes"
 import { ReferenceScopeProvider } from "@/components/eraser/reference-menu"
-
-// Un comparateur créé une fois : « localeCompare » avec options en recréait un à chaque comparaison.
-const frenchOrder = new Intl.Collator("fr", { sensitivity: "base" })
 
 // Les fenêtres (« Modifier », guide, fiche d'une créature) ne sont chargées qu'à leur ouverture : la page s'affiche plus vite.
 const IndexEditor = dynamic(() => import("@/components/eraser/index-editor").then((module) => module.IndexEditor), { ssr: false })
@@ -391,23 +388,11 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   // Une liste à ajout libre propose aussi les valeurs déjà écrites dans la colonne (tous onglets) :
   // une valeur ajoutée une fois se choisit ensuite. Pas pour « Corriger N fautes », qui lit `baseSpecOf`.
   const customChoiceSpecs = useMemo(() => {
-    const used = new Map<string, Set<string>>()
-    for (const owner of data?.tables ?? []) for (const column of data?.columns[owner.tabName] ?? []) {
-      if (column.spec.kind !== "choice" || !column.spec.allowCustom) continue
-      const at = columnIndexOf(owner, column.header)
-      if (at < 0) continue
-      const values = used.get(foldName(column.header)) ?? new Set<string>()
-      // Choix multiple : chaque étiquette de la case, jamais la case entière (« Parchemin, Culture »).
-      for (const row of owner.rows) for (const value of choiceValuesOfCell(row.values[at] ?? "", column.spec)) values.add(value)
-      used.set(foldName(column.header), values)
-    }
+    const used = usedChoiceValues(data?.tables ?? [], (tab) => data?.columns[tab])
     const specs = new Map<string, IndexColumnSpec>()
     for (const [tab, list] of Object.entries(data?.columns ?? {})) for (const column of list) {
-      const values = column.spec.kind === "choice" && column.spec.allowCustom ? used.get(foldName(column.header)) : undefined
-      if (!values?.size) continue
-      const known = new Set((column.spec.options ?? []).map((option) => foldName(option.value)))
-      const extra = [...values].filter((value) => !known.has(foldName(value)) && Boolean(known.add(foldName(value)))).sort((left, right) => frenchOrder.compare(left, right))
-      if (extra.length) specs.set(`${tab}\u0000${foldName(column.header)}`, { ...column.spec, options: [...(column.spec.options ?? []), ...extra.map((value) => ({ value }))] })
+      const spec = withUsedChoices(column.spec, used.get(foldName(column.header)))
+      if (spec !== column.spec) specs.set(`${tab}\u0000${foldName(column.header)}`, spec)
     }
     return specs
   }, [data])
@@ -1521,6 +1506,12 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   }, [specOf, tables])
   const statValueOf = useCallback((rowKey: string, column: string) => column === TAB_PSEUDO && !locate(rowKey)?.table.headers.some((header) => foldName(header) === foldName(TAB_PSEUDO)) ? parseRowKey(rowKey).tabName : valueOf(rowKey, column), [locate, valueOf])
   const statTabOf = useCallback((rowKey: string) => parseRowKey(rowKey).tabName, [])
+  // Les conditions d'une vue : les valeurs d'une colonne à liste (options, et valeurs déjà écrites d'une liste à ajout libre).
+  const viewValuesOf = useCallback((source: string, header: string) => {
+    const owners = source === ALL_SOURCES ? tables : tables.filter((candidate) => candidate.tabName === source)
+    const owner = owners.find((candidate) => candidate.headers.some((name) => foldName(name) === foldName(header)))
+    return owner ? (specOf(owner.tabName, header).options ?? []).map((option) => option.value).slice(0, 500) : []
+  }, [specOf, tables])
   const statOptionsOf = useCallback((header: string) => {
     const owner = tables.find((candidate) => candidate.headers.some((name) => foldName(name) === foldName(header)))
     return (owner ? specOf(owner.tabName, header).options ?? [] : []).map((option) => ({ value: option.value, color: option.color }))
@@ -2038,6 +2029,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         sources={[{ value: ALL_SOURCES, label: "Tous les onglets de l’index" }, ...tables.map((candidate) => ({ value: candidate.tabName, label: `L’onglet « ${candidate.tabName} »` }))]}
         columnsOf={(source) => [...new Set((source === ALL_SOURCES ? tables : tables.filter((candidate) => candidate.tabName === source)).flatMap((candidate) => (data?.columns[candidate.tabName] ?? []).map((column) => column.header)).filter((header) => !/^id$/i.test(header)))]}
         tabOf={(source) => source === ALL_SOURCES ? tables[0]?.tabName ?? "" : source}
+        valuesOf={viewValuesOf}
         presentations={settings.presentations}
         presets={presentationPresets}
         cards={settings.cards}

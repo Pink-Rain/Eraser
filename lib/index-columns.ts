@@ -666,6 +666,43 @@ export function choiceValuesOfCell(text: string, spec: IndexColumnSpec) {
   return values.filter((value) => value.length <= 80)
 }
 
+/** Une Liste à ajout libre : elle propose aussi les valeurs déjà écrites dans sa colonne. */
+export function isOpenChoiceSpec(spec: IndexColumnSpec) {
+  return spec.kind === "choice" && Boolean(spec.allowCustom)
+}
+
+type UsedChoiceTable = { tabName: string; headers: readonly string[]; rows: ReadonlyArray<{ values: readonly string[] }> }
+
+/**
+ * Les valeurs déjà écrites dans les Listes à ajout libre, par en-tête (replié), tous onglets
+ * réunis : une valeur ajoutée une fois se choisit ensuite. L'index et les blocs des pages lisent
+ * cette même fonction : un « Type » qui propose ses valeurs dans l'un les propose dans l'autre.
+ */
+export function usedChoiceValues(tables: readonly UsedChoiceTable[], columnsOf: (tab: string) => ReadonlyArray<{ header: string; spec: IndexColumnSpec }> | undefined) {
+  const used = new Map<string, Set<string>>()
+  for (const table of tables) for (const column of columnsOf(table.tabName) ?? []) {
+    if (!isOpenChoiceSpec(column.spec)) continue
+    const at = table.headers.findIndex((candidate) => foldName(candidate) === foldName(column.header))
+    if (at < 0) continue
+    const key = foldName(column.header)
+    const values = used.get(key) ?? new Set<string>()
+    // Choix multiple : chaque étiquette de la case, jamais la case entière (« Parchemin, Culture »).
+    for (const row of table.rows) for (const value of choiceValuesOfCell(row.values[at] ?? "", column.spec)) values.add(value)
+    used.set(key, values)
+  }
+  return used
+}
+
+const frenchCollator = new Intl.Collator("fr", { sensitivity: "base" })
+
+/** La colonne avec ses valeurs déjà écrites à la suite de ses options (rangées), sans doublon. Rien à ajouter : la même. */
+export function withUsedChoices(spec: IndexColumnSpec, values: Iterable<string> | undefined): IndexColumnSpec {
+  if (!values || !isOpenChoiceSpec(spec)) return spec
+  const known = new Set((spec.options ?? []).flatMap((option) => [option.value, ...(option.aliases ?? [])]).map(foldName))
+  const extra = [...values].filter((value) => !known.has(foldName(value)) && Boolean(known.add(foldName(value)))).sort((left, right) => frenchCollator.compare(left, right))
+  return extra.length ? { ...spec, options: [...(spec.options ?? []), ...extra.map((value) => ({ value }))] } : spec
+}
+
 export function joinListValue(values: string[], separator = ",") {
   return values.map((value) => value.trim()).filter(Boolean).join(separator.trim() === "-" ? " - " : ", ")
 }

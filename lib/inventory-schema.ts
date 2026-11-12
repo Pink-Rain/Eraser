@@ -311,6 +311,13 @@ export function inventoryRecycleErrorMessage(code: string) {
         : undefined
 }
 
+/** Le message d'un refus propre à la réserve ou à ce qu'un exemplaire porte en propre (lib/item-instance.ts), ou `undefined`. */
+export function inventoryInstanceErrorMessage(code: string) {
+  return code === "INVALID_INVENTORY_INSTANCE" ? "La réserve, le recyclage ou les lignes d’effet de cet item sont mal formés."
+    : code === "INVENTORY_NO_RESERVE" ? "Cet item n’a plus rien à consommer : actualise puis recommence."
+      : undefined
+}
+
 export const baseInventoryContainerTypes: InventoryContainerTypeRecord[] = [
   { id: "TYPE-ARMES-BASE", name: "Armes de base", category: "Armes", capacity: 6, columns: [], active: true },
   { id: "TYPE-EQUIPEMENT-BASE", name: "Équipement de base", category: "Équipement", capacity: 8, columns: [], active: true },

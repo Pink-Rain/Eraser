@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation"
-import { HardDrive, Puzzle, ShieldCheck, Trash2, Users } from "lucide-react"
+import { EyeOff, HardDrive, Puzzle, ShieldCheck, Trash2, Users } from "lucide-react"
 
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { ErrorJournalPanel } from "@/components/eraser/error-journal-panel"
@@ -19,12 +19,13 @@ export default async function AdministrationPage() {
         eyebrow="Menu"
         title="Administration"
         icon={ShieldCheck}
-        description="Les comptes, la connexion à Google, la corbeille et les extensions, puis ce qui s’est mal passé sur ce serveur."
+        description="Les comptes, la connexion à Google, la corbeille, les extensions et les effets cachés, puis ce qui s’est mal passé sur ce serveur."
         links={[
           { href: "/administration/comptes-et-roles", label: "Comptes et rôles", description: "Les comptes de la table, leurs rôles et leurs accès.", icon: Users },
           { href: "/administration/google-drive", label: "Google Drive et Sheets", description: "Le compte Google relié, les feuilles d’Eraser et leurs performances.", icon: HardDrive },
           { href: "/administration/corbeille", label: "Corbeille", description: "Les personnages, campagnes et index supprimés, à restaurer.", icon: Trash2 },
           { href: "/administration/extensions", label: "Extensions", description: "Les extensions liées à Eraser et qui les reçoit automatiquement.", icon: Puzzle },
+          { href: "/administration/effets-caches", label: "Effets cachés", description: "Les types d’items dont l’effet reste verrouillé tant qu’un personnage ne l’a pas débloqué.", icon: EyeOff },
           ...pages,
         ]}
       >

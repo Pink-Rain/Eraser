@@ -216,6 +216,41 @@ export function useCharacterSatiety(characterId: string) {
 }
 
 /**
+ * Relit la barre d'un personnage déjà affichée (son inventaire vient de changer ailleurs : une
+ * portion mangée par une extension, par exemple). Une barre jamais lue n'est pas demandée.
+ */
+export function reloadSatiety(characterId: string) {
+  if (!entries.get(characterId)?.state) return
+  lastReads.delete(characterId)
+  void loadSatiety(characterId)
+}
+
+/**
+ * Une action sur la barre qu'une autre API enregistre (une portion mangée dans l'inventaire) :
+ * montrée tout de suite si la barre est déjà lue. La fonction rendue la règle : avec la barre
+ * renvoyée par le serveur, elle la montre ; sans (refus), la barre d'avant revient et se relit.
+ */
+export function previewSatiety(characterId: string, action: SatietyAction) {
+  const before = entryOf(characterId).state
+  if (before) setEntry(characterId, { state: applySatietyAction(before, action), error: "" })
+  pendingActions.set(characterId, (pendingActions.get(characterId) ?? 0) + 1)
+  let settled = false
+  return (state: SatietyState | null, error = "") => {
+    if (settled) return
+    settled = true
+    const left = (pendingActions.get(characterId) ?? 1) - 1
+    pendingActions.set(characterId, left)
+    if (state) setEntry(characterId, { state, error })
+    else {
+      if (before && !left) setEntry(characterId, { state: before, error })
+      else if (error) setEntry(characterId, { error })
+      lastReads.delete(characterId)
+      if (!left) void loadSatiety(characterId)
+    }
+  }
+}
+
+/**
  * Sous le portrait, le token et les états : la barre de rassasiement et sa lune. Les jours
  * comptent dans la campagne choisie (la seule, ou celle retenue parmi plusieurs).
  */

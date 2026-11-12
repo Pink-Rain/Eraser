@@ -5,6 +5,7 @@ import Link from "next/link"
 import { ExternalLink, Puzzle, RefreshCw } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { ExtensionSlot } from "@/components/eraser/extension-runtime"
 import type { ExtensionOverview } from "@/lib/extensions-sync"
 
 export type ExtensionsAdminData = { api: number; installable: boolean; extensions: ExtensionOverview[] }
@@ -60,7 +61,11 @@ export function ExtensionsAdmin({ initial }: { initial: ExtensionsAdminData }) {
                 <p className="mt-1 text-sm text-muted-foreground">{extension.description}</p>
                 <a href={`https://github.com/${extension.repository}`} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline">{extension.repository}<ExternalLink className="size-3" /></a>
               </div>
-              {extension.installed && <Button asChild variant="outline" size="sm"><Link href={`/extension/${extension.id}`}>Ouvrir</Link></Button>}
+              <div className="flex items-center gap-2">
+                {/* Ce que l'extension pose sur sa propre ligne (sa roue de réglages…). */}
+                <ExtensionSlot name="administration.extension" context={{ id: extension.id, version: extension.installed?.version ?? null }} className="flex items-center gap-2" />
+                {extension.installed?.page && <Button asChild variant="outline" size="sm"><Link href={`/extension/${extension.id}`}>Ouvrir</Link></Button>}
+              </div>
             </div>
 
             <div className="mt-4 grid gap-1 text-sm">

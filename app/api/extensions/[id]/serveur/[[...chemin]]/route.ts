@@ -2,14 +2,16 @@ import { NextResponse } from "next/server"
 
 import { EXTENSION_API_VERSION, linkedExtension } from "@/lib/extensions"
 import { readInstalledExtension, runExtensionServer } from "@/lib/extensions-install"
+import { extensionIndexList, extensionIndexRead } from "@/lib/extensions-indexes"
 import { extensionDataStore } from "@/lib/extensions-store"
 import { authorizedAccount } from "@/lib/server-auth"
 
 /**
  * La partie serveur d'une extension installée : `/api/extensions/<id>/serveur/<chemin>` lui est
  * confiée telle quelle, avec ce qu'Eraser lui prête (`eraser`, version `EXTENSION_API_VERSION`) :
- * le compte qui demande, le chemin et `store`, ses données sur le serveur partagé
- * (lib/extensions-store.ts). Elle n'accède à rien d'autre d'Eraser.
+ * le compte qui demande, le chemin, `store`, ses données sur le serveur partagé
+ * (lib/extensions-store.ts), et (API 4) `indexes`, la lecture des index du monde
+ * (lib/extensions-indexes.ts). Elle n'accède à rien d'autre d'Eraser.
  */
 async function handle(request: Request, { params }: { params: Promise<{ id: string; chemin?: string[] }> }) {
   const { id, chemin } = await params
@@ -25,6 +27,7 @@ async function handle(request: Request, { params }: { params: Promise<{ id: stri
     account: { uid: account.uid, displayName: account.displayName, role: account.role, accountRole: account.accountRole },
     path: chemin ?? [],
     store: extensionDataStore(id),
+    indexes: { list: extensionIndexList, read: extensionIndexRead },
   }
   try {
     return await runExtensionServer(installed, request, eraser)

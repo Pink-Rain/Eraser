@@ -34,7 +34,7 @@ export function columnOfKind(columns: Array<{ header: string; spec: IndexColumnS
 }
 
 /** Les index du monde à parcourir : ceux d'Eraser déjà reliés (pas les entités) et les index créés. */
-async function worldKeys() {
+export async function worldKeys() {
   const builtin = await Promise.all(Object.keys(worldIndexDefinitions).filter((key) => !isEntityWorldIndexKey(key)).map(async (key) => (await resolveJdrSheet(key as JdrSheetKey).catch(() => null)) ? key as WorldIndexKey : null))
   const custom = (await listCustomIndexes().catch(() => [])).map((entry) => entry.key as WorldIndexKey)
   return [...builtin.filter((key): key is WorldIndexKey => Boolean(key)), ...custom]

@@ -120,6 +120,11 @@
   Ne jamais rajouter de lecture ni de copie en mémoire des items à part (l’ancien
   `listObjectIndexTables` a été retiré à l’alpha 240) ; ne jamais annoncer « branché sur le
   moteur » tant qu’un consommateur lit ailleurs.
+- Ce qu’un exemplaire d’inventaire porte en propre (réserve de portions ou de doses, recyclage,
+  lignes d’effet : `lib/item-instance.ts`) vit dans son JSON « Modificateurs » : toute réécriture
+  de ce JSON passe par `withKeptItemEntries` (ou `keepItemCharges`) ; ne jamais renommer ses
+  cibles (`reserve`, `recyclage`, `effet`). Les effets cachés (types réglés par l’admin, déblocages
+  par personnage) vivent sur le Worker (`lib/hidden-effects-store.ts`), jamais dans Sheets.
 - Le chantier en cours suit la roadmap « Eraser · Vues des index » (document
   partagé du propriétaire) : la relire et la mettre à jour à chaque étape.
 
@@ -220,11 +225,11 @@
 ## Extensions
 
 - Une extension vit dans son propre dépôt GitHub public (`Pink-Rain/Eraser_doc`, `Eraser_map`,
-  `Eraser_page`) et se lie dans `linkedExtensions` (`lib/extensions.ts`), jamais depuis
+  `Eraser_page`, `Eraser_craft`) et se lie dans `linkedExtensions` (`lib/extensions.ts`), jamais depuis
   l'application. Toutes les installations les reçoivent toutes. **Les droits se règlent par module,
   dans chaque extension**, jamais par extension (le tabletop aura des modules pour les MJ, d'autres
   pour les joueurs…) ; les API d'Eraser les vérifient. Ne jamais renommer l'identifiant d'une
-  extension liée (`doc`, `map`, `page`).
+  extension liée (`doc`, `map`, `page`, `craft`).
 - **L'atelier des pages vit dans `Pink-Rain/Eraser_page`** (extension `page`), les documents dans
   `Pink-Rain/Eraser_doc` (extension `doc`) : ne pas les recréer dans Eraser. Eraser garde l'affichage, le modèle et les API des pages, et les données de
   l'atelier (`lib/page-atelier-data.ts`). Un changement de l'atelier se fait dans ce dépôt ; un

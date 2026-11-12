@@ -151,3 +151,23 @@ test("Liste à ajout libre en choix multiple : les valeurs déjà écrites sont 
   assert.deepEqual(columns.choiceValuesOfCell("  ", multiple), []);
   assert.deepEqual(columns.choiceValuesOfCell("<b>Arme</b>; Culture", multiple), ["Arme", "Culture"]);
 });
+
+test("Filtre d'en-tête d'une liste à plusieurs choix : étiquette par étiquette, comme une vue enregistrée", async () => {
+  const grid = await vite.ssrLoadModule("/components/eraser/sheet-grid-filter.tsx");
+  const windows = await vite.ssrLoadModule("/lib/index-windows.ts");
+  const parts = (text) => columns.splitListValue(text, []);
+  const both = "Parchemin, Culture";
+  // Décocher « Parchemin » masque toute ligne qui le porte, même avec d'autres étiquettes…
+  assert.equal(grid.passesFilter({ hidden: ["Parchemin"] }, both, parts(both)), false);
+  assert.equal(grid.passesFilter({ hidden: ["Parchemin"] }, "Culture", parts("Culture")), true);
+  // … exactement comme « Type n'est pas Parchemin », la vue que « Enregistrer comme vue » en tire.
+  assert.equal(windows.matchesCondition({ column: "Type", operator: "n-est-pas", value: "Parchemin" }, both), false);
+  // « Est exactement Culture » vaut pour l'une des étiquettes.
+  assert.equal(grid.passesFilter({ condition: { type: "exact", value: "culture" } }, both, parts(both)), true);
+  assert.equal(grid.passesFilter({ condition: { type: "exact", value: "Arme" } }, both, parts(both)), false);
+  // Un filtre d'avant, qui avait décoché la case entière, la masque toujours ; une case vide se décoche à part.
+  assert.equal(grid.passesFilter({ hidden: [both] }, both, parts(both)), false);
+  assert.equal(grid.passesFilter({ hidden: [""] }, "", []), false);
+  // Sans étiquettes (colonne ordinaire) : rien ne change.
+  assert.equal(grid.passesFilter({ hidden: ["Parchemin"] }, both), true);
+});

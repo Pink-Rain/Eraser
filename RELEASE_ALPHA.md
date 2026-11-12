@@ -1,6 +1,6 @@
-# Eraser 0.1.1-alpha.288 — Des documents de plusieurs pages, en vente chez les marchands, dans le journal
+# Eraser 0.1.1-alpha.291 — Des documents de plusieurs pages, en vente chez les marchands, dans le journal
 
-Cette version arrive **sans réinstallation** (même enveloppe que l'alpha 287) : Eraser la
+Cette version arrive **sans réinstallation** (même enveloppe que l’alpha 290) : Eraser la
 télécharge, redémarre son serveur et recharge la page tout seul. Dans Google Sheets, la feuille
 « Documents de campagne » gagne deux colonnes à droite, « Pages (JSON) » et « Journal », ajoutées
 au premier document enregistré ; rien d'autre ne change.

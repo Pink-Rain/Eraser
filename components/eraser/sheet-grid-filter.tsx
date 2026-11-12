@@ -71,10 +71,16 @@ function compare(left: string, right: string) {
   return frenchNumericOrder.compare(left, right)
 }
 
-export function passesFilter(filter: ColumnFilter | undefined, raw: string) {
+/**
+ * `parts` : les étiquettes d'une case à plusieurs choix (« Parchemin, Culture »). Une étiquette
+ * décochée masque toute ligne qui la porte, comme « n'est pas » d'une vue enregistrée depuis ce
+ * filtre ; « est exactement » vaut pour l'une d'elles, comme « est » d'une vue.
+ */
+export function passesFilter(filter: ColumnFilter | undefined, raw: string, parts?: readonly string[]) {
   if (!filter) return true
   const value = raw.trim()
   if (filter.hidden?.includes(value)) return false
+  if (parts?.length && filter.hidden?.length && parts.some((part) => filter.hidden!.includes(part.trim()))) return false
   const condition = filter.condition
   if (!condition || condition.type === "none") return true
   const expected = condition.value.trim()
@@ -87,7 +93,7 @@ export function passesFilter(filter: ColumnFilter | undefined, raw: string) {
     case "not-contains": return !folded.includes(target)
     case "starts": return folded.startsWith(target)
     case "ends": return folded.endsWith(target)
-    case "exact": return folded === target
+    case "exact": return folded === target || Boolean(parts?.some((part) => fold(part) === target))
     case "gt": return Boolean(value) && compare(value, expected) > 0
     case "gte": return Boolean(value) && compare(value, expected) >= 0
     case "lt": return Boolean(value) && compare(value, expected) < 0
@@ -114,7 +120,7 @@ function Section({ title, open, onToggle, children }: { title: string; open: boo
 /** Le contenu du menu d'en-tête : tri, filtre par condition, filtre par valeurs. */
 export function ColumnMenu({ label, values, filter, sortDirection, onSort, onApply, onClose }: {
   label: string
-  /** Les valeurs distinctes de la colonne (texte brut), « » pour les cellules vides. */
+  /** Les valeurs distinctes de la colonne (texte brut, une par étiquette pour une case à plusieurs choix), « » pour les cellules vides. */
   values: string[]
   filter: ColumnFilter | undefined
   sortDirection: "asc" | "desc" | null
