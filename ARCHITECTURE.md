@@ -572,7 +572,7 @@ auteur dans toutes ses campagnes. Eraser garde :
   et son fond importé `fond-<id de la page>` ;
 - les API : `GET /api/campaigns/[id]/documents` (`?atelier=1` : la campagne, ses sessions, à qui
   donner — `players`, `merchants`, `npcs` —, les modèles du compte et `features`, ce que ce
-  serveur sait garder, pour l'éditeur : « pages » depuis l'alpha 288),
+  serveur sait garder, pour l'éditeur : « pages », « journal », « fonds », « couvertures » et « relief » depuis l'alpha 292),
   `POST` (enregistrer : le rendu WebP et l'impression JPEG sur fond blanc de chaque page, dessinés
   dans le navigateur par l'extension — `render`/`print` pour la première, `render-<n>`/`print-<n>`
   ensuite —, vont dans Drive avec les fonds envoyés — `background`, `background-<id de la
