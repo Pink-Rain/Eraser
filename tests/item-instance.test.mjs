@@ -8,9 +8,8 @@ import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
 
 // Ce qu'un exemplaire de l'inventaire porte en propre (lib/item-instance.ts) : sa réserve
-// (portions, doses), ce qu'il donne en plus au recyclage, les lignes de son effet ; et les effets
-// cachés (lib/hidden-effects.ts). Le modèle pur, puis le vrai lib/google-sheets.ts sur un Google
-// Sheets en mémoire et le serveur partagé en mémoire (tests/fakes/shared-store.ts).
+// (portions, doses), ce qu'il donne en plus au recyclage, les lignes de son effet. Le modèle pur,
+// puis le vrai lib/google-sheets.ts sur un Google Sheets en mémoire.
 const root = fileURLToPath(new URL("..", import.meta.url));
 const dataDir = mkdtempSync(join(tmpdir(), "eraser-instance-"));
 process.env.ERASER_DESKTOP_DATA_DIR = dataDir;
@@ -32,7 +31,6 @@ after(async () => { await vite.close(); rmSync(dataDir, { recursive: true, force
 const instance = await vite.ssrLoadModule("/lib/item-instance.ts");
 const links = await vite.ssrLoadModule("/lib/item-modifiers.ts");
 const documents = await vite.ssrLoadModule("/lib/document-model.ts");
-const hidden = await vite.ssrLoadModule("/lib/hidden-effects.ts");
 const satiety = await vite.ssrLoadModule("/lib/satiety.ts");
 
 test("la réserve d'un exemplaire : validée strictement, consommée une unité à la fois", () => {
@@ -112,22 +110,6 @@ test("ce que l'exemplaire porte en propre survit à chaque réécriture de son J
   const replaced = instance.withKeptItemEntries(instance.withItemReserve("", { count: 1, total: 3, unit: "dose" }), marked);
   assert.equal(instance.parseItemReserve(replaced).count, 1);
   assert.equal(instance.withKeptItemEntries("", ""), "");
-});
-
-test("effets cachés : types choisis par un admin, items débloqués par personnage, sans accents ni casse", () => {
-  const effects = { hiddenTypes: hidden.cleanEffectNames("Ingrédient, Base,  alchimie ; ingredient", 60), unlocked: [] };
-  assert.deepEqual(effects.hiddenTypes, ["Ingrédient", "Base", "alchimie"]);
-  assert.equal(hidden.isEffectHidden("Pomme", "ingredient", effects), true);
-  assert.equal(hidden.isEffectHidden("Épée", "Arme", effects), false);
-  assert.equal(hidden.isEffectHidden("Pomme", "", effects), false);
-  assert.equal(hidden.isEffectHidden("Pomme", "Ingrédient", { hiddenTypes: [], unlocked: [] }), false, "rien de choisi : rien de caché");
-  assert.equal(hidden.isEffectHidden("Pomme", "Ingrédient", null), false);
-  const unlocked = { ...effects, unlocked: hidden.withUnlockedEffect([], "  POMME ", true) };
-  assert.deepEqual(unlocked.unlocked, ["pomme"]);
-  assert.equal(hidden.isEffectHidden("Pomme", "Ingrédient", unlocked), false);
-  assert.equal(hidden.isHiddenEffectType("Alchimie", unlocked), true, "débloqué, le type reste caché (on peut reverrouiller)");
-  assert.deepEqual(hidden.withUnlockedEffect(["pomme", "menthe"], "Pomme", false), ["menthe"]);
-  assert.equal(hidden.foldEffectName("Écorce  d’Érable"), "ecorce d'erable");
 });
 
 test("une portion rend sa Nutrition à la barre de rassasiement, bornée", () => {
@@ -217,17 +199,3 @@ test("create-item, use-reserve et recyclage d'un exemplaire fabriqué, sur l'inv
   assert.equal(slotOf(current, "Bocal").quantity, 1);
 });
 
-test("effets débloqués par personnage et types cachés, gardés sur le serveur partagé", async () => {
-  const shared = await vite.ssrLoadModule("/tests/fakes/shared-store.ts");
-  const store = await vite.ssrLoadModule("/lib/hidden-effects-store.ts");
-  shared.reset();
-  assert.deepEqual(await store.readCharacterEffects("P-1"), { hiddenTypes: [], unlocked: [] });
-  assert.deepEqual(await store.saveHiddenEffectTypes(["Ingrédient", "ingredient", " Alchimie "]), ["Ingrédient", "Alchimie"]);
-  assert.deepEqual(await store.setUnlockedEffect("P-1", "Pomme", true), ["pomme"]);
-  assert.deepEqual(await store.setUnlockedEffect("P-1", "Écorce", true), ["pomme", "ecorce"]);
-  assert.deepEqual(await store.setUnlockedEffect("P-1", "POMME", false), ["ecorce"]);
-  assert.deepEqual(await store.readCharacterEffects("P-1"), { hiddenTypes: ["Ingrédient", "Alchimie"], unlocked: ["ecorce"] });
-  assert.deepEqual((await store.readCharacterEffects("P-2")).unlocked, [], "chaque personnage a les siens");
-  await assert.rejects(store.setUnlockedEffect("P-1", "   ", true), /ITEM_EFFECTS_INVALID/);
-  assert.deepEqual(await store.saveHiddenEffectTypes([]), [], "vide : plus rien de caché");
-});

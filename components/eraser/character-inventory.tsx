@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent, type ReactNode, type SetStateAction } from "react"
-import { Anvil, ArrowDownToLine, ArrowLeft, Backpack, BookOpen, Check, ChevronDown, ChevronRight, Coins, Eye, EyeOff, FlaskConical, Gem, LoaderCircle, Lock, LockOpen, Minus, MoveRight, PackageOpen, Pencil, Plus, Recycle, Search, Shield, Soup, Sword, Trash2, UserRound, Users, X } from "lucide-react"
+import { Anvil, ArrowDownToLine, ArrowLeft, Backpack, BookOpen, Check, ChevronDown, ChevronRight, Coins, Eye, EyeOff, FlaskConical, Gem, LoaderCircle, Minus, MoveRight, PackageOpen, Pencil, Plus, Recycle, Search, Shield, Soup, Sword, Trash2, UserRound, Users, X } from "lucide-react"
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { useInventoryReceived } from "@/components/eraser/item-notifications"
@@ -9,7 +9,6 @@ import { markNewSlots, NewSlotsContext, receivedSlots, useNewSlot, useNewSlots }
 import { useCommitOnLeave } from "@/components/eraser/use-commit-on-leave"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -35,8 +34,7 @@ import { playItemEquipped, playItemUnequipped } from "@/lib/sounds"
 import { DocumentViewerDialog } from "@/components/eraser/document-viewer"
 import { documentOfItem } from "@/lib/document-model"
 import { itemReserveAfter, itemReserveLabel, parseItemEffectSources, parseItemReserve, withItemReserve, type ItemReserve } from "@/lib/item-instance"
-import { foldEffectName, isEffectHidden, isHiddenEffectType, type CharacterEffects } from "@/lib/hidden-effects"
-import { useCharacterEffects } from "@/components/eraser/hidden-effects"
+import { isEffectShown, onShownEffectsChange, setEffectsShown } from "@/lib/shown-effects"
 import { previewSatiety, reloadSatiety } from "@/components/eraser/satiety"
 import type { SatietyState } from "@/lib/satiety"
 
@@ -236,36 +234,18 @@ function ItemDescription({ item, template, readOnly, withDescription, extras, on
  */
 const EffectBehindEyeContext = createContext(false)
 
-/**
- * Les effets montrés, gardés sur cet ordinateur (comme les plis de l'inventaire) : un effet
- * montré le reste après une actualisation ou un redémarrage d'Eraser, un effet recaché aussi.
- * On retient les exemplaires dont l'effet est montré : caché est l'état d'office.
- */
-const shownEffectsKey = "eraser:inventory-shown-effects"
-const shownEffectsLimit = 1000
-
-function readShownEffects(): string[] {
-  try {
-    const stored: unknown = JSON.parse(window.localStorage.getItem(shownEffectsKey) ?? "[]")
-    return Array.isArray(stored) ? stored.filter((key): key is string => typeof key === "string") : []
-  } catch { return [] }
-}
-
-function rememberShownEffect(slotId: string, shown: boolean) {
-  // Relu au moment du clic : chaque ligne d'item garde la sienne sans effacer celle des autres.
-  const others = readShownEffects().filter((key) => key !== slotId)
-  const next = shown ? [...others, slotId].slice(-shownEffectsLimit) : others
-  try { window.localStorage.setItem(shownEffectsKey, JSON.stringify(next)) } catch { /* l'état vaut pour cette visite */ }
-}
-
 function ItemEffectReveal({ slotId, itemName, parts }: { slotId: string; itemName: string; parts: ReactNode[] }) {
   const [shown, setShown] = useState(false)
+  // Lu après l'affichage (le serveur ne connaît pas cet ordinateur), puis suivi : un atelier
+  // d'une extension peut montrer ou cacher le même effet.
   useEffect(() => {
-    if (readShownEffects().includes(slotId)) queueMicrotask(() => setShown(true))
+    const read = () => setShown(isEffectShown(slotId))
+    queueMicrotask(read)
+    return onShownEffectsChange(read)
   }, [slotId])
   function toggle(next: boolean) {
     setShown(next)
-    rememberShownEffect(slotId, next)
+    setEffectsShown([slotId], next)
   }
   const label = shown ? `Cacher l’effet de ${itemName}` : `Voir l’effet de ${itemName}`
   // L'œil dit l'état : barré tant que l'effet est caché, ouvert quand on le voit.
@@ -334,17 +314,6 @@ function RecycleDialogBody({ itemName, quantity, products, customized, onConfirm
 }
 
 /**
- * Les effets cachés du personnage dont c'est l'inventaire (lib/hidden-effects.ts) : seulement sur
- * sa fiche. `canEdit` : le compte peut débloquer ou reverrouiller un effet (pas en lecture seule).
- */
-const CharacterEffectsContext = createContext<{ effects: CharacterEffects | null; canEdit: boolean; toggle: (item: string, unlocked: boolean) => void } | null>(null)
-
-/** « Effet verrouillé », « Effet inconnu » : discret, en italique. */
-function LockedEffect({ label, title }: { label: string; title?: string }) {
-  return <span className="inline-flex items-center gap-1 italic text-muted-foreground/55" title={title}><Lock className="size-3 shrink-0" />{label}</span>
-}
-
-/**
  * La réserve d'un exemplaire (lib/item-instance.ts) : une icône par unité, pâle une fois
  * consommée (un bol pour une portion, une fiole pour une dose). Un clic en consomme une : elle
  * pâlit tout de suite, et revient si le serveur refuse.
@@ -373,7 +342,6 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
   const [reading, setReading] = useState(false)
   const itemDisplay = useItemDisplay()
   const effectBehindEye = useContext(EffectBehindEyeContext)
-  const characterEffects = useContext(CharacterEffectsContext)
   const modifiers = parseItemModifiers(slot.modifiers)
   // Sa réserve (portions, doses), et les lignes de son effet avec ce qui les apporte (lib/item-instance.ts).
   const reserve = parseItemReserve(slot.modifiers)
@@ -389,8 +357,6 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
   const equippable = !readOnly && !flat && container.category !== "Bourse" && container.category !== GROUND_CATEGORY
   if (!item) return null
   const shown = effectiveItemFields(item, slot.modifiers)
-  // Un item d'un type caché, pas encore débloqué par le personnage : « Effet verrouillé ».
-  const effectLocked = isEffectHidden(item.name, item.type, characterEffects?.effects)
   // Une illustration propre à l'objet passe avant l'icône.
   const visualIsImage = /^(?:https?:\/\/|\/)/i.test(item.image || "")
   const update = (changes: Partial<ItemFields> & { descriptionHtml?: string; effectHtml?: string }) => mutate({
@@ -420,7 +386,6 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
       const filled = Boolean(item.effect.trim() || richTextPlainText(item.effectHtml || "").trim())
       if (container.category === "Esthétique" && !item.effect.trim()) return null
       if (readOnly && !filled) return null
-      if (effectLocked) return filled ? <div className="flex gap-1">{labelOf(field)}<LockedEffect label="Effet verrouillé" title={characterEffects?.canEdit ? "Clic droit sur l’item : débloquer l’effet" : undefined} /></div> : null
       return <div className="flex gap-1">{labelOf(field)}<InlineField readOnly={readOnly} multiline label="l’effet" value={item.effect} html={item.effectHtml} template={shown} className="min-w-0 flex-1" onCommit={(effect) => update({ effect }).then(() => undefined)} onRichCommit={(effectHtml) => void update({ effect: richTextPlainText(effectHtml), effectHtml })} /></div>
     }
     return undefined
@@ -430,20 +395,14 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
   const underParts = itemZoneParts(placeZone(placed, "under"), { ...zone, inline: true })
   const descriptionFields = placeZone(placed, "description")
   const descriptionParts = itemZoneParts(descriptionFields, zone)
-  // Les lignes d'effet d'un item fabriqué suivent son effet ; celles d'un type caché pas encore débloqué restent inconnues.
-  const sourceLines = effectSources.length ? <ul key="effect-sources" className="grid gap-0.5">{effectSources.map((line, index) => <li key={index} className="min-w-0">{isEffectHidden(line.source, line.type, characterEffects?.effects) ? <LockedEffect label="Effet inconnu" /> : <span title={line.source}>{line.text}</span>}</li>)}</ul> : null
+  // Les lignes d'effet d'un item fabriqué (l'effet de chaque ingrédient) suivent son effet, derrière le même œil.
+  const sourceLines = effectSources.length ? <ul key="effect-sources" className="grid gap-0.5">{effectSources.map((line, index) => <li key={index} className="min-w-0"><span title={line.source}>{line.text}</span></li>)}</ul> : null
   const effectParts = [...itemZoneParts(placeZone(placed, "effect"), zone), ...(sourceLines ? [sourceLines] : [])]
   const withDescription = zoneHas(descriptionFields, "description")
   const expected: SlotExpectation = { expectedItemId: slot.itemId, expectedQuantity: slot.quantity }
   // « Se recycle en » de l'Index des items, et ce que l'exemplaire donne en propre : au moins un autre item.
   const recyclable = slot.quantity > 0 && container.category !== "Bourse" && item.recycle?.length ? item.recycle : null
-  // Clic droit : débloquer ou reverrouiller l'effet de l'item, et celui de chaque item d'un type
-  // caché dont il tient une ligne d'effet (le joueur, son MJ, un admin ; jamais en lecture seule).
-  const lockable = characterEffects?.canEdit && !readOnly ? [
-    ...(isHiddenEffectType(item.type, characterEffects.effects) ? [{ name: item.name, own: true }] : []),
-    ...effectSources.filter((line) => isHiddenEffectType(line.type, characterEffects.effects) && foldEffectName(line.source) !== foldEffectName(item.name)).map((line) => ({ name: line.source, own: false })),
-  ].filter((entry, index, all) => all.findIndex((other) => foldEffectName(other.name) === foldEffectName(entry.name)) === index) : []
-  const article = <article className="relative rounded-xl border border-border/55 bg-background/40 p-3 shadow-sm" onPointerMove={fresh.isNew ? fresh.seen : undefined} onFocusCapture={fresh.isNew ? fresh.seen : undefined}>
+  return <article className="relative rounded-xl border border-border/55 bg-background/40 p-3 shadow-sm" onPointerMove={fresh.isNew ? fresh.seen : undefined} onFocusCapture={fresh.isNew ? fresh.seen : undefined}>
     {fresh.isNew && <span className="absolute -left-1 -top-1 size-2.5 rounded-full bg-rose-400 ring-2 ring-card" title="Item reçu — disparaît au survol" aria-label="Nouvel item reçu" />}
     <div className="flex items-start gap-3">
       {equippable && <Checkbox checked={slot.equipped} disabled={pending} onCheckedChange={(checked) => { if (checked === true) playItemEquipped(); else playItemUnequipped(); void mutate({ action: "set-equipped", slotId: slot.id, equipped: checked === true }, `slot:${slot.id}`) }} className="mt-3" aria-label={`${slot.equipped ? "Déséquiper" : "Équiper"} ${item.name}`} title={slot.equipped ? (modifiers.length ? "Équipé — ses liens comptent dans les totaux" : "Équipé") : "Non équipé"} />}
@@ -471,19 +430,6 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
     {documentRef && <DocumentViewerDialog document={reading ? { campaignId: documentRef.campaignId, documentId: documentRef.documentId, title: item.name } : null} onClose={() => setReading(false)} />}
     {equippable && <ItemModifierDialog open={linking} onOpenChange={setLinking} itemName={item.name} base={item} effective={shown} modifiers={modifiers} effectHtml={item.effectHtml?.trim() ? sanitizeRichText(item.effectHtml) : escapeRichText(item.effect).replace(/\n/g, "<br>")} onSaveEffect={(effectHtml) => update({ effect: richTextPlainText(effectHtml), effectHtml })} pending={pending} onSave={(serialized) => mutate({ action: "set-modifiers", slotId: slot.id, modifiers: keepItemCharges(serialized, slot.modifiers) }, `slot:${slot.id}`)} />}
   </article>
-  if (!lockable.length || !characterEffects) return article
-  const unlockedNow = (name: string) => characterEffects.effects?.unlocked.includes(foldEffectName(name)) ?? false
-  return <ContextMenu>
-    <ContextMenuTrigger asChild>{article}</ContextMenuTrigger>
-    <ContextMenuContent className="w-64">
-      <ContextMenuLabel className="truncate text-xs text-muted-foreground">{item.name}</ContextMenuLabel>
-      {lockable.map((entry) => {
-        const unlocked = unlockedNow(entry.name)
-        const what = entry.own ? "l’effet" : `l’effet de ${entry.name}`
-        return <ContextMenuItem key={entry.name} onSelect={() => characterEffects.toggle(entry.name, !unlocked)}>{unlocked ? <Lock /> : <LockOpen />}{unlocked ? `Reverrouiller ${what}` : `Débloquer ${what}`}</ContextMenuItem>
-      })}
-    </ContextMenuContent>
-  </ContextMenu>
 }
 
 function CurrencyLine({ slot, container, readOnly, mutate }: { slot: InventorySlotRecord; container: InventoryContainerRecord; readOnly: boolean; mutate: Mutate }) {
@@ -642,12 +588,9 @@ export function CharacterInventory({ characterId, initialInventory, endpoint, fl
   const [targetsLoaded, setTargetsLoaded] = useState(false)
   const [targetsLoading, setTargetsLoading] = useState(false)
   const inventoryEndpoint = endpoint || `/api/characters/${encodeURIComponent(characterId)}/inventory`
-  // L'inventaire d'un personnage (sa fiche) : ses effets cachés, et sa barre de rassasiement
-  // qu'une portion mangée remplit. Les autres inventaires (campagne, PNJ, index) n'en ont pas.
+  // L'inventaire d'un personnage (sa fiche) : sa barre de rassasiement, qu'une portion mangée
+  // remplit. Les autres inventaires (campagne, PNJ, index) n'en ont pas.
   const ownCharacter = !endpoint && mode === "character"
-  const characterEffects = useCharacterEffects(ownCharacter ? characterId : "")
-  const { toggle: toggleEffect } = characterEffects
-  const effectsContext = useMemo(() => ownCharacter ? { effects: characterEffects.effects, canEdit: !readOnly, toggle: (item: string, unlocked: boolean) => void toggleEffect(item, unlocked) } : null, [characterEffects.effects, ownCharacter, readOnly, toggleEffect])
   // Un item reçu recharge l'inventaire affiché (la fiche, elle, recharge le sien).
   const [reloads, setReloads] = useState(0)
   // Un item annoncé : le prochain inventaire reçu est comparé au précédent pour poser la pastille.
@@ -841,15 +784,14 @@ export function CharacterInventory({ characterId, initialInventory, endpoint, fl
   }
   const sectionProps = { inventory, pendingKey, openSearch, catalogLoading, searches, flat: effectiveFlat, readOnly, transferTargets, targetsLoading, setSearches, openItemSearch: (containerId: string) => void openItemSearch(containerId), closeItemSearch: () => setOpenSearch(null), openContainerCreation, openContainerEdition, openItemCreation, ensureTargets, mutate, isFolded: folds.isFolded, toggleFold: folds.toggle }
   if (initialLoading) return <div className="grid min-h-32 place-items-center rounded-2xl border border-dashed"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>
-  return <NewSlotsContext.Provider value={newSlots}><EffectBehindEyeContext.Provider value={effectBehindEye}><CharacterEffectsContext.Provider value={effectsContext}><section>
+  return <NewSlotsContext.Provider value={newSlots}><EffectBehindEyeContext.Provider value={effectBehindEye}><section>
     {pendingKey && <div className="mb-3 flex justify-end"><LoaderCircle className="size-4 animate-spin text-muted-foreground" /></div>}
     {error && <p className="mb-3 rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive">{error}</p>}
-    {characterEffects.error && <p className="mb-3 flex items-center gap-2 rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive" role="alert"><span className="flex-1">{characterEffects.error}</span><button type="button" onClick={characterEffects.clearError} className="rounded-md p-1 hover:bg-destructive/10" aria-label="Fermer"><X className="size-3.5" /></button></p>}
     {notice && <p className="mb-3 flex items-center gap-2 rounded-xl border px-4 py-3 text-sm" style={{ borderColor: `${categoryPresentation[GROUND_CATEGORY].color}55`, color: categoryPresentation[GROUND_CATEGORY].color }}><ArrowDownToLine className="size-4 shrink-0" /><span className="flex-1">{notice}</span><button type="button" onClick={() => setNotice("")} className="rounded-md p-1 hover:bg-muted" aria-label="Fermer"><X className="size-3.5" /></button></p>}
     {categories?.length ? <><div className="grid items-start gap-4">{categories.map((category, index) => <CategorySection key={category} category={category} gear={index === 0} {...sectionProps} />)}</div>{!effectiveFlat && categories.includes("Inventaire") && inventory.containers.some((container) => container.custom) && <CustomInventorySection {...sectionProps} />}</> : effectiveFlat ? <>{/* Un inventaire plat n'a pas d'en-tête : la roue se pose au-dessus (MJ seulement). */}<div className="-mt-1 mb-1 flex justify-end empty:hidden"><ItemDisplaySettingsLink place="inventory" /></div><CategorySection category="Inventaire" {...sectionProps} /></> : <div className="grid items-start gap-4 xl:grid-cols-2"><div className="space-y-4"><CategorySection category="Armes" {...sectionProps} /><CategorySection category="Équipement" {...sectionProps} /><CategorySection category="Esthétique" {...sectionProps} /><CustomInventorySection side="left" {...sectionProps} onCreate={() => setCustomDialog({ container: null, side: "left" })} /></div><div className="space-y-4">{/* La bourse, et à côté d'elle, à sa hauteur, ce qu'y posent les extensions (les ateliers de fabrication…). */}<div className="flex flex-wrap items-stretch gap-4"><div className="flex min-w-[17rem] flex-1 flex-col [&>*]:flex-1"><CategorySection category="Bourse" {...sectionProps} /></div><ExtensionSlot name="inventaire.bourse" context={{ characterId, readOnly }} className="flex flex-col [&>*]:flex-1" /></div><CategorySection category="Inventaire" gear {...sectionProps} /><CategorySection category={GROUND_CATEGORY} {...sectionProps} /><CustomInventorySection side="right" {...sectionProps} onCreate={() => setCustomDialog({ container: null, side: "right" })} /></div></div>}
     <CustomInventoryDialog open={customDialog !== null} container={customDialog?.container ?? null} side={customDialog?.side ?? "left"} pending={Boolean(pendingKey)} onOpenChange={(open) => { if (!open) setCustomDialog(null) }} onSave={saveCustomInventory} />
     <Dialog open={addingCategory !== null} onOpenChange={(open) => { if (!open) setAddingCategory(null) }}><DialogContent><DialogHeader><DialogTitle>Ajouter {addingCategory ? categoryPresentation[addingCategory].singular : "un contenant"}</DialogTitle></DialogHeader><div className="mt-2 grid gap-4">{addingCategory && inventory.containerTypes.some((type) => type.category === addingCategory) && <Label className="grid gap-1.5 text-sm font-medium">Modèle<NativeSelect value="" onChange={(event) => { const preset = inventory.containerTypes.find((type) => type.id === event.target.value); if (preset) setNewContainer({ name: preset.name, capacity: String(preset.capacity) }) }}><NativeSelectOption value="">Choisir…</NativeSelectOption>{inventory.containerTypes.filter((type) => type.category === addingCategory).map((type) => <NativeSelectOption key={type.id} value={type.id}>{type.name} · {type.capacity}</NativeSelectOption>)}</NativeSelect></Label>}<Label className="grid gap-1.5 text-sm font-medium">Nom<Input value={newContainer.name} onChange={(event) => setNewContainer((current) => ({ ...current, name: event.target.value }))} maxLength={120} /></Label><Label className="grid gap-1.5 text-sm font-medium">{addingCategory === "Bourse" ? "Capacité" : "Emplacements"}<Input type="number" min={1} max={10000} value={newContainer.capacity} onChange={(event) => setNewContainer((current) => ({ ...current, capacity: event.target.value }))} /></Label><Button type="button" disabled={!addingCategory || !newContainer.name.trim() || !Number(newContainer.capacity) || Boolean(pendingKey)} onClick={async () => { if (!addingCategory) return; const saved = await mutate({ action: "create-container", name: newContainer.name, category: addingCategory, capacity: Number(newContainer.capacity) }, `create:${addingCategory}`); if (saved) setAddingCategory(null) }}><Plus />Ajouter</Button></div></DialogContent></Dialog>
     <Dialog open={editingContainer !== null} onOpenChange={(open) => { if (!open) setEditingContainer(null) }}><DialogContent><DialogHeader><DialogTitle>Modifier le contenant</DialogTitle></DialogHeader><div className="mt-2 grid gap-4"><Label className="grid gap-1.5 text-sm font-medium">Nom<Input value={editedContainer.name} onChange={(event) => setEditedContainer((current) => ({ ...current, name: event.target.value }))} maxLength={120} /></Label><Label className="grid gap-1.5 text-sm font-medium">{editingContainer?.category === "Bourse" ? "Capacité" : "Emplacements"}<Input type="number" min={1} max={10000} value={editedContainer.capacity} onChange={(event) => setEditedContainer((current) => ({ ...current, capacity: event.target.value }))} /></Label><Button type="button" disabled={!editingContainer || !editedContainer.name.trim() || !Number(editedContainer.capacity) || Boolean(pendingKey)} onClick={async () => { if (!editingContainer) return; const saved = await mutate({ action: "update-container", containerId: editingContainer.id, name: editedContainer.name, capacity: Number(editedContainer.capacity) }, `container:${editingContainer.id}:edit`); if (saved) setEditingContainer(null) }}><Check />Enregistrer</Button></div></DialogContent></Dialog>
     <Dialog open={creatingItemFor !== null} onOpenChange={(open) => { if (!open) setCreatingItemFor(null) }}><DialogContent className="sm:max-w-2xl"><DialogHeader><DialogTitle>Créer un item</DialogTitle></DialogHeader><div className="grid gap-4 sm:grid-cols-2"><Label className="grid gap-1.5 text-sm font-medium">Nom<Input value={newItem.name} onChange={(event) => setNewItem((current) => ({ ...current, name: event.target.value }))} maxLength={160} autoFocus /></Label><Label className="grid gap-1.5 text-sm font-medium">Type<Input value={newItem.type} onChange={(event) => setNewItem((current) => ({ ...current, type: event.target.value }))} placeholder="Arme, équipement, ressource…" /></Label><Label className="grid gap-1.5 text-sm font-medium sm:col-span-2">Sous-type<Input value={newItem.subtype} onChange={(event) => setNewItem((current) => ({ ...current, subtype: event.target.value }))} /></Label><div className="grid gap-1.5 text-sm font-medium sm:col-span-2 leading-none">Description<RichTextField ariaLabel="Description" value={newItem.description} onCommit={(html) => setNewItem((current) => ({ ...current, description: html }))} minHeight="min-h-24" /></div><div className="grid gap-1.5 text-sm font-medium sm:col-span-2 leading-none">Effet<RichTextField ariaLabel="Effet" value={newItem.effect} onCommit={(html) => setNewItem((current) => ({ ...current, effect: html }))} minHeight="min-h-24" /></div><div className="flex justify-end gap-2 sm:col-span-2"><Button type="button" variant="ghost" onClick={() => setCreatingItemFor(null)}>Annuler</Button><Button type="button" disabled={!creatingItemFor || !newItem.name.trim() || Boolean(pendingKey)} onClick={async () => { if (!creatingItemFor) return; const saved = await mutate({ action: "create-item", containerId: creatingItemFor.id, ...newItem }, `container:${creatingItemFor.id}:item`); if (saved) { setCreatingItemFor(null); setOpenSearch(null) } }}><Plus />Créer et ajouter</Button></div></div></DialogContent></Dialog>
-  </section></CharacterEffectsContext.Provider></EffectBehindEyeContext.Provider></NewSlotsContext.Provider>
+  </section></EffectBehindEyeContext.Provider></NewSlotsContext.Provider>
 }

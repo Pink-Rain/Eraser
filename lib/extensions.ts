@@ -23,7 +23,7 @@
  * attend qu'Eraser soit à jour. À incrémenter quand on ajoute quelque chose dont une extension
  * aura besoin ; ne jamais retirer ce qu'une version précédente offrait.
  */
-export const EXTENSION_API_VERSION = 4
+export const EXTENSION_API_VERSION = 5
 
 export const EXTENSION_MANIFEST_ASSET = "eraser-extension.json"
 export const EXTENSION_PACK_ASSET = "eraser-extension.pack.gz"

@@ -123,8 +123,8 @@
 - Ce qu’un exemplaire d’inventaire porte en propre (réserve de portions ou de doses, recyclage,
   lignes d’effet : `lib/item-instance.ts`) vit dans son JSON « Modificateurs » : toute réécriture
   de ce JSON passe par `withKeptItemEntries` (ou `keepItemCharges`) ; ne jamais renommer ses
-  cibles (`reserve`, `recyclage`, `effet`). Les effets cachés (types réglés par l’admin, déblocages
-  par personnage) vivent sur le Worker (`lib/hidden-effects-store.ts`), jamais dans Sheets.
+  cibles (`reserve`, `recyclage`, `effet`). L’effet d’un item est caché d’office derrière l’œil
+  de l’inventaire (`lib/shown-effects.ts`) : ne pas ajouter d’autre système de verrou.
 - Le chantier en cours suit la roadmap « Eraser · Vues des index » (document
   partagé du propriétaire) : la relire et la mettre à jour à chaque étape.
 

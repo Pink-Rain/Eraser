@@ -342,16 +342,11 @@ pour tout index. Sa page est `WorldIndexPage`. Il n’a **pas d’autre lecteur*
   et le suivant repart plein). Une portion qui a une Nutrition remplit la barre de rassasiement
   (`updateCharacterSatiety`, action `add`, bornée) : sur une fiche seulement, la barre change tout
   de suite (`previewSatiety`) et la réponse donne `satiety`.
-- les **effets cachés** (`lib/hidden-effects.ts`, `lib/hidden-effects-store.ts`, sur le Worker) :
-  Administration › Effets cachés règle les types d'items dont l'effet est caché (portée
-  `item-effects`, clé `hidden-types`, lue par `sharedSnapshot` ; vide : rien de caché). Chaque
-  personnage garde les items dont il a débloqué l'effet (portée `character-effects`, noms
-  repliés). Sur sa fiche, l'effet d'un tel item est « Effet verrouillé » et une ligne d'effet
-  venue de lui « Effet inconnu » ; clic droit sur l'item (ou la touche menu) : « Débloquer
-  l'effet » / « Reverrouiller l'effet » (son joueur, son MJ, un admin ; jamais en lecture seule).
-  `GET/POST /api/characters/[id]/effects` (droits de l'inventaire) sert la page et les extensions ;
-  la page relit les déblocages quand l'inventaire du personnage change ailleurs
-  (`eraser:inventory-received`, donc `eraser.inventory.changed(id)` d'une extension).
+- l'**œil des effets** (`lib/shown-effects.ts`) : sur la fiche d'un personnage, l'effet de chaque
+  item (et les lignes d'effet d'un item fabriqué) est caché d'office derrière un œil ; le joueur
+  clique pour le voir. Les exemplaires montrés sont retenus sur cet ordinateur. Les extensions
+  lisent et changent le même état (`eraser.inventory.effectShown`, `showEffects`, API 5) : un
+  effet montré dans un atelier l'est aussi dans l'inventaire.
 Les vues d’avant désignaient un onglet par « fichier:sheetId » : la page les lit sous son nom.
 
 ### Affichage des items (inventaire, magasin, fouille)
@@ -720,7 +715,8 @@ items par `create-item` avec réserve, recyclage et lignes d'effet, voir « L'In
     affichée et le rôle de vue), `eraser.page()`, `eraser.go(adresse)`, `eraser.file(chemin)`, et
     comme avant `server`, `eraser` (API d'Eraser), `require`, `account`. API 4 :
     `eraser.inventory.changed(id)`, après une modification d'inventaire par une API d'Eraser : la
-    fiche qui l'affiche le relit (même signal qu'un item reçu, `eraser:inventory-received`).
+    fiche qui l'affiche le relit (même signal qu'un item reçu, `eraser:inventory-received`). API 5 :
+    `eraser.inventory.effectShown(caseId)` et `showEffects(casesIds, montré)`, l'œil des effets.
   - Repères stables pour le CSS des extensions : `data-eraser-part` (`barre-laterale`, `en-tete`,
     `page`, `messages` ; dans une présentation : `vue-en-tete`, `vue-outils`, `vue-section`,
     `vue-pied`) et `data-eraser-slot` ; jamais les classes Tailwind d'Eraser, qui changent.
@@ -759,7 +755,7 @@ items par `create-item` avec réserve, recyclage et lignes d'effet, voir « L'In
   l'extension choisit ce qu'elle en sert à ses pages (un joueur n'ouvre pas les index, mais
   l'atelier lui donne la Nutrition de ses ingrédients). Le reste de Google passe par une API
   d'Eraser.
-- **Version de l'API** : `EXTENSION_API_VERSION` (4 depuis l’alpha 290 : emplacements de
+- **Version de l'API** : `EXTENSION_API_VERSION` (5 depuis l'alpha 294 : l'œil des effets pour les extensions ; 4 depuis l’alpha 290 : emplacements de
   l'inventaire et de l'administration, `inventory.changed`, `indexes` côté serveur ; 3 depuis l'alpha 281 : démarrage, styles globaux,
   emplacements, fenêtres ; 2 : `Page` ; 1 : `mount`). On ne retire jamais rien de ce qu'elle
   offre ; on l'incrémente quand on ajoute ce dont une extension aura besoin. Une extension qui

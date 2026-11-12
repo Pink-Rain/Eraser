@@ -89,7 +89,13 @@ export type Eraser = {
    * personnage (ou de ce PNJ, ou `CAMPAGNE:<id>`) par une API d'Eraser ; la page qui l'affiche le
    * relit, comme pour un item reçu (le nouvel item reçoit sa pastille).
    */
-  inventory: { changed: (ownerId: string) => void }
+  inventory: {
+    changed: (ownerId: string) => void
+    /** API 5 : l'effet de cet exemplaire (case d'inventaire) est-il montré par l'œil de l'inventaire ? Caché d'office. */
+    effectShown: (slotId: string) => boolean
+    /** API 5 : montre ou cache l'effet de ces exemplaires, comme l'œil de l'inventaire (le même état, sur cet ordinateur). */
+    showEffects: (slotIds: string[], shown: boolean) => void
+  }
   /** Écoute un événement d'Eraser. */
   on: <K extends keyof ExtensionEvents>(event: K, listener: (value: ExtensionEvents[K]) => void) => Dispose
 }
