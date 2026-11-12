@@ -12,6 +12,7 @@ import { backlinkSources, indexSourceOf, readOptions, rowTemplates, viewerFor } 
 import { listCustomIndexes } from "@/lib/custom-indexes"
 import { listIndexCards } from "@/lib/index-cards-store"
 import { tabCardsOf } from "@/lib/index-cards"
+import { foldName, usedChoiceValues, withUsedChoices } from "@/lib/index-columns"
 import { linkedBlock, type SavedView } from "@/lib/index-saved-views"
 import { listStoredSavedViews } from "@/lib/index-saved-views-store"
 import { listIndexPresentations, listIndexStatsRecord, listViewPresets } from "@/lib/index-presentations-store"
@@ -158,6 +159,7 @@ export async function GET(request: Request) {
       const [data, presentations, cards, record, presets, layouts] = await Promise.all([isPagesIndex(key) ? pagesIndexSource(account) : getWorldIndexQuick(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), listIndexStatsRecord(key).catch(() => ({ stats: [], groups: [] })), listViewPresets().catch(() => []), listIndexLayouts(key).catch(() => ({}))])
       // Les cartes de l'onglet : celles enregistrées, sinon celles qu'Eraser lui donne (campagnes, pages…).
       const cardsOf = (tab: string) => tabCardsOf(cards, key, tab).cards
+      const usedChoices = usedChoiceValues(data.tables, (tab) => data.columns[tab])
       return NextResponse.json({
         tabs: data.tables.map((table) => ({
           name: table.tabName,
@@ -175,7 +177,8 @@ export async function GET(request: Request) {
           viewList: namedPresentationsOf(Object.entries(presentations).find(([name]) => name.toLocaleLowerCase("fr") === table.tabName.toLocaleLowerCase("fr"))?.[1]).map((item) => ({ id: item.id, name: item.name, kind: item.layout.kind })),
           columns: (data.columns[table.tabName] ?? []).map((column) => column.header).filter((header) => !/^id$/i.test(header)),
           // Les valeurs proposées des colonnes à liste : les conditions d'un bloc les suggèrent.
-          choices: Object.fromEntries((data.columns[table.tabName] ?? []).flatMap((column) => column.spec.options?.length ? [[column.header, column.spec.options.map((option) => option.value).slice(0, 80)]] : [])),
+          // Une Liste à ajout libre (« Type ») : aussi ses valeurs déjà écrites, comme dans l'index.
+          choices: Object.fromEntries((data.columns[table.tabName] ?? []).flatMap((column) => { const spec = withUsedChoices(column.spec, usedChoices.get(foldName(column.header))); return spec.options?.length ? [[column.header, spec.options.map((option) => option.value).slice(0, 80)]] : [] })),
         })),
         stats: record.stats.map((stat) => ({ id: stat.id, title: stat.title, pinned: Boolean(stat.pinned) })),
         // Les presets de vues (« Kanban serré », les tiens…) : autant de formes à choisir pour un bloc.

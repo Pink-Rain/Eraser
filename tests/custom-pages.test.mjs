@@ -681,3 +681,33 @@ test("le module « Classe : fiche complète (comme avant) » se garde sur une pa
   assert.match(modules.eraserModules.find((entry) => entry.key === "classe-fiche").label, /fiche complète/);
   assert.equal(pages.cleanBlock({ id: "m2", type: "module", module: "classe-fiche" }).module, "classe-fiche");
 });
+
+test("Bloc d'une page : une Liste à ajout libre propose ses valeurs déjà écrites, comme l'index (« Type » n'arrive plus vide)", async () => {
+  const columns = await vite.ssrLoadModule("/lib/index-columns.ts");
+  const type = { kind: "choice", multiple: true, allowCustom: true, options: [] };
+  const source = {
+    key: "objects",
+    title: "Items",
+    path: "/ressources/index-des-objets",
+    tables: [
+      { tabName: "Items", headers: ["ID", "Nom", "Type"], rows: [
+        { values: ["IT-1", "Grimoire", "Parchemin, Culture"], html: ["IT-1", "Grimoire", "Parchemin, Culture"] },
+        { values: ["IT-2", "Épée", "Arme de corps à corps"], html: ["IT-2", "Épée", "Arme de corps à corps"] },
+      ] },
+      { tabName: "Réserve", headers: ["ID", "Nom", "Type"], rows: [{ values: ["IT-3", "Arc", "Arme à distance"], html: ["IT-3", "Arc", "Arme à distance"] }] },
+    ],
+    columns: { Items: [{ header: "Type", spec: type }], "Réserve": [{ header: "Type", spec: type }] },
+  };
+  const settings = { presentations: {}, cards: {} };
+  // MJ : toutes les valeurs de l'index, tous onglets, étiquette par étiquette.
+  const forMj = blockData.viewBlockData(source, { tab: "Items", kind: "table", limit: 0, where: { match: "toutes", conditions: [{ column: "Nom", operator: "est", value: "Grimoire" }] } }, settings, { player: false });
+  assert.deepEqual(forMj.specs.Type.options.map((option) => option.value), ["Arme à distance", "Arme de corps à corps", "Culture", "Parchemin"]);
+  assert.equal(forMj.specs.Type.multiple, true);
+  // Joueur : seulement les valeurs des lignes qu'il reçoit.
+  const forPlayer = blockData.viewBlockData(source, { tab: "Items", kind: "table", limit: 0 }, settings, { player: true });
+  assert.deepEqual(forPlayer.specs.Type.options.map((option) => option.value), ["Arme de corps à corps", "Culture", "Parchemin"]);
+  // Une colonne déjà réglée ne change pas d'objet quand il n'y a rien à ajouter.
+  const closed = { kind: "choice", options: [{ value: "Rare" }] };
+  assert.equal(columns.withUsedChoices(closed, ["Commun"]), closed);
+  assert.deepEqual(columns.withUsedChoices({ ...type, options: [{ value: "Agressif", aliases: ["Aggressif"] }] }, ["Aggressif", "Calme"]).options.map((option) => option.value), ["Agressif", "Calme"]);
+});

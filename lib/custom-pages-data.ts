@@ -9,7 +9,7 @@
 import { tabCardsOf, type CardTemplate, type TabCards } from "@/lib/index-cards"
 import { automaticLayoutFor, tabFormOrBuiltin } from "@/lib/index-layout-defaults"
 import { DEFAULT_FORM_ID, type IndexLayout, type TabLayouts } from "@/lib/index-layouts"
-import { foldName, isComputedSpec, isIdHeader, isRichSpec, type IndexColumnSpec } from "@/lib/index-columns"
+import { foldName, isComputedSpec, isIdHeader, isRichSpec, usedChoiceValues, withUsedChoices, type IndexColumnSpec } from "@/lib/index-columns"
 import type { StatColumnGroup, StatDefinition } from "@/lib/index-stats"
 import { fitLayoutToColumns, isPresentationKind, presentationFor, sortLayoutRows, type TabPresentations, type Presentation } from "@/lib/index-presentations"
 import { activeWhere, type ViewBlockKind, type ViewWhere } from "@/lib/custom-pages"
@@ -216,7 +216,10 @@ export function viewBlockData(source: IndexSource, input: ViewBlockInput, settin
     all = at < 0 ? [] : all.filter((row) => cellCitesRow(row.cells[at] ?? "", separator, input.match!))
   }
   const limit = input.limit > 0 ? Math.min(input.limit, MAX_ROWS) : MAX_ROWS
-  const specs = Object.fromEntries(headers.map((header) => [header, columnSpecIn(source, table.tabName, header)]))
+  // Une Liste à ajout libre (« Type ») propose ses valeurs déjà écrites, comme dans l'index : sans
+  // elles, la fiche d'une page n'en proposait aucune. Un joueur : seulement celles des lignes qu'il reçoit.
+  const used = usedChoiceValues(options.player ? [{ tabName: table.tabName, headers, rows: all.map((row) => ({ values: row.cells })) }] : source.tables, (tab) => source.columns[tab])
+  const specs = Object.fromEntries(headers.map((header) => [header, withUsedChoices(columnSpecIn(source, table.tabName, header), used.get(foldName(header)))]))
   const base: ViewBlockData = { kind: "view", index: source.key, title: source.title, tab: table.tabName, view: input.kind, headers, specs, rows: all.slice(0, limit), total: all.length }
   const cards = () => {
     const entry = tabCardsOf(settings.cards, source.key, table.tabName)
