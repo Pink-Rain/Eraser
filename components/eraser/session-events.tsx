@@ -32,6 +32,7 @@ import type { CampaignNpcRecord, SavedShopRecord, ShopGeneratorItem } from "@/li
 import { builtinShopTypes, type ShopTypeDefinition } from "@/lib/shop-types"
 import { drawEncounter, encounterPool, encounterRarityLabels, type EncounterCandidate } from "@/lib/environment-draws"
 import type { ShopBuyer } from "@/lib/shop-access"
+import { thingAttributes } from "@/lib/extensions"
 
 /*
  * Les événements d'une campagne. La page Événements (menu › Créateur de session) les crée,
@@ -199,7 +200,7 @@ function blankEvent(kind: CreatableKind, candidate?: Candidate): SessionEvent {
 type CardAction = { label: string; icon: typeof Sparkles; onClick?: () => void; href?: string; destructive?: boolean }
 
 function EventCard({ event, pending, actions, leading, children }: { event: SessionEvent; pending: boolean; actions: CardAction[]; /** Avant les actions : l'œil du Créateur de session. */ leading?: ReactNode; children?: ReactNode }) {
-  return <article id={event.id} className="relative flex min-w-0 flex-col overflow-hidden rounded-2xl border bg-card/80 shadow-sm target:ring-2 target:ring-primary">
+  return <article id={event.id} {...thingAttributes({ kind: "evenement", id: event.id, label: event.name })} className="relative flex min-w-0 flex-col overflow-hidden rounded-2xl border bg-card/80 shadow-sm target:ring-2 target:ring-primary">
     <div className="flex gap-3 p-3 pr-2">
       <EventPortrait event={event} />
       <div className="min-w-0 flex-1">

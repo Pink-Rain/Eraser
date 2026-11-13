@@ -30,6 +30,7 @@ import { shopItemQuantity, type ShopSale } from "@/lib/shop-purchase"
 import { DOCUMENT_SHOP_SOURCE, documentOfShopItem, documentShopLine } from "@/lib/document-model"
 import { ShopBuyDialog, type ShopPurchaseBinding } from "@/components/eraser/shop-buy-dialog"
 import { builtinShopTypes, findLabels, isShopTypePlace, itemSourceOf, shopPlaceMatcher, shopTypeAllows, shopTypeIcons, shopTypeOf, type ShopTypeDefinition } from "@/lib/shop-types"
+import { thingAttributes } from "@/lib/extensions"
 
 export type { ShopGeneratorItem } from "@/lib/shop-schema"
 
@@ -472,7 +473,7 @@ function ShopCards({ shops, actions, pending, npcs = [], onSave, onSend, onSendS
       return next
     })
   }
-  return <div className={single ? "grid gap-4" : "grid gap-4 xl:grid-cols-2"}>{shops.map((shop) => { const definition = shopTypeOf(types, shop.key); const linkedNpcId = "npcId" in shop && typeof shop.npcId === "string" ? shop.npcId : ""; const vendor = npcs.find((npc) => npc.id === linkedNpcId); const collapsed = actions === "locations" && !single && !openShops.has(shop.id); return <article key={shop.id} data-shop-id={shop.id} className="deferred-section scroll-mt-24 overflow-hidden rounded-2xl border bg-card/90 shadow-sm target:ring-2 target:ring-primary">
+  return <div className={single ? "grid gap-4" : "grid gap-4 xl:grid-cols-2"}>{shops.map((shop) => { const definition = shopTypeOf(types, shop.key); const linkedNpcId = "npcId" in shop && typeof shop.npcId === "string" ? shop.npcId : ""; const vendor = npcs.find((npc) => npc.id === linkedNpcId); const collapsed = actions === "locations" && !single && !openShops.has(shop.id); return <article key={shop.id} data-shop-id={shop.id} {...thingAttributes({ kind: "magasin", id: shop.id, label: shop.name })} className="deferred-section scroll-mt-24 overflow-hidden rounded-2xl border bg-card/90 shadow-sm target:ring-2 target:ring-primary">
     <header className={`grid grid-cols-[4.75rem_minmax(0,1fr)_auto] items-stretch bg-primary/[0.055] sm:grid-cols-[5.5rem_minmax(0,1fr)_auto] ${collapsed ? "" : "border-b"}`}>
       <div className="relative min-h-28 overflow-hidden border-r border-primary/15 bg-primary/[0.06]">
         {linkedNpcId ? <>

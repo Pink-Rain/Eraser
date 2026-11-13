@@ -30,6 +30,7 @@ import { compactRichText } from "@/lib/index-columns"
 import { isNpcLibraryPage, npcBelongsToCampaign } from "@/lib/npc-pages"
 import type { CampaignNpcRecord, ReusablePageOption, SavedShopRecord } from "@/lib/shop-schema"
 import { fetchPersistedShops, persistShops } from "@/components/eraser/shop-persistence"
+import { thingAttributes } from "@/lib/extensions"
 
 export function blankNpc(pageLinked: string): CampaignNpcRecord {
   return {
@@ -215,7 +216,7 @@ type NpcCardAction = { kind: "add-to-session" } | { kind: "remove-from-session" 
 function NpcCard({ npc, pending, mode, action, shops = [], onEdit, onAction, onSend, onLinkShop, onToggleGroup, onDelete }: { npc: CampaignNpcRecord; pending: boolean; mode: "manage" | "session"; action: NpcCardAction; shops?: SavedShopRecord[]; onEdit: () => void; onAction: () => void; onSend?: () => void; onLinkShop?: () => void; onToggleGroup: () => void; onDelete: () => void }) {
   const hp = npc.totalHp > 0 ? Math.max(0, Math.min(100, (npc.currentHp / npc.totalHp) * 100)) : 0
   const campaignNpc = npcBelongsToCampaign(npc)
-  return <article className="overflow-hidden rounded-2xl border bg-card/75 shadow-sm">
+  return <article {...thingAttributes({ kind: "pnj", id: npc.id, label: npc.name })} className="overflow-hidden rounded-2xl border bg-card/75 shadow-sm">
     <div className="grid gap-4 p-4 sm:grid-cols-[7rem_minmax(0,1fr)]">
       <div className="aspect-[4/5] overflow-hidden rounded-xl border bg-muted/40">{npc.portrait ? <img src={npc.portrait} alt={`Portrait de ${npc.name}`} className="size-full object-cover" /> : <div className="grid size-full place-items-center"><UserRound className="size-10 text-primary/25" /></div>}</div>
       <div className="min-w-0 space-y-3">

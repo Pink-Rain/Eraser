@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import { foldNpcName } from "@/lib/npc-pages"
 import type { CampaignNpcRecord } from "@/lib/shop-schema"
+import { thingAttributes } from "@/lib/extensions"
 
 function GroupNpcCard({ npc, canManage, pending, onEdit, onRemove }: { npc: CampaignNpcRecord; canManage: boolean; pending: boolean; onEdit: () => void; onRemove: () => void }) {
   const [open, setOpen] = useState(false)
@@ -21,7 +22,7 @@ function GroupNpcCard({ npc, canManage, pending, onEdit, onRemove }: { npc: Camp
   const hp = npc.totalHp > 0 ? Math.max(0, Math.min(100, (npc.currentHp / npc.totalHp) * 100)) : 0
   const details = [richTextPlainText(npc.title), richTextPlainText(npc.occupation), npc.people].filter(Boolean).join(" · ")
   return <Collapsible open={open} onOpenChange={(next) => { setOpen(next); if (next) setOpened(true) }} asChild>
-    <article className="min-w-0 self-start overflow-hidden rounded-2xl border bg-card/75 shadow-sm">
+    <article {...thingAttributes({ kind: "pnj", id: npc.id, label: npc.name })} className="min-w-0 self-start overflow-hidden rounded-2xl border bg-card/75 shadow-sm">
       <div className="relative grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)]">
         <div className="relative min-h-28 bg-muted">{npc.portrait
           // eslint-disable-next-line @next/next/no-img-element

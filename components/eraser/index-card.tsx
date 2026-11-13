@@ -41,6 +41,7 @@ import {
 } from "@/lib/index-cards"
 import { foldName, gaugeScaleOf, isCheckedValue, isImageSource, matchChoice, normalizeSpec, parseGaugeCell, parseGlyphValue, type IndexColumnSpec } from "@/lib/index-columns"
 import { formatIndexNumber, parseIndexNumber } from "@/lib/index-numbers"
+import { thingAttributes } from "@/lib/extensions"
 import { cn } from "@/lib/utils"
 import { allowedFor, type RoleRow, type ViewRole } from "@/lib/view-roles"
 
@@ -725,7 +726,7 @@ const PAGE = 60
  * Les lignes affichées (recherche, filtres et tri compris) en cartes. Les cartes se
  * dessinent par paquets de 60 en descendant : un index de mille lignes reste fluide.
  */
-export function IndexCardGrid({ card, cardOf, rows, rowSource, onOpen, hrefOf, rowRef, empty }: {
+export function IndexCardGrid({ card, cardOf, rows, rowSource, onOpen, hrefOf, rowRef, rowThing, empty }: {
   card: CardTemplate
   /** La vue « Tout » : chaque ligne avec la carte de son onglet (sinon `card`). */
   cardOf?: (rowKey: string) => CardTemplate
@@ -735,6 +736,8 @@ export function IndexCardGrid({ card, cardOf, rows, rowSource, onOpen, hrefOf, r
   hrefOf?: (rowKey: string) => string | undefined
   /** La ligne citable : au passage de la souris, son survol (la version choisie par la carte, sinon l'étoilée). */
   rowRef?: (rowKey: string) => { index: string; id: string } | null
+  /** La chose d'Eraser que montre une ligne, reconnue par les extensions au clic droit (API 6). */
+  rowThing?: (rowKey: string) => Parameters<typeof thingAttributes>[0]
   empty: ReactNode
 }) {
   const [limit, setLimit] = useState(PAGE)
@@ -756,7 +759,9 @@ export function IndexCardGrid({ card, cardOf, rows, rowSource, onOpen, hrefOf, r
         const node = <IndexCard key={row.key} card={shown} row={rowSource(row.key)} onOpen={() => onOpen(row.key)} href={hrefOf?.(row.key)} />
         // Le survol propre à la carte (fait dans une page) passe avant la version choisie.
         const ref = shown.hover === "-" && !shown.hoverLayout ? null : rowRef?.(row.key)
-        return ref?.id ? <RowHover key={row.key} index={ref.index} id={ref.id} hover={shown.hover} layout={shown.hoverLayout}>{node}</RowHover> : node
+        const thing = rowThing?.(row.key)
+        const attributes = thingAttributes(thing)
+        return ref?.id ? <RowHover key={row.key} index={ref.index} id={ref.id} hover={shown.hover} layout={shown.hoverLayout} attributes={attributes}>{node}</RowHover> : thing?.id ? <div key={row.key} className="min-w-0" {...attributes}>{node}</div> : node
       })}
     </div>
     {more && <div ref={sentinel} className="flex items-center justify-center gap-2 py-3 text-xs text-muted-foreground">

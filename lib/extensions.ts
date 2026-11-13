@@ -23,7 +23,7 @@
  * attend qu'Eraser soit à jour. À incrémenter quand on ajoute quelque chose dont une extension
  * aura besoin ; ne jamais retirer ce qu'une version précédente offrait.
  */
-export const EXTENSION_API_VERSION = 5
+export const EXTENSION_API_VERSION = 6
 
 export const EXTENSION_MANIFEST_ASSET = "eraser-extension.json"
 export const EXTENSION_PACK_ASSET = "eraser-extension.pack.gz"
@@ -44,6 +44,7 @@ export const linkedExtensions: ExtensionDefinition[] = [
   { id: "map", name: "Eraser Map", description: "Le tabletop : cartes, tokens et table partagée en direct.", repository: "Pink-Rain/Eraser_map" },
   { id: "page", name: "Eraser Page", description: "L'atelier des pages : créer et modifier les pages d'Eraser et le menu.", repository: "Pink-Rain/Eraser_page" },
   { id: "craft", name: "Eraser Craft", description: "Les ateliers de fabrication des personnages : cuisine, alchimie et les autres à venir.", repository: "Pink-Rain/Eraser_craft" },
+  { id: "note-mj", name: "Eraser Note MJ", description: "Le carnet du MJ de chaque campagne : notes, préparation des sessions et post-its sur tout.", repository: "Pink-Rain/Eraser_note_mj" },
 ]
 
 export function linkedExtension(id: string): ExtensionDefinition | null {
@@ -142,11 +143,86 @@ export const extensionSlots = {
    * `null`). Chaque extension vérifie `id` et ne s'affiche que sur sa propre ligne.
    */
   "administration.extension": "Sur la ligne d'une extension, dans Administration › Extensions",
+  /**
+   * API 6 : dans l'en-tête du tableau de bord d'une campagne, sous son titre (petits boutons).
+   * `context` : `{ campaignId, campaignName, canManage }` (`canManage` : MJ de la campagne ou
+   * admin ; les API vérifient toujours).
+   */
+  "campagne.en-tete": "Dans l'en-tête du tableau de bord d'une campagne",
+  /**
+   * API 6 : dans le Créateur de session, à la fin de la session choisie (MJ de la campagne et
+   * admin seulement). `context` : `{ campaignId, sessionId, sessionName }`.
+   */
+  "session.preparation": "Dans le Créateur de session, à la fin de la session choisie",
 } as const
 
 export type ExtensionSlotName = keyof typeof extensionSlots
 
 export const extensionSlotNames = Object.keys(extensionSlots) as ExtensionSlotName[]
+
+/**
+ * API 6 : les choses d'Eraser qu'une extension peut reconnaître dans la page (clic droit,
+ * `eraser.menu.add`). Un élément qui en montre une porte `data-eraser-thing` (sa sorte),
+ * `data-eraser-thing-id` et `data-eraser-thing-label` (`thingAttributes`) ; les images et les
+ * liens vers une page d'Eraser sont reconnus seuls. C'est un contrat, gardé par
+ * tests/extensions.test.mjs : on ajoute des sortes, on n'en retire ni n'en renomme jamais, et le
+ * format de leur `id` ne change pas.
+ */
+export const extensionThingKinds = {
+  /** Une ligne d'un index (créature, item, lieu, état…) : `id` « <index>/<identifiant> ». */
+  "ligne": "Une ligne d'un index",
+  /** Une référence citée dans un texte (« {État:Sérénité} ») : `id` « <index>/<identifiant> ». */
+  "reference": "Une référence citée dans un texte",
+  /** Un PNJ : `id` son identifiant. */
+  "pnj": "Un PNJ",
+  /** Un magasin : `id` son identifiant. */
+  "magasin": "Un magasin",
+  /** Un document de campagne : `id` son identifiant. */
+  "document": "Un document de campagne",
+  /** Un personnage : `id` son identifiant. */
+  "personnage": "Un personnage",
+  /** Une session d'une campagne : `id` son identifiant. */
+  "session": "Une session",
+  /** Un événement de campagne : `id` son identifiant. */
+  "evenement": "Un événement de campagne",
+  /** Une image (reconnue seule) : `id` son adresse. */
+  "image": "Une image",
+  /** Un lien vers une page d'Eraser (reconnu seul) : `id` son adresse (« /campagne/… »). */
+  "lien": "Un lien vers une page d'Eraser",
+} as const
+
+export type ExtensionThingKind = keyof typeof extensionThingKinds
+
+/** Une chose d'Eraser repérée dans la page. `href` : où l'ouvrir, si on le sait. */
+export type ExtensionThing = { kind: ExtensionThingKind; id: string; label: string; href: string | null }
+
+/** Les attributs qui font reconnaître une chose (à poser sur l'élément qui la montre). */
+export function thingAttributes(thing: { kind: ExtensionThingKind; id: string; label?: string; href?: string | null } | null | undefined): Record<string, string> {
+  if (!thing?.id) return {}
+  return {
+    "data-eraser-thing": thing.kind,
+    "data-eraser-thing-id": thing.id,
+    ...(thing.label ? { "data-eraser-thing-label": thing.label.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim().slice(0, 200) } : {}),
+    ...(thing.href ? { "data-eraser-thing-href": thing.href } : {}),
+  }
+}
+
+/**
+ * Ce que montre une ligne d'index : un personnage ou un PNJ (leurs index d'entités) se reconnaissent
+ * comme tels, toute autre ligne comme `ligne` (« <index>/<identifiant> »).
+ */
+export function indexRowThing(index: string, id: string, label: string, href: string | null = null): ExtensionThing | null {
+  if (!index || !id) return null
+  if (index === "characters") return { kind: "personnage", id, label, href }
+  if (index === "npcs") return { kind: "pnj", id, label, href }
+  return { kind: "ligne", id: `${index}/${id}`, label, href }
+}
+
+/** La campagne d'une adresse d'Eraser (« /campagne/<id>/… »), ou null. */
+export function campaignOfPath(pathname: string): string | null {
+  const match = /^\/campagne\/([^/?#]+)/.exec(pathname)
+  return match ? decodeURIComponent(match[1]) : null
+}
 
 export function safeExtensionPath(value: string): string | null {
   const path = value.trim()

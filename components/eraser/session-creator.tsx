@@ -29,6 +29,8 @@ import type { CampaignNpcRecord, SavedShopRecord, ShopGeneratorItem } from "@/li
 import { builtinShopTypes, type ShopTypeDefinition } from "@/lib/shop-types"
 import type { CampaignEvent } from "@/lib/campaign-events"
 import { documentRecipients, type CampaignDocumentRecord } from "@/lib/document-model"
+import { thingAttributes } from "@/lib/extensions"
+import { ExtensionSlot } from "@/components/eraser/extension-runtime"
 
 export type SessionMember = { id: string; name: string; people: string; classes: string; level: string; honoraryTitle: string }
 
@@ -314,7 +316,7 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
         <Button type="button" className="mt-5" onClick={() => setCreating(true)}><Plus />Créer une nouvelle session</Button>
       </div>
     </section> : <>
-      <section className="relative overflow-hidden rounded-3xl border bg-muted/40">
+      <section {...thingAttributes({ kind: "session", id: session.id, label: session.name, href: `/campagne/${encodeURIComponent(campaignId)}/lieux-et-rencontres?session=${encodeURIComponent(session.id)}` })} className="relative overflow-hidden rounded-3xl border bg-muted/40">
         <div className="relative aspect-[21/7] min-h-44 w-full">
           {session.bannerUrl
             // eslint-disable-next-line @next/next/no-img-element
@@ -406,6 +408,9 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
         <SectionTitle>Documents</SectionTitle>
         <SessionDocuments campaignId={campaignId} sessionId={session.id} initialDocuments={documents} {...documentRecipients((players.length ? players : members), npcs, shops)} />
       </section>
+
+      {/* Ce que les extensions ajoutent à la préparation de la session (API 6) : les notes du MJ, par exemple. */}
+      <ExtensionSlot name="session.preparation" context={{ campaignId, sessionId: session.id, sessionName: session.name }} className="flex flex-col gap-4 border-t pt-8" />
     </>}
 
     {/* Ce qui est coché : une barre collée en bas de l'écran, comme une sélection de fichiers. */}

@@ -36,7 +36,9 @@ import {
   sanitizeRichText,
   type RichTextTarget,
 } from "@/components/eraser/rich-text"
+import { ExtensionMenuItems } from "@/components/eraser/extension-menu"
 import { usePersistentState } from "@/hooks/use-persistent-state"
+import { thingAttributes } from "@/lib/extensions"
 import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
 import { clampTableColumnWidth, clampTableRowHeight } from "@/hooks/use-persistent-table-layout"
 
@@ -177,6 +179,9 @@ type SheetGridMenu = {
   readOnly: boolean
 }
 
+/** Ce qu'une ligne montre, pour les extensions (lib/extensions.ts, `thingAttributes`). */
+export type SheetGridRowThing = (rowKey: string) => Parameters<typeof thingAttributes>[0]
+
 const SheetGridMenuContext = createContext<SheetGridMenu | null>(null)
 
 function SheetGridRowMenu({ rowKey, rowNumber }: { rowKey: string; rowNumber: number }) {
@@ -205,6 +210,8 @@ function SheetGridRowMenu({ rowKey, rowNumber }: { rowKey: string; rowNumber: nu
     </>}
     </>}
     {menu.rowMenuExtras?.(rowKey)}
+    {/* Ce que les extensions proposent pour cette ligne (API 6). */}
+    <ExtensionMenuItems />
   </>
 }
 
@@ -228,7 +235,7 @@ type SheetGridRowActions = {
  */
 const SheetGridRowView = memo(function SheetGridRowView({
   rowKey, rowNumber, rowIndex, columns, firstKey, manualHeight, selected, activeColumn, fillColumn,
-  version, rowVersion, writeTick, disabled, readOnly, valueOf, renderCustomCell, actions, striped,
+  version, rowVersion, writeTick, disabled, readOnly, valueOf, renderCustomCell, actions, striped, rowThing,
 }: {
   rowKey: string
   rowNumber: number
@@ -250,13 +257,14 @@ const SheetGridRowView = memo(function SheetGridRowView({
   actions: SheetGridRowActions
   /** Une ligne sur deux, à peine teintée, pour suivre une ligne d'un coup d'œil. */
   striped: boolean
+  rowThing?: SheetGridRowThing
 }) {
   // Le fond reste opaque : une cellule figée laisserait sinon voir la colonne
   // qui défile derrière elle. La teinte de sélection est posée par-dessus.
   // Teinte opaque : les colonnes figées recouvrent celles qui défilent.
   // Bordures toujours de la couleur du tableau : un style imposé ne colore que le texte.
   const cellBase = `relative border-b border-r border-foreground p-1 align-top ${striped ? "bg-[color-mix(in_oklab,var(--background)_95%,var(--foreground))]" : "bg-background"} ${manualHeight ? "overflow-hidden" : ""}`
-  return <tr data-row-key={rowKey} data-row-index={rowIndex} style={manualHeight ? { height: manualHeight } : undefined}>
+  return <tr data-row-key={rowKey} data-row-index={rowIndex} {...thingAttributes(rowThing?.(rowKey))} style={manualHeight ? { height: manualHeight } : undefined}>
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <td
@@ -399,7 +407,7 @@ function NewRowDraft({ columns, firstKey, settings, disabled, onDone }: {
 export function SheetGrid({
   layoutKey, columns: allColumns, rows: sourceRows, valueOf, onCommit, renderCustomCell, rowCommands, rowMenuExtras, addRowLabel = "Ajouter une ligne",
   sort, onSort, toolbarLeading, toolbarTrailing, empty, disabled = false, readOnly = false, version = 0, rowVersions, fit = false,
-  fullscreen = false, onExitFullscreen, resetKey = "",
+  fullscreen = false, onExitFullscreen, resetKey = "", rowThing,
 }: {
   layoutKey: string
   columns: SheetGridColumn[]
@@ -411,6 +419,8 @@ export function SheetGrid({
   rowCommands?: SheetGridRowCommands
   /** Entrées propres à la page, ajoutées au bas du menu contextuel d'une ligne. */
   rowMenuExtras?: (rowKey: string) => ReactNode
+  /** La chose d'Eraser que montre une ligne, reconnue par les extensions au clic droit (API 6). Fonction stable : elle passe à chaque ligne. */
+  rowThing?: SheetGridRowThing
   addRowLabel?: string
   sort?: SheetGridSort
   onSort?: (next: SheetGridSort) => void
@@ -874,6 +884,7 @@ export function SheetGrid({
             renderCustomCell={renderCustomCell}
             actions={rowActions}
             striped={rowIndex % 2 === 1}
+            rowThing={rowThing}
           />)}
           {shownRows.length < rows.length && <tr ref={moreRef}><td colSpan={columns.length + 1} className="px-3 py-2 text-xs text-muted-foreground">{shownRows.length} lignes sur {rows.length} : la suite s’affiche en faisant défiler.</td></tr>}
           {(rowCommands?.append || rowCommands?.appendNamed) && !readOnly && Boolean(rows.length) && shownRows.length === rows.length && (drafting && rowCommands.appendNamed

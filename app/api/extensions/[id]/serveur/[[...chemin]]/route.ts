@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server"
 
 import { EXTENSION_API_VERSION, linkedExtension } from "@/lib/extensions"
+import { extensionCampaignAccess, extensionManagedCampaigns } from "@/lib/extensions-campaigns"
 import { readInstalledExtension, runExtensionServer } from "@/lib/extensions-install"
 import { extensionIndexList, extensionIndexRead } from "@/lib/extensions-indexes"
 import { extensionDataStore } from "@/lib/extensions-store"
+import { sanitizeRichText } from "@/lib/rich-text-sanitize"
 import { authorizedAccount } from "@/lib/server-auth"
 
 /**
@@ -11,7 +13,9 @@ import { authorizedAccount } from "@/lib/server-auth"
  * confiée telle quelle, avec ce qu'Eraser lui prête (`eraser`, version `EXTENSION_API_VERSION`) :
  * le compte qui demande, le chemin, `store`, ses données sur le serveur partagé
  * (lib/extensions-store.ts), et (API 4) `indexes`, la lecture des index du monde
- * (lib/extensions-indexes.ts). Elle n'accède à rien d'autre d'Eraser.
+ * (lib/extensions-indexes.ts), et (API 6) `campaigns`, les campagnes du compte et ses droits
+ * (lib/extensions-campaigns.ts), et `richText.sanitize`, le nettoyage d'un texte enrichi
+ * d'Eraser (lib/rich-text-sanitize.ts). Elle n'accède à rien d'autre d'Eraser.
  */
 async function handle(request: Request, { params }: { params: Promise<{ id: string; chemin?: string[] }> }) {
   const { id, chemin } = await params
@@ -28,6 +32,11 @@ async function handle(request: Request, { params }: { params: Promise<{ id: stri
     path: chemin ?? [],
     store: extensionDataStore(id),
     indexes: { list: extensionIndexList, read: extensionIndexRead },
+    campaigns: {
+      managed: () => extensionManagedCampaigns(account),
+      access: (campaignId: string) => extensionCampaignAccess(account, String(campaignId ?? "")),
+    },
+    richText: { sanitize: (html: string) => sanitizeRichText(String(html ?? "")) },
   }
   try {
     return await runExtensionServer(installed, request, eraser)

@@ -657,7 +657,9 @@ seul et arrive sur chaque installation sans réinstaller Eraser. Liées : `doc` 
 **l'éditeur des documents de campagne**, depuis l'alpha 278), `map` (Pink-Rain/Eraser_map,
 tabletop, encore vide), `page` (Pink-Rain/Eraser_page, **l'atelier des pages**, depuis l'alpha 275),
 `craft` (Pink-Rain/Eraser_craft, **les ateliers de fabrication** : cuisine, alchimie… ; il crée ses
-items par `create-item` avec réserve, recyclage et lignes d'effet, voir « L'Index des items »).
+items par `create-item` avec réserve, recyclage et lignes d'effet, voir « L'Index des items »),
+`note-mj` (Pink-Rain/Eraser_note_mj, **le carnet du MJ** de chaque campagne, depuis l'alpha 295 :
+notes rattachées à la campagne, préparation des sessions, post-its posés au clic droit).
 
 - **Liaison** : `linkedExtensions` dans `lib/extensions.ts`, dans le code seulement. L'identifiant
   nomme le dossier d'installation, l'adresse `/extension/<id>` et ses données : il ne se renomme
@@ -717,6 +719,27 @@ items par `create-item` avec réserve, recyclage et lignes d'effet, voir « L'In
     `eraser.inventory.changed(id)`, après une modification d'inventaire par une API d'Eraser : la
     fiche qui l'affiche le relit (même signal qu'un item reçu, `eraser:inventory-received`). API 5 :
     `eraser.inventory.effectShown(caseId)` et `showEffects(casesIds, montré)`, l'œil des effets.
+  - **Le clic droit (API 6)** : `eraser.menu.add(fournisseur)`. À chaque clic droit, le fournisseur
+    reçoit ce qu'il y a sous le pointeur (`things`, la chose la plus proche d'abord ; `selection`, le
+    texte sélectionné ; `page`) et rend ses entrées (ou rien). Moteur :
+    `components/eraser/extension-menu.tsx`. Les entrées s'ajoutent aux menus d'Eraser
+    (`<ExtensionMenuItems>` : ligne d'un tableau d'index, liens de l'application de bureau) ;
+    ailleurs, `<ExtensionContextMenu>` (dans `ExtensionLayers`) ouvre un menu au pointeur, seulement
+    si une extension propose quelque chose, avec « Copier » pour le texte sélectionné. Le menu du
+    système reste dans les zones de saisie et avec Maj + clic droit. Sans fournisseur, rien n'est
+    calculé.
+  - **Les choses d'Eraser (API 6)** : `extensionThingKinds` (`lib/extensions.ts`) nomme ce qu'un
+    clic droit reconnaît : `ligne` et `reference` (`id` « <index>/<identifiant> »), `pnj`, `magasin`,
+    `document`, `personnage`, `session`, `evenement` (leur identifiant), `image` et `lien` (leur
+    adresse, reconnus seuls). L'élément qui montre une chose porte `thingAttributes(…)`
+    (`data-eraser-thing`, `-id`, `-label`, `-href`) : lignes des tableaux, cartes et présentations
+    des index (`rowThing`, `indexRowThing`), fiche d'une ligne, citations dans les textes, cartes de
+    PNJ, magasins, documents de session, personnages de la campagne, événements, bannière de la
+    session. **Toute nouvelle vue d'une de ces choses pose ses attributs**. On ajoute des sortes ;
+    on n'en retire ni n'en renomme jamais, et le format de leur `id` ne change pas (gardé par
+    `tests/extensions.test.mjs`).
+  - **La page (API 6)** : `eraser.page()` et `on("page")` donnent aussi `search` (« ?session=… »,
+    relu à chaque `replaceAppUrl`) et `campaignId` (la campagne de l'adresse, ou null).
   - Repères stables pour le CSS des extensions : `data-eraser-part` (`barre-laterale`, `en-tete`,
     `page`, `messages` ; dans une présentation : `vue-en-tete`, `vue-outils`, `vue-section`,
     `vue-pied`) et `data-eraser-slot` ; jamais les classes Tailwind d'Eraser, qui changent.
@@ -754,8 +777,15 @@ items par `create-item` avec réserve, recyclage et lignes d'effet, voir « L'In
   d'après les copies gardées en mémoire ; jamais les index d'entités. Eraser lit Google ;
   l'extension choisit ce qu'elle en sert à ses pages (un joueur n'ouvre pas les index, mais
   l'atelier lui donne la Nutrition de ses ingrédients). Le reste de Google passe par une API
-  d'Eraser.
-- **Version de l'API** : `EXTENSION_API_VERSION` (5 depuis l'alpha 294 : l'œil des effets pour les extensions ; 4 depuis l’alpha 290 : emplacements de
+  d'Eraser. API 6 : `campaigns.managed()` (les campagnes que le compte mène : les siennes pour un
+  MJ, toutes pour un admin) et `campaigns.access(id)` (`{ id, name, accentColor, manager }` ou
+  null), `lib/extensions-campaigns.ts`, mêmes règles que les pages d'Eraser : ce qui appartient à
+  une campagne s'y range et suit la campagne, pas le compte ; `richText.sanitize(html)`, le
+  nettoyage des textes enrichis d'Eraser (l'éditeur `RichTextField` est prêté par
+  `@/components/eraser/rich-text`).
+- **Version de l'API** : `EXTENSION_API_VERSION` (6 depuis l'alpha 295 : clic droit, choses
+  d'Eraser, `search` et `campaignId` de la page, emplacements `campagne.en-tete` et
+  `session.preparation`, `campaigns` et `richText` côté serveur ; 5 depuis l'alpha 294 : l'œil des effets pour les extensions ; 4 depuis l’alpha 290 : emplacements de
   l'inventaire et de l'administration, `inventory.changed`, `indexes` côté serveur ; 3 depuis l'alpha 281 : démarrage, styles globaux,
   emplacements, fenêtres ; 2 : `Page` ; 1 : `mount`). On ne retire jamais rien de ce qu'elle
   offre ; on l'incrémente quand on ajoute ce dont une extension aura besoin. Une extension qui

@@ -16,6 +16,7 @@ import { allowedFor, pickForRole, type RoleRow, type ViewRole } from "@/lib/view
 import type { CardTemplate } from "@/lib/index-cards"
 import { parseGlyphValue, type IndexColumnSpec } from "@/lib/index-columns"
 import { cellNumber, cellParts } from "@/lib/index-stats"
+import { thingAttributes } from "@/lib/extensions"
 import { cn } from "@/lib/utils"
 import { calendarScaleOf, calendarScales, PRESENTATION_ITEM_CARD, type PresentationClick, dashboardTileKinds, dashboardTileValue, DEFAULT_ITEM_CARD, depthPalette, formatPresentationNumber, groupFormulaValue, groupRowsBy, linkedTiles, rowTree, ruleFor, sortLayoutRows, textWithFormulas, toolbarRows, tileGaugeValue, timelineEntries, treeSize, allPresentationKinds, presentationPalette, type CalendarScale, type DashboardTile, type GroupTabs, type KanbanLane, type RowTreeNode, type TabPresentations, type Presentation, type PresentationLook } from "@/lib/index-presentations"
 
@@ -71,6 +72,8 @@ export type PresentationProps = {
   specOf?: (header: string) => IndexColumnSpec | undefined
   /** La ligne citable (index, identifiant) : au passage de la souris, son survol (la version de `layout.hover`). */
   rowRef?: (rowKey: string) => { index: string; id: string } | null
+  /** La chose d'Eraser que montre une ligne, reconnue par les extensions au clic droit (API 6). */
+  rowThing?: (rowKey: string) => Parameters<typeof thingAttributes>[0]
   /** Un formulaire de l'onglet ouvert ici sur la ligne (le clic d'une carte « Ouvrir un formulaire ») ; absent : la fiche. */
   onOpenForm?: (rowKey: string, formId: string) => void
   /** Le détail modifiable : le formulaire de la ligne, ses champs enregistrés d'eux-mêmes (`locked` : en lecture) ; absent : en lecture. */
@@ -1774,7 +1777,7 @@ export function IndexPresentation(input: PresentationProps) {
     chosen: panelRow, onChoose: (row) => setChosen({ row, mode: structural === "side" ? "side" : "below" }),
     empty: layout.emptyText || input.empty,
   }
-  const { rowRef } = input
+  const { rowRef, rowThing } = input
   // Le survol : celui propre à la vue (fait dans une page), sinon celui choisi par la vue ; sinon (absent)
   // celui de la carte de l'élément (le sien propre, ou sa version) ; sinon l'étoilé.
   // Une règle de couleur vraie pour la ligne y pose son signe, ou la grise.
@@ -1787,14 +1790,16 @@ export function IndexPresentation(input: PresentationProps) {
     const shown = hover ?? element?.hover
     const own = ownHover ?? (hover === undefined ? element?.hoverLayout : undefined)
     const ref = shown === NO_ROW_HOVER && !ownHover ? null : rowRef?.(row)
-    const hovered = ref?.id ? <RowHover index={ref.index} id={ref.id} hover={shown} layout={own} className={className}>{node}</RowHover> : node
+    const thing = rowThing?.(row)
+    const attributes = thingAttributes(thing)
+    const hovered = ref?.id ? <RowHover index={ref.index} id={ref.id} hover={shown} layout={own} className={className} attributes={attributes}>{node}</RowHover> : thing?.id ? <div className={cn("min-w-0", className)} {...attributes}>{node}</div> : node
     const rule = ruleFor(rules, row, valueOf)
     if (!rule || (!rule.icon && !rule.dim && !(rule.tint && itemCard))) return hovered
     return <div className="relative min-w-0" style={{ ...(rule.dim ? { opacity: 0.5, filter: "grayscale(0.6)" } : {}), ...(rule.tint && itemCard ? { boxShadow: `0 0 0 2px ${rule.tint}`, borderRadius: 12 } : {}) }}>
       {hovered}
       {rule.icon && <span aria-hidden className="pointer-events-none absolute right-1.5 top-1.5 z-[2] grid size-5 place-items-center rounded-full border bg-card shadow-sm"><Glyph value={rule.icon} className="size-3" color={rule.tint} /></span>}
     </div>
-  }, [cardOf, hover, itemCard, itemTemplate, ownHover, rowRef, rules, valueOf])
+  }, [cardOf, hover, itemCard, itemTemplate, ownHover, rowRef, rowThing, rules, valueOf])
   // L'en-tête et la barre d'outils : au-dessus de la vue, ou au-dessus du détail (maître-détail, panneau à côté).
   const withDetail = layout.kind === "master-detail" || sidePanel
   const header = <ListHeaderView layout={layout} count={kept.length} />

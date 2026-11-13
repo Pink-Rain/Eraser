@@ -26,14 +26,34 @@
 import type { ComponentType, ReactNode } from "react"
 
 import type { SiteRole } from "@/lib/auth-types"
-import type { ExtensionSlotName } from "@/lib/extensions"
+import type { ExtensionSlotName, ExtensionThing } from "@/lib/extensions"
 
-export type { ExtensionSlotName } from "@/lib/extensions"
+export type { ExtensionSlotName, ExtensionThing, ExtensionThingKind } from "@/lib/extensions"
 
 export type ExtensionAccount = { uid: string; displayName: string; role: SiteRole }
 
-/** La page affichée : son adresse et le rôle sous lequel on la regarde (« Voir en tant que »). */
-export type ExtensionPageState = { pathname: string; viewRole: SiteRole }
+/**
+ * La page affichée : son adresse et le rôle sous lequel on la regarde (« Voir en tant que »).
+ * API 6 : `search`, ce qui suit l'adresse (« ?session=… », ou "") ; `campaignId`, la campagne
+ * de la page (« /campagne/<id>/… »), ou null.
+ */
+export type ExtensionPageState = { pathname: string; viewRole: SiteRole; search: string; campaignId: string | null }
+
+/**
+ * API 6 : ce qu'il y a sous un clic droit. `things` : les choses d'Eraser reconnues sous le
+ * pointeur, la plus proche d'abord (`extensionThingKinds`, lib/extensions.ts) ; `selection` : le
+ * texte sélectionné, ou "".
+ */
+export type ExtensionMenuTarget = { things: ExtensionThing[]; selection: string; page: ExtensionPageState }
+
+/** API 6 : une entrée du menu du clic droit. */
+export type ExtensionMenuEntry = { label: string; icon?: ReactNode; onSelect: () => void; destructive?: boolean }
+
+/**
+ * API 6 : ce qu'une extension propose pour un clic droit (rien : null). Appelé à chaque clic
+ * droit, il doit répondre tout de suite, sans rien attendre du réseau.
+ */
+export type ExtensionMenuProvider = (target: ExtensionMenuTarget) => ExtensionMenuEntry | ExtensionMenuEntry[] | null | undefined
 
 /** Ce que reçoit un composant posé dans un emplacement. `context` : voir `extensionSlots` (lib/extensions.ts). */
 export type ExtensionSlotProps = { eraser: Eraser; context: Record<string, unknown> }
@@ -96,6 +116,13 @@ export type Eraser = {
     /** API 5 : montre ou cache l'effet de ces exemplaires, comme l'œil de l'inventaire (le même état, sur cet ordinateur). */
     showEffects: (slotIds: string[], shown: boolean) => void
   }
+  /**
+   * API 6 : le clic droit. `add(fournisseur)` propose des entrées selon ce qu'il y a sous le
+   * pointeur (`ExtensionMenuTarget`). Elles s'ajoutent aux menus d'Eraser (ligne d'un tableau,
+   * magasin, lien) ou, ailleurs, à un menu qu'Eraser ouvre au pointeur. Le menu du système
+   * reste dans les zones de saisie et avec Maj + clic droit.
+   */
+  menu: { add: (provider: ExtensionMenuProvider) => Dispose }
   /** Écoute un événement d'Eraser. */
   on: <K extends keyof ExtensionEvents>(event: K, listener: (value: ExtensionEvents[K]) => void) => Dispose
 }

@@ -232,11 +232,11 @@
 ## Extensions
 
 - Une extension vit dans son propre dépôt GitHub public (`Pink-Rain/Eraser_doc`, `Eraser_map`,
-  `Eraser_page`, `Eraser_craft`) et se lie dans `linkedExtensions` (`lib/extensions.ts`), jamais depuis
+  `Eraser_page`, `Eraser_craft`, `Eraser_note_mj`) et se lie dans `linkedExtensions` (`lib/extensions.ts`), jamais depuis
   l'application. Toutes les installations les reçoivent toutes. **Les droits se règlent par module,
   dans chaque extension**, jamais par extension (le tabletop aura des modules pour les MJ, d'autres
   pour les joueurs…) ; les API d'Eraser les vérifient. Ne jamais renommer l'identifiant d'une
-  extension liée (`doc`, `map`, `page`, `craft`).
+  extension liée (`doc`, `map`, `page`, `craft`, `note-mj`).
 - **L'atelier des pages vit dans `Pink-Rain/Eraser_page`** (extension `page`), les documents dans
   `Pink-Rain/Eraser_doc` (extension `doc`) : ne pas les recréer dans Eraser. Eraser garde l'affichage, le modèle et les API des pages, et les données de
   l'atelier (`lib/page-atelier-data.ts`). Un changement de l'atelier se fait dans ce dépôt ; un
@@ -257,6 +257,11 @@
 - **Rien dans Eraser qui ne serve qu'à une extension** : on ne prête que ce qu'Eraser utilise
   lui-même ; le reste vit dans le dépôt de l'extension. Pour retirer d'Eraser un module prêté,
   publier d'abord l'extension qui n'en a plus besoin, puis l'alpha qui le retire.
+- **Clic droit et choses d'Eraser (API 6)** : un élément qui montre un PNJ, un magasin, un
+  document, un personnage, une session, un événement ou une ligne d'index porte
+  `thingAttributes(…)` (`lib/extensions.ts`) : toute nouvelle vue de l'une d'elles le pose aussi.
+  Un menu contextuel d'Eraser affiche `<ExtensionMenuItems>` (`components/eraser/extension-menu.tsx`)
+  pour que les extensions y ajoutent leurs entrées.
 - Ce qu'une extension charge encore porte `aria-busy="true"` : le relevé de fluidité mesure son
   ouverture (et le changement de page) jusqu'à ce qu'il n'y en ait plus.
 - Une extension n'appelle jamais Google elle-même : elle passe par une API d'Eraser (porte du quota,

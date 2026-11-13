@@ -23,11 +23,13 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { URL_CHANGE_EVENT } from "@/components/eraser/app-tabs"
+import { addMenuProvider, ExtensionContextMenu, setMenuPageSource } from "@/components/eraser/extension-menu"
 import { announceInventoryReceived } from "@/components/eraser/item-notifications"
 import { isEffectShown, setEffectsShown } from "@/lib/shown-effects"
 import type { SiteRole } from "@/lib/auth-types"
 import type { Dispose, Eraser, ExtensionAccount, ExtensionBootModule, ExtensionDialogProps, ExtensionEvents, ExtensionPageState, ExtensionSlotProps } from "@/lib/extension-api"
-import { EXTENSION_API_VERSION, extensionSlots, type ExtensionSlotName } from "@/lib/extensions"
+import { campaignOfPath, EXTENSION_API_VERSION, extensionSlots, type ExtensionSlotName } from "@/lib/extensions"
 import { noteExtensionBooted } from "@/lib/fluidity-journal"
 import { cn } from "@/lib/utils"
 
@@ -176,7 +178,16 @@ function addLayer(layer: Layer): Dispose {
 
 // ——— La page affichée et les écoutes ———
 
-const pageStore = createStore<ExtensionPageState>({ pathname: "", viewRole: "joueur" })
+const pageStore = createStore<ExtensionPageState>({ pathname: "", viewRole: "joueur", search: "", campaignId: null })
+setMenuPageSource(() => pageStore.get())
+
+/** La page affichée, mise à jour si elle a changé (adresse, ce qui la suit, rôle de vue). */
+function showPage(pathname: string, viewRole: SiteRole) {
+  const search = typeof window === "undefined" ? "" : window.location.search
+  const current = pageStore.get()
+  if (current.pathname === pathname && current.viewRole === viewRole && current.search === search) return
+  pageStore.set({ pathname, viewRole, search, campaignId: campaignOfPath(pathname) })
+}
 
 /** Ouvre une adresse d'Eraser : le routeur de la coque dès qu'elle est là. */
 let goTo: (href: string) => void = (href) => { window.location.assign(href) }
@@ -210,6 +221,13 @@ export function extensionToolbox(extension: { id: string; version: string }, acc
     },
     server: (path, init) => fetch(`/api/extensions/${encodeURIComponent(id)}/serveur/${path.replace(/^\/+/, "")}`, init),
     eraser: (path, init) => path.startsWith("/api/") ? fetch(path, init) : Promise.reject(new Error("Une API d'Eraser commence par « /api/ ».")),
+    menu: {
+      add(provider) {
+        if (typeof provider !== "function") return noop
+        counter += 1
+        return mine(addMenuProvider(id, `${id}:${counter}`, provider))
+      },
+    },
     inventory: { changed: (ownerId) => announceInventoryReceived(ownerId), effectShown: (slotId) => isEffectShown(slotId), showEffects: (slotIds, shown) => setEffectsShown(slotIds, shown) },
     slots: {
       add(slot, component, options) {
@@ -272,7 +290,7 @@ export function extensionToolbox(extension: { id: string; version: string }, acc
       if (last.pathname) queueMicrotask(() => notify(pageStore.get()))
       const unsubscribe = pageStore.subscribe(() => {
         const next = pageStore.get()
-        if (next.pathname === last.pathname && next.viewRole === last.viewRole) return
+        if (next.pathname === last.pathname && next.viewRole === last.viewRole && next.search === last.search) return
         last = next
         notify(next)
       })
@@ -360,8 +378,12 @@ export function ExtensionBoot({ extensions, account, pathname, viewRole }: {
   }, [router])
 
   useEffect(() => {
-    const current = pageStore.get()
-    if (current.pathname !== pathname || current.viewRole !== viewRole) pageStore.set({ pathname, viewRole })
+    showPage(pathname, viewRole)
+    // Ce qui suit l'adresse change aussi sans changer de page (« ?session=… ») : relu à chaque fois.
+    const reread = () => showPage(pathname, viewRole)
+    window.addEventListener(URL_CHANGE_EVENT, reread)
+    window.addEventListener("popstate", reread)
+    return () => { window.removeEventListener(URL_CHANGE_EVENT, reread); window.removeEventListener("popstate", reread) }
   }, [pathname, viewRole])
 
   useEffect(() => {
@@ -382,12 +404,13 @@ export function ExtensionBoot({ extensions, account, pathname, viewRole }: {
 
 // ——— Ce qui se rend par-dessus tout ———
 
-/** Dans la coque : l'emplacement « calque », les fenêtres, messages et confirmations ouverts par les extensions. */
+/** Dans la coque : l'emplacement « calque », le menu du clic droit, les fenêtres, messages et confirmations ouverts par les extensions. */
 export function ExtensionLayers({ context }: { context: Record<string, unknown> }) {
   const layers = useSyncExternalStore(layerStore.subscribe, layerStore.get, () => NO_LAYERS)
   const toasts = layers.filter((layer) => layer.kind === "toast")
   return <>
     <ExtensionSlot name="calque" context={context} />
+    <ExtensionContextMenu />
     {layers.map((layer) => {
       if (layer.kind === "dialog") return <ExtensionDialog key={layer.key} layer={layer} />
       if (layer.kind === "confirm") return <ExtensionConfirm key={layer.key} layer={layer} />

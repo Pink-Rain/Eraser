@@ -4,6 +4,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useRouter } from "next/navigation"
 import { ArrowLeft, ArrowRight, Plus, RotateCw, X } from "lucide-react"
 
+import { ExtensionMenuItems } from "@/components/eraser/extension-menu"
+
 /**
  * Les onglets de l'application, comme ceux d'un navigateur. Un seul rendu existe à la
  * fois : un onglet est une adresse, un titre et son propre historique (précédent /
@@ -419,6 +421,8 @@ export function AppTabsProvider({ pathname, label, children }: { pathname: strin
       <button type="button" role="menuitem" onClick={() => { open(menu.href, menu.label); setMenu(null) }} className={itemClass}>Ouvrir dans un nouvel onglet</button>
       {typeof window !== "undefined" && window.eraserDesktop?.openWindow && <button type="button" role="menuitem" onClick={() => { openWindow(menu.href); setMenu(null) }} className={itemClass}>Ouvrir dans une nouvelle fenêtre</button>}
       <button type="button" role="menuitem" onClick={() => { navigate(router, menu.href); setMenu(null) }} className={itemClass}>Ouvrir ici</button>
+      {/* Ce que les extensions proposent pour ce lien (API 6). */}
+      <ExtensionMenuItems kind="plain" itemClassName={`${itemClass} [&_svg]:size-4 [&_svg]:shrink-0`} onDone={() => setMenu(null)} />
     </div>}
   </AppTabsContext.Provider>
 }

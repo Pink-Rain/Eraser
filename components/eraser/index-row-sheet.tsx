@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils"
 import { LayoutBlockView, type LayoutBlockContext } from "@/components/eraser/index-layout-blocks"
 import { richTextPlainText } from "@/components/eraser/rich-text"
 import { foldName, normalizeSpec, type IndexColumnSpec } from "@/lib/index-columns"
+import { indexRowThing, thingAttributes } from "@/lib/extensions"
 import { arrangeLayout, resolveLayoutColor, type IndexLayout, type LayoutBlock, type LayoutField } from "@/lib/index-layouts"
 
 export type RowSheetField = { key: string; label: string; spec: IndexColumnSpec; value: string; long?: boolean; /** Un bloc de la mise en page (tuiles, inventaire…) à la place d'une colonne. */ block?: LayoutBlock }
@@ -114,6 +115,8 @@ export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, r
   const slotContext = { index: rowRef?.index ?? "", id: rowRef?.id ?? "", tab: rowRef?.tab ?? "", values: Object.fromEntries(fields.filter((field) => !field.block).map((field) => [field.label || field.key, field.value])) }
   return <Dialog open={open} onOpenChange={(value) => { if (!value) close() }}>
     <DialogContent
+      // La fiche entière montre sa ligne : un clic droit dedans la propose aux extensions (API 6).
+      {...thingAttributes(indexRowThing(rowRef?.index ?? "", rowRef?.id ?? "", title))}
       className={`flex max-h-[92svh] flex-col gap-4 ${layout?.aside.length ? "sm:max-w-5xl" : "sm:max-w-4xl"}`}
       style={background ? { background } : undefined}
       onKeyDown={(event) => {

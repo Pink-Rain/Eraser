@@ -76,6 +76,7 @@ test("les extensions liées : identifiants stables, dépôts du propriétaire", 
     ["map", "Pink-Rain/Eraser_map"],
     ["page", "Pink-Rain/Eraser_page"],
     ["craft", "Pink-Rain/Eraser_craft"],
+    ["note-mj", "Pink-Rain/Eraser_note_mj"],
   ]);
   assert.equal(extensions.linkedExtension("map")?.name, "Eraser Map");
   assert.equal(extensions.linkedExtension("autre"), null);
@@ -235,11 +236,14 @@ test("API 3 : une extension sans page, lancée au démarrage sur toutes les page
 test("le contrat des extensions : emplacements et boîte à outils jamais retirés ni renommés, chaque emplacement rendu", async () => {
   const { readFile } = await import("node:fs/promises");
   // Ajouter un emplacement ou un outil : l'ajouter aussi ici. Ne jamais rien retirer de ces listes.
-  const slots = ["page.avant", "page.apres", "page.en-tete", "barre-laterale", "barre-laterale.pied", "calque", "index.fiche", "index.fiche.actions", "inventaire.bourse", "administration.extension"];
-  const tools = ["api", "extension", "account", "require", "file", "page", "go", "server", "eraser", "slots", "ui", "styles", "on", "inventory"];
+  const slots = ["page.avant", "page.apres", "page.en-tete", "barre-laterale", "barre-laterale.pied", "calque", "index.fiche", "index.fiche.actions", "inventaire.bourse", "administration.extension", "campagne.en-tete", "session.preparation"];
+  const tools = ["api", "extension", "account", "require", "file", "page", "go", "server", "eraser", "slots", "ui", "styles", "on", "inventory", "menu"];
+  // API 6 : les choses reconnues au clic droit ; leur sorte et le format de leur `id` ne changent jamais.
+  const things = ["ligne", "reference", "pnj", "magasin", "document", "personnage", "session", "evenement", "image", "lien"];
   const uiTools = ["dialog", "toast", "confirm"];
   assert.ok(extensions.EXTENSION_API_VERSION >= 3);
   for (const slot of slots) assert.ok(extensions.extensionSlotNames.includes(slot), `emplacement retiré : ${slot}`);
+  for (const kind of things) assert.ok(Object.hasOwn(extensions.extensionThingKinds, kind), `sorte de chose retirée : ${kind}`);
 
   // Chaque emplacement promis est vraiment posé dans Eraser.
   const sources = [];
@@ -323,4 +327,16 @@ test("Eraser ne prête que ce qu'il utilise lui-même : ce qui ne sert qu'à une
     return !files.some(([path, source]) => !path.startsWith(`${own}.`) && (source.includes(`from "${id}"`) || source.includes(`import("${id}")`)));
   });
   assert.deepEqual(orphans, [], `Prêtés mais inutilisés par Eraser (à déplacer dans l'extension) : ${orphans.join(", ")}`);
+});
+
+test("API 6 : une chose se reconnaît par ses attributs ; une ligne d'entité garde sa sorte", () => {
+  assert.deepEqual(extensions.thingAttributes({ kind: "pnj", id: "n1", label: " <b>Bran</b>  le   Gris " }), { "data-eraser-thing": "pnj", "data-eraser-thing-id": "n1", "data-eraser-thing-label": "Bran le Gris" });
+  assert.deepEqual(extensions.thingAttributes({ kind: "pnj", id: "" }), {});
+  assert.deepEqual(extensions.thingAttributes(null), {});
+  assert.deepEqual(extensions.indexRowThing("creatures", "CRE-1", "Goule", "/x?ligne=CRE-1"), { kind: "ligne", id: "creatures/CRE-1", label: "Goule", href: "/x?ligne=CRE-1" });
+  assert.equal(extensions.indexRowThing("npcs", "n1", "Bran").kind, "pnj");
+  assert.equal(extensions.indexRowThing("characters", "c1", "Lou").kind, "personnage");
+  assert.equal(extensions.indexRowThing("", "x", ""), null);
+  assert.equal(extensions.campaignOfPath("/campagne/3f2a/lieux-et-rencontres"), "3f2a");
+  assert.equal(extensions.campaignOfPath("/ressources/index"), null);
 });

@@ -25,6 +25,7 @@ import { DEFAULT_LAYOUT_ACCENT, IndexLayoutView, labelLookOf, layoutBackgroundOf
 import { LayoutBlockView } from "@/components/eraser/index-layout-blocks"
 import { resolveReference } from "@/components/eraser/reference-store"
 import { objectIconImage } from "@/lib/object-icons"
+import { thingAttributes } from "@/lib/extensions"
 import { cn } from "@/lib/utils"
 import type { WeaponModifierRef } from "@/lib/weapon-modifiers"
 
@@ -401,7 +402,7 @@ export function LayoutDetails({ reference, layout, color, depth, level }: { refe
  * cartes…) : la version du survol choisie par la vue (`hover`), sinon l'étoilée. La ligne
  * n'est lue qu'à l'ouverture (une demande groupée, gardée 30 s), jamais d'avance.
  */
-export function RowHover({ index, id, hover, layout, className, children }: { index: string; id: string; hover?: string; /** Un survol propre à une page (fait dans l'atelier) : il passe avant `hover`. */ layout?: IndexLayout; className?: string; children: ReactNode }) {
+export function RowHover({ index, id, hover, layout, className, attributes, children }: { index: string; id: string; hover?: string; /** Un survol propre à une page (fait dans l'atelier) : il passe avant `hover`. */ layout?: IndexLayout; className?: string; /** Les repères de la ligne pour les extensions (`thingAttributes`, API 6). */ attributes?: Record<string, string>; children: ReactNode }) {
   const request = useMemo((): ReferenceRequest => ({ index, id, ...(layout ? { layout } : hover && hover !== "principal" ? { hover } : {}) }), [hover, id, index, layout])
   const key = referenceKey(request)
   const [open, setOpen] = useState(false)
@@ -416,7 +417,7 @@ export function RowHover({ index, id, hover, layout, className, children }: { in
   const reference = loaded?.key === key ? loaded.value : known ?? null
   const color = reference?.color
   return <HoverCard openDelay={400} closeDelay={80} open={open && Boolean(reference)} onOpenChange={setOpen}>
-    <HoverCardTrigger asChild><div className={cn("min-w-0", className)}>{children}</div></HoverCardTrigger>
+    <HoverCardTrigger asChild><div className={cn("min-w-0", className)} {...attributes}>{children}</div></HoverCardTrigger>
     {reference && <HoverCardContent side="top" align="start" collisionPadding={12} className={`${hoverWidthClass(reference.layout)} rounded-2xl p-3.5 text-foreground`} style={color ? { borderColor: `${color}55` } : undefined}>
       {reference.layout ? <LayoutDetails reference={reference} layout={reference.layout} color={color} depth={0} /> : <RowDetails reference={reference} color={color} depth={0} />}
     </HoverCardContent>}
@@ -548,6 +549,13 @@ export function IndexRichText({ html, fill, self, depth = 0, className = "", as 
     // Un détachement (nouveau rendu) ne vide rien : seul le texte posé compte.
     if (!node) return
     const next = citations.length ? [...node.querySelectorAll<HTMLElement>(":scope [data-eraser-ref]")].filter((element) => element.closest("[data-eraser-text]") === node) : []
+    // Chaque citation d'une autre ligne se laisse reconnaître par les extensions au clic droit (API 6).
+    for (const element of next) {
+      const citation = citations[Number(element.dataset.eraserRef)]
+      if (!citation || citation.self) continue
+      const { index, id } = citation.request
+      for (const [name, value] of Object.entries(thingAttributes({ kind: "reference", id: `${index}/${id}`, label: citation.label, href: `/reference/${encodeURIComponent(index)}/${encodeURIComponent(id)}` }))) element.setAttribute(name, value)
+    }
     setTargets((current) => current.length === next.length && current.every((element, index) => element === next[index]) ? current : next)
   }, [citations])
   // Le même objet tant que le texte ne change pas : React réécrirait sinon tout le texte

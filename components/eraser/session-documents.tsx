@@ -10,6 +10,7 @@ import { DocumentViewerDialog, GiveDocumentButton, type ViewedDocument } from "@
 import { RevealToggle, SessionRevealProvider } from "@/components/eraser/session-reveal"
 import { documentImageUrl, documentInJournal, documentPageCount, documentPageRolesOf, documentStudioHref, type CampaignDocumentRecord, type DocumentRecipient } from "@/lib/document-model"
 import { cn } from "@/lib/utils"
+import { thingAttributes } from "@/lib/extensions"
 
 /**
  * Les documents d'une session (Créateur de session) : les lettres et parchemins écrits dans
@@ -86,7 +87,7 @@ export function SessionDocuments({ campaignId, sessionId, initialDocuments, play
     </div>
     {message && <p className={cn("rounded-xl border px-4 py-2 text-sm", message.tone === "ok" ? "border-emerald-600/25 bg-emerald-600/8 text-emerald-800 dark:text-emerald-300" : "border-destructive/25 bg-destructive/5 text-destructive")}>{message.text}</p>}
     {inSession.length
-      ? <SessionRevealProvider value={reveal}><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{inSession.map((document) => <article key={document.id} className="overflow-hidden rounded-2xl border bg-card/70 shadow-sm">
+      ? <SessionRevealProvider value={reveal}><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{inSession.map((document) => <article key={document.id} {...thingAttributes({ kind: "document", id: document.id, label: document.title })} className="overflow-hidden rounded-2xl border bg-card/70 shadow-sm">
         <button type="button" disabled={!document.renderVersion} onClick={() => setViewing({ campaignId, documentId: document.id, title: document.title, version: document.renderVersion, pages: documentPageCount(document), roles: documentPageRolesOf(document) })} className="group relative grid aspect-[4/3] w-full place-items-center bg-[radial-gradient(circle_at_center,rgb(120_90_50/0.16),transparent_72%)] p-3" title={document.renderVersion ? "Lire le document" : "Ce document n’a pas encore été enregistré"}>
           {document.renderVersion
             // eslint-disable-next-line @next/next/no-img-element

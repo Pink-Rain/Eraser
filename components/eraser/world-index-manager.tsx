@@ -30,6 +30,7 @@ import { IndexStats, TAB_PSEUDO } from "@/components/eraser/index-stats"
 import type { StatColumnGroup, StatDefinition } from "@/lib/index-stats"
 import { builtinPresentationPresets, DEFAULT_ITEM_CARD, groupRowsBy, type Presentation } from "@/lib/index-presentations"
 import { filterFromGridFilters, matchesSavedView, resolveSavedViewPresentation, savedViewFromWindow, windowFromSavedView, type SavedView } from "@/lib/index-saved-views"
+import { indexRowThing } from "@/lib/extensions"
 import { CardActionsContext, IndexCard, IndexCardGrid, IndexDisplayControls, NoCardsYet, isCardChoice, isIndexDisplay, roleRowOf, type CardActions, type CardRowSource, type IndexDisplay } from "@/components/eraser/index-card"
 import { pickCard, tabCardsOf } from "@/lib/index-cards"
 import { ALL_SOURCES, windowIdOfSelectKey, windowSelectKey, type FilterCondition } from "@/lib/index-windows"
@@ -1486,6 +1487,8 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     return table ? resolveSavedViewPresentation(activeView, { tab: table.tabName, headers: layoutHeaders, presentations: settings.presentations, presets: presentationPresets }) : null
   }, [activeView, layoutHeaders, presentationPresets, settings.presentations, table])
   const layoutNameOf = useCallback((rowKey: string) => nameOf(rowKey).replace(/<[^>]+>/g, "").trim(), [nameOf])
+  /** Ce que montre une ligne, reconnu par les extensions au clic droit (API 6). */
+  const rowThingOf = useCallback((rowKey: string) => indexRowThing(indexKey, rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim(), layoutNameOf(rowKey), rowHref(rowKey) ?? null), [indexKey, layoutNameOf, rawOf, rowHref])
   // Ce que reçoit une présentation (liste, kanban, calendrier…) : stable d'un rendu à l'autre.
   // Recréé à chaque frappe, il lui faisait refiltrer, retrier et redessiner toutes les lignes.
   const displayedRowKeys = useMemo(() => displayedRows.map((row) => row.key), [displayedRows])
@@ -1944,13 +1947,14 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         cardOf={presentationCardOf}
         renderForm={renderViewForm}
         rowRef={rowRefOf}
+        rowThing={rowThingOf}
         empty={viewTables.some((owner) => owner.rows.length) ? "Aucune ligne ne remplit les conditions de cette vue." : `Cet onglet est vide. Ajoute ${tabDefinition.itemLabel} pour commencer.`}
       /> : table && (shownDisplay === "cards" || viewLayout?.kind === "cards") ? (shownCard
         ? viewLayout?.groupBy
           // Cartes rangées en sections : une grille par valeur de la colonne choisie.
           ? <div className="space-y-6">{(cardGroups ?? []).map((group) => <section key={group.name || "*"} className="space-y-2">
             <p className="flex items-center justify-between border-b pb-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-primary/80"><span>{group.name || "Sans valeur"}</span><span className="text-muted-foreground">{group.rows.length}</span></p>
-            <IndexCardGrid card={shownCard} cardOf={spanning ? cardOf : undefined} rows={group.rows} rowSource={cardRow} onOpen={openRow} hrefOf={rowHref} rowRef={rowRefOf} empty="" />
+            <IndexCardGrid card={shownCard} cardOf={spanning ? cardOf : undefined} rows={group.rows} rowSource={cardRow} onOpen={openRow} hrefOf={rowHref} rowRef={rowRefOf} rowThing={rowThingOf} empty="" />
           </section>)}</div>
           : <IndexCardGrid
           card={shownCard}
@@ -1960,6 +1964,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
           onOpen={openRow}
           hrefOf={rowHref}
           rowRef={rowRefOf}
+          rowThing={rowThingOf}
           empty={activeView ? "Aucune ligne ne remplit les conditions de cette vue." : viewTables.some((owner) => owner.rows.length) ? "Aucune ligne ne correspond à la recherche." : `Cet onglet est vide. Ajoute ${tabDefinition.itemLabel} pour commencer.`}
         />
         : <NoCardsYet tabName={table.tabName} onCreate={() => void openEditor("cards")} />
@@ -1994,6 +1999,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
             duplicate: (rowKeys) => void mutate("duplicate", rowKeys, "duplicate"),
             remove: (rowKeys) => void mutate("delete", rowKeys, "delete"),
           }}
+          rowThing={rowThingOf}
           rowMenuExtras={(rowKey) => {
             const targets = moveTargetsOf(parseRowKey(rowKey).tabName)
             return <>
