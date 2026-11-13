@@ -658,7 +658,7 @@ seul et arrive sur chaque installation sans réinstaller Eraser. Liées : `doc` 
 tabletop, encore vide), `page` (Pink-Rain/Eraser_page, **l'atelier des pages**, depuis l'alpha 275),
 `craft` (Pink-Rain/Eraser_craft, **les ateliers de fabrication** : cuisine, alchimie… ; il crée ses
 items par `create-item` avec réserve, recyclage et lignes d'effet, voir « L'Index des items »),
-`note-mj` (Pink-Rain/Eraser_note_mj, **le carnet du MJ** de chaque campagne, depuis l'alpha 295 :
+`note-mj` (Pink-Rain/Eraser_note_mj, **le carnet du MJ** de chaque campagne, depuis l'alpha 297 :
 notes rattachées à la campagne, préparation des sessions, post-its posés au clic droit).
 
 - **Liaison** : `linkedExtensions` dans `lib/extensions.ts`, dans le code seulement. L'identifiant
@@ -783,7 +783,7 @@ notes rattachées à la campagne, préparation des sessions, post-its posés au 
   une campagne s'y range et suit la campagne, pas le compte ; `richText.sanitize(html)`, le
   nettoyage des textes enrichis d'Eraser (l'éditeur `RichTextField` est prêté par
   `@/components/eraser/rich-text`).
-- **Version de l'API** : `EXTENSION_API_VERSION` (6 depuis l'alpha 295 : clic droit, choses
+- **Version de l'API** : `EXTENSION_API_VERSION` (6 depuis l'alpha 297 : clic droit, choses
   d'Eraser, `search` et `campaignId` de la page, emplacements `campagne.en-tete` et
   `session.preparation`, `campaigns` et `richText` côté serveur ; 5 depuis l'alpha 294 : l'œil des effets pour les extensions ; 4 depuis l’alpha 290 : emplacements de
   l'inventaire et de l'administration, `inventory.changed`, `indexes` côté serveur ; 3 depuis l'alpha 281 : démarrage, styles globaux,
