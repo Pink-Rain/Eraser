@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  const VERSION = '0.9.0';
+  const VERSION = '0.10.0';
   const API = 'http://127.0.0.1:32147/api/roll20/bridge';
   const IS_TOP = window.top === window;
   let syncing = false;
@@ -743,6 +743,19 @@
     watchChat();
   }
 
-  const start = () => (IS_TOP ? mount() : watchChat());
+  // Eraser a rangé une version plus récente dans le dossier du compagnon : le compagnon se
+  // recharge depuis ce dossier, puis la page Roll20 aussi (sinon elle garderait l'ancien code).
+  async function selfUpdate() {
+    const result = await runtimeMessage({ type: 'eraser-self-update' });
+    if (result?.reloading) {
+      const button = document.getElementById('eraser-roll20-button');
+      if (button) button.textContent = 'Eraser ↻ ' + result.version;
+      setTimeout(() => location.reload(), 1500);
+    } else if (result?.otherFolder) {
+      status('Eraser a rangé le compagnon ' + result.otherFolder + ' dans son dossier, mais le navigateur en charge un autre (' + VERSION + '). Dans la page des extensions, retire celui-ci puis « Charger l’extension non empaquetée » depuis le dossier choisi dans Eraser.', true);
+    }
+  }
+
+  const start = () => (IS_TOP ? Promise.resolve(mount()).then(selfUpdate).catch(() => {}) : watchChat());
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => void start()); else void start();
 }());

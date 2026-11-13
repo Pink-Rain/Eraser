@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Eraser — Compagnon Roll20",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Synchronise une campagne, une session (PNJ, créatures, magasins), les personnages joueurs et les documents de l’application Eraser avec Roll20.",
   "permissions": [
     "storage"

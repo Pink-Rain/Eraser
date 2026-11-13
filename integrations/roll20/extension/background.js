@@ -1,7 +1,38 @@
 // 0.3.0 : le service worker ne fait plus que les requêtes réseau vers Eraser.
 // Toute la configuration Roll20 passe par le script Mod.
 // 0.8.0 : « eraser-file » télécharge aussi un fichier qui n'est pas une image (PDF des documents).
+// 0.10.0 : « eraser-self-update » : quand Eraser a rangé une version plus récente dans le dossier
+// du compagnon (dossier de campagne › Compagnon Roll20 › étape 1), le compagnon se recharge seul.
+
+function newerVersion(left, right) {
+  const a = String(left).split('.').map(Number);
+  const b = String(right).split('.').map(Number);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const difference = (a[index] || 0) - (b[index] || 0);
+    if (difference) return difference > 0;
+  }
+  return false;
+}
+
+// Une seule tentative par version : chargé depuis un autre dossier, le compagnon ne boucle pas.
+async function selfUpdate() {
+  const running = chrome.runtime.getManifest().version;
+  const response = await fetch('http://127.0.0.1:32147/api/roll20/bridge/companion', { cache: 'no-store' });
+  if (!response.ok) return { reloading: false };
+  const { folderVersion } = await response.json();
+  if (!folderVersion || !newerVersion(folderVersion, running)) return { reloading: false };
+  const { eraserReloadedFor } = await chrome.storage.local.get('eraserReloadedFor');
+  if (eraserReloadedFor === folderVersion) return { reloading: false, otherFolder: folderVersion };
+  await chrome.storage.local.set({ eraserReloadedFor: folderVersion });
+  setTimeout(() => chrome.runtime.reload(), 400);
+  return { reloading: true, version: folderVersion };
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === 'eraser-self-update') {
+    selfUpdate().then(sendResponse, () => sendResponse({ reloading: false }));
+    return true;
+  }
   if (!message || !['eraser-fetch', 'eraser-image', 'eraser-file'].includes(message.type)) return false;
   (async () => {
     try {

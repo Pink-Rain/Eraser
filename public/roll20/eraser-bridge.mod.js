@@ -11,10 +11,11 @@
  * jour avec leur fiche, image renvoyée si elle a disparu de Roll20, documents d'Eraser en
  * handouts (image du document ; le PDF est déposé dans le Journal par le compagnon).
  * 0.9.0 : les créatures des événements de session (fiche, portrait et token d'Eraser).
+ * 0.10.0 : même version que le compagnon, qui se recharge seul depuis le dossier où Eraser le range.
  */
 var EraserBridge = EraserBridge || (function () {
   'use strict';
-  var VERSION = '0.9.0';
+  var VERSION = '0.10.0';
   var SCRIPT = 'Eraser';
   var BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   var PORTRAIT_WINDOW_MS = 90000;

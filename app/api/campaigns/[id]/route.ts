@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { saveCampaignBanner } from "@/lib/campaign-banners"
-import { setCampaignRoll20Url } from "@/lib/campaign-roll20-url"
+import { setCampaignRoll20ScriptsUrl, setCampaignRoll20Url } from "@/lib/campaign-roll20-url"
 import { getCampaignForMj, updateCampaignForMj } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
 
@@ -36,6 +36,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
     const patch = (await request.json()) as Record<string, string>
     // Le lien de la partie Roll20 : sur le serveur partagé, pas dans la feuille « Campagnes ».
+    // La page des scripts Mod de la partie (étape 3 de la mise à jour du compagnon).
+    if (typeof patch.roll20ScriptsUrl === "string") {
+      if (account.role !== "admin" && !await getCampaignForMj(account.uid, id)) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
+      return NextResponse.json({ roll20ScriptsUrl: await setCampaignRoll20ScriptsUrl(id, patch.roll20ScriptsUrl) })
+    }
     if (typeof patch.roll20Url === "string") {
       if (account.role !== "admin" && !await getCampaignForMj(account.uid, id)) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
       return NextResponse.json({ roll20Url: await setCampaignRoll20Url(id, patch.roll20Url) })

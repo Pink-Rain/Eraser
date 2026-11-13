@@ -219,6 +219,12 @@
   génération vérifié ne remplace les copies publiques.
 - Le jeton de campagne est l’authentification du pont. Ne pas ajouter une
   authentification par cookie aux routes `/api/roll20/bridge`.
+- Le MJ met le compagnon à jour depuis le dossier de campagne, en 3 étapes : le serveur local
+  écrit lui-même ses fichiers dans le dossier du PC (`lib/roll20-companion.ts`, fichiers
+  d'`integrations/roll20/extension` inclus par `?raw`), ouvre Chrome ou Opera sur leur page des
+  extensions, puis le MJ copie le script Mod. Jamais de lien qui fait naviguer la fenêtre d'Eraser
+  vers un fichier (`.js`, `.zip`) : elle l'affiche sans retour possible. Le compagnon se recharge
+  seul quand son dossier a une version plus récente (`/api/roll20/bridge/companion`).
 - Le compagnon et le script Mod portent la même version (`VERSION`, `manifest.json`) : le
   compagnon refuse un Mod d'une autre version. Après toute modification, recopier le Mod dans
   `public/roll20/` et refaire `public/roll20/eraser-roll20-companion.zip` (fichiers à la racine).

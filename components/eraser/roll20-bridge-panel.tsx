@@ -1,13 +1,15 @@
 "use client"
 
 import { useState } from "react"
-import { Check, Copy, Download, Link2, RefreshCw, ShieldCheck, Unlink } from "lucide-react"
+import { Check, Copy, Link2, RefreshCw, ShieldCheck, Unlink } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Roll20CompanionSteps } from "@/components/eraser/roll20-companion-steps"
+import { companionManifest } from "@/lib/roll20-companion-version"
 
 type LinkRecord = {
   id: string
@@ -26,7 +28,8 @@ function dateLabel(value: string | null) {
 }
 
 /** `embedded` : dans la partie dépliable du dossier de la campagne (sans titre de page). */
-export function Roll20BridgePanel({ campaignId, initialLink, embedded = false }: { campaignId: string; initialLink: LinkRecord | null; embedded?: boolean }) {
+/** `scriptsUrl` / `suggestedScriptsUrl` : la page des scripts Mod de la partie, gardée ou déduite du lien de la partie. */
+export function Roll20BridgePanel({ campaignId, initialLink, embedded = false, scriptsUrl = "", suggestedScriptsUrl = "" }: { campaignId: string; initialLink: LinkRecord | null; embedded?: boolean; scriptsUrl?: string; suggestedScriptsUrl?: string }) {
   const [link, setLink] = useState(initialLink)
   const [token, setToken] = useState("")
   const [busy, setBusy] = useState(false)
@@ -81,6 +84,8 @@ export function Roll20BridgePanel({ campaignId, initialLink, embedded = false }:
         <p className="mt-3 max-w-3xl text-base leading-7 text-muted-foreground">Synchronise en une fois les personnages joueurs, PNJ, créatures des événements, magasins et documents de cette campagne, ou seulement ceux d’une session (rangés dans un dossier du Journal à son nom). Chaque fiche reçoit son portrait et son token : celui préparé dans Eraser, sinon le token que l’éditeur de token aurait fait : le cadre choisi (ou celui par défaut du joueur, du PNJ, de la porte du magasin) et l’avatar cadré au même endroit. Les jetons déjà posés sur les cartes prennent la nouvelle image. Un document devient un handout (son image) et un PDF du Journal. À la fin d’une session, les PV peuvent revenir de Roll20 vers Eraser.</p>
       </header>
 
+      <Roll20CompanionSteps campaignId={campaignId} scriptsUrl={scriptsUrl} suggestedScriptsUrl={suggestedScriptsUrl} />
+
       {error && <Alert variant="destructive"><AlertTitle>La liaison n’a pas été modifiée</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
 
       <div className="grid gap-6 lg:grid-cols-[1.15fr_.85fr]">
@@ -112,16 +117,12 @@ export function Roll20BridgePanel({ campaignId, initialLink, embedded = false }:
         </Card>
 
         <Card>
-          <CardHeader><CardTitle>Installation</CardTitle><CardDescription>Les deux éléments sont nécessaires : le compagnon communique avec Eraser, le script modifie la partie Roll20.</CardDescription></CardHeader>
-          <CardContent className="space-y-3">
-            <Button asChild className="w-full justify-start" variant="secondary"><a href="/roll20/eraser-roll20-companion.zip" download><Download />1. Compagnon Chrome v0.8.0 (application)</a></Button>
-            <Button asChild className="w-full justify-start" variant="secondary"><a href="/roll20/eraser-bridge.mod.js" download><Download />2. Script Mod Roll20 v0.8.0</a></Button>
+          <CardHeader><CardTitle>Utilisation</CardTitle><CardDescription>Le compagnon (dans Chrome ou Opera) parle à Eraser ; le script Mod modifie la partie Roll20. Les deux portent la même version : la mise à jour ci-dessus les change ensemble.</CardDescription></CardHeader>
+          <CardContent>
             <ol className="space-y-2 pl-5 text-sm leading-6 text-muted-foreground">
-              <li className="list-decimal">Télécharge le compagnon, décompresse le fichier ZIP et conserve le dossier obtenu. Pour une mise à jour, remplace le contenu du dossier puis clique sur « Actualiser » dans chrome://extensions.</li>
-              <li className="list-decimal">Dans Chrome, ouvre « chrome://extensions », active le mode développeur, clique sur « Charger l’extension non empaquetée », puis sélectionne ce dossier.</li>
-              <li className="list-decimal">Télécharge le script Mod. Dans les paramètres de ta partie Roll20, ouvre « Mod Scripts », crée un nouveau script, colle tout son contenu et enregistre.</li>
-              <li className="list-decimal">Attends que la console Mod affiche « Eraser Bridge 0.8.0 prêt ». Pour une mise à jour, remplace tout le contenu du script existant : le compagnon et le script doivent avoir la même version.</li>
-              <li className="list-decimal">Ouvre ensuite la partie Roll20, clique sur « Eraser », puis colle la clé de liaison créée sur cette page.</li>
+              <li className="list-decimal">Fais les trois étapes de « Mettre à jour le compagnon » (la première fois aussi : l’étape 2 explique comment l’ajouter au navigateur).</li>
+              <li className="list-decimal">Ouvre la partie Roll20 : la console Mod affiche « Eraser Bridge {companionManifest.version} prêt ».</li>
+              <li className="list-decimal">Clique sur « Eraser » dans Roll20, puis colle la clé de liaison créée à gauche.</li>
               <li className="list-decimal">Utilise « Tout synchroniser », « Synchroniser une session » (choisis la session dans le menu déroulant, de la plus récente à la plus ancienne, avec recherche par nom), « Mettre à jour les personnages joueurs » (nom, PV, rapidité, profil, portrait et token des joueurs, sans toucher au reste), « Synchroniser les documents » ou « Renvoyer les PV ».</li>
             </ol>
           </CardContent>

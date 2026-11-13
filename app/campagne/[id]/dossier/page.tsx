@@ -14,6 +14,8 @@ import { playerNamesFor } from "@/lib/chat-accounts"
 import { getCampaignDashboard, listCampaignMembers, listCharacterGroupStats, listNpcs, listRelationsOfCharacters, type CampaignRecord } from "@/lib/google-sheets"
 import { identityUidsForUser } from "@/lib/identity-links"
 import { getRoll20LinkForManager } from "@/lib/roll20-bridge"
+import { campaignRoll20ScriptsUrl, campaignRoll20Url } from "@/lib/campaign-roll20-url"
+import { roll20ScriptsUrlFrom } from "@/lib/roll20-url"
 import { authorizedAccount, type AuthorizedUser } from "@/lib/server-auth"
 
 export const dynamic = "force-dynamic"
@@ -113,7 +115,7 @@ export default async function CampaignFolderPage({ params }: { params: Promise<{
   const { id } = await params
   const campaign = await getCampaignDashboard(account.role === "admin" ? null : account.uid, id).catch(() => null)
   if (!campaign) notFound()
-  const [link, data, pages] = await Promise.all([getRoll20LinkForManager(account, id).catch(() => null), folderData(campaign, account), customPageLinks("campagne", campaign.id, "size-4")])
+  const [link, data, pages, gameUrl, scriptsUrl] = await Promise.all([getRoll20LinkForManager(account, id).catch(() => null), folderData(campaign, account), customPageLinks("campagne", campaign.id, "size-4"), campaignRoll20Url(id), campaignRoll20ScriptsUrl(id)])
   const href = `/campagne/${encodeURIComponent(campaign.id)}`
   const accent = campaign.accentColor || "#3b5c8a"
   return (
@@ -148,10 +150,10 @@ export default async function CampaignFolderPage({ params }: { params: Promise<{
             <details id="roll20" className="group rounded-2xl border bg-card/70 [&_summary::-webkit-details-marker]:hidden">
               <summary className="flex cursor-pointer list-none items-center gap-3 px-5 py-4">
                 <span className="flex size-10 items-center justify-center rounded-xl border border-primary/20 bg-primary/8 font-display text-sm font-bold text-primary">R20</span>
-                <span className="min-w-0 flex-1"><span className="block font-display text-2xl font-semibold">Compagnon Roll20</span><span className="block text-xs text-muted-foreground">{link ? "Relié à cette campagne." : "Pas encore relié."} Déplier pour le régler.</span></span>
+                <span className="min-w-0 flex-1"><span className="block font-display text-2xl font-semibold">Compagnon Roll20</span><span className="block text-xs text-muted-foreground">{link ? "Relié à cette campagne." : "Pas encore relié."} Déplier pour le mettre à jour en 3 étapes.</span></span>
                 <ChevronDown className="size-5 text-muted-foreground transition-transform group-open:rotate-180" />
               </summary>
-              <div className="border-t px-5 pb-6"><Roll20BridgePanel key={id} campaignId={id} initialLink={link} embedded /></div>
+              <div className="border-t px-5 pb-6"><Roll20BridgePanel key={id} campaignId={id} initialLink={link} embedded scriptsUrl={scriptsUrl} suggestedScriptsUrl={roll20ScriptsUrlFrom(gameUrl)} /></div>
             </details>
           </div>
           <MenuLinkPanel title="La campagne" icon={Map} links={[

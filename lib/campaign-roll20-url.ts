@@ -43,3 +43,30 @@ export async function setCampaignRoll20Url(campaignId: string, value: unknown) {
   cache.set(campaignId, { at: Date.now(), promise: Promise.resolve(url) })
   return url
 }
+
+/**
+ * La page des scripts Mod de la partie (« https://app.roll20.net/campaigns/scripts/… »), où le MJ
+ * colle le script Eraser Bridge : réglée dans le dossier de la campagne (étape 3 de la mise à jour
+ * du compagnon). Portée « campaign-roll20-scripts-url », une entrée par campagne.
+ */
+const scriptsScope = "campaign-roll20-scripts-url"
+
+export async function campaignRoll20ScriptsUrl(campaignId: string) {
+  if (!sharedStoreAvailable()) return ""
+  try {
+    const record = await readSharedRecord(scriptsScope, campaignId)
+    return cleanRoll20Url(record?.value)
+  } catch (error) {
+    if (!(error instanceof Error && error.message === "INVALID_ROLL20_URL")) console.error("CAMPAIGN_ROLL20_SCRIPTS_URL_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    return ""
+  }
+}
+
+/** Enregistre (ou efface, avec "") le lien de la page des scripts Mod ; rend le lien gardé. */
+export async function setCampaignRoll20ScriptsUrl(campaignId: string, value: unknown) {
+  if (!sharedStoreAvailable()) throw new Error("SHARED_STORE_UNAVAILABLE")
+  const url = cleanRoll20Url(value)
+  if (url) await writeSharedRecord(scriptsScope, campaignId, url)
+  else await deleteSharedRecord(scriptsScope, campaignId)
+  return url
+}
