@@ -911,11 +911,6 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
             </div>
           </section>
 
-          <aside className="order-2 min-w-0 lg:sticky lg:top-4 lg:order-none lg:col-start-1 lg:row-start-1 lg:max-h-[calc(100svh-2rem)] lg:overflow-y-auto lg:overscroll-contain lg:rounded-2xl lg:scrollbar-thin">
-            {notesError && <p className="mb-3 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive" role="alert">Les notes n’ont pas pu être lues dans Google Sheets. Actualise dans un instant.</p>}
-            <SessionNotesBoard id="journal-notes" handle={board} authorLabel={authorLabel} campaignId={campaignId} sessions={refs} sessionId={current.id} notes={notes} onNotesChange={setNotes} entities={entities} viewer={viewer} />
-          </aside>
-
           <div key={`recit-${current.id}`} className="journal-rise order-3 min-w-0 space-y-10 lg:order-none">
             <Section id="journal-groupe" icon={linkKindLabels.character.icon} title="Le groupe" count={absents.length ? `${group.length} · ${plural(absents.length, "absent", "absents")}` : group.length} action={restAction}>
               {group.length + absents.length ? <div className={groupGrid}>
@@ -1031,6 +1026,13 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
             </Section>
           </div>
           </div>
+
+          {/* Les notes, hors de la colonne de droite : à gauche, collées en défilant (ordinateur), entre
+              le bilan et le récit (téléphone, par `order`). */}
+          <aside className="order-2 min-w-0 lg:sticky lg:top-4 lg:order-none lg:col-start-1 lg:row-start-1 lg:max-h-[calc(100svh-2rem)] lg:overflow-y-auto lg:overscroll-contain lg:rounded-2xl lg:scrollbar-thin">
+            {notesError && <p className="mb-3 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive" role="alert">Les notes n’ont pas pu être lues dans Google Sheets. Actualise dans un instant.</p>}
+            <SessionNotesBoard id="journal-notes" handle={board} authorLabel={authorLabel} campaignId={campaignId} sessions={refs} sessionId={current.id} notes={notes} onNotesChange={setNotes} entities={entities} viewer={viewer} />
+          </aside>
         </div>
 
         {/* Pied de page : la session d'avant et celle d'après, pour lire le journal d'un trait. */}
