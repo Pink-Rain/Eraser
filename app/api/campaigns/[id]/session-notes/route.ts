@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { listCampaignSessionsForDisplay } from "@/lib/campaign-sessions"
+import { sessionsForPlayers } from "@/lib/session-reveal"
 import { campaignReader } from "@/lib/session-access"
 import { deleteSessionNote, listSessionNotes, reorderSessionEvents, saveSessionNote } from "@/lib/session-notes"
 
@@ -26,7 +27,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   try {
     const [notes, sessions] = await Promise.all([
       listSessionNotes(id, { uid: reader.account.uid, manager: reader.manager }),
-      listCampaignSessionsForDisplay(id),
+      // Un joueur ne voit pas les sessions que le MJ prépare en avance.
+      listCampaignSessionsForDisplay(id).then((sessions) => reader.manager ? sessions : sessionsForPlayers(sessions)),
     ])
     return NextResponse.json({
       campaign: reader.campaign,
@@ -46,7 +48,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!reader) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
     const body = (await request.json()) as { note?: unknown }
-    const sessions = await listCampaignSessionsForDisplay(id)
+    const listed = await listCampaignSessionsForDisplay(id)
+    const sessions = reader.manager ? listed : sessionsForPlayers(listed)
     const note = await saveSessionNote(id, body.note, { uid: reader.account.uid, manager: reader.manager, name: reader.account.displayName || "" }, sessions.map((session) => session.id))
     return NextResponse.json({ note })
   } catch (error) {

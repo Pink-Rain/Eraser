@@ -3062,7 +3062,7 @@ export const campaignDocumentSheetHeaders = ["ID", "ID campagne", "ID session", 
 export const sessionNoteSheetHeaders = ["ID", "ID campagne", "ID session", "Visibilité", "ID personnage", "Type", "Titre", "Texte", "Moment", "Liens (JSON)", "Quête (JSON)", "Auteur", "UID auteur", "Créé le", "Modifié le", "Ordre"]
 // « Ordre » : la place d'un événement dans la frise de sa session, ajoutée à droite.
 // « Cachés (JSON) » : ce que le MJ n'a pas encore révélé aux joueurs (lib/session-reveal.ts), ajouté à droite.
-export const sessionSheetHeaders = ["ID", "ID campagne", "Titre", "Bannière", "Personnages (JSON)", "PNJs (JSON)", "Magasins (JSON)", "Créée par", "Créée le", "Modifiée le", "Lieux de la session", "Document", "Événements (JSON)", "Cachés (JSON)", "Lieux liés (JSON)", "Calendrier", "Date de début", "Date de fin"]
+export const sessionSheetHeaders = ["ID", "ID campagne", "Titre", "Bannière", "Personnages (JSON)", "PNJs (JSON)", "Magasins (JSON)", "Créée par", "Créée le", "Modifiée le", "Lieux de la session", "Document", "Événements (JSON)", "Cachés (JSON)", "Lieux liés (JSON)", "Calendrier", "Date de début", "Date de fin", "Cachée aux joueurs"]
 
 const npcSheetColumnWidths = [
   180, 190, 220, 180, 110, 110, 110, 100, 100, 110, 100, 100, 130, 120, 130, 120, 110,

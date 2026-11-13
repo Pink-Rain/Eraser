@@ -373,6 +373,36 @@ test("Session : lieux de l'Index des lieux liés (cachés aux joueurs d'abord) e
   assert.deepEqual([cleared.calendar, cleared.startDate, cleared.endDate], ["", "", ""]);
 });
 
+test("Session préparée en avance : cachée aux joueurs dans sa propre colonne, montrée d'un clic", async () => {
+  const id = fresh("sessions");
+  google.addSpreadsheet(id, [{ title: "Sessions", grid: [sessionHeaders,
+    ["S-1", "CAMP-1", "Ouverture", "", "[\"PJ-1\"]", "[\"PNJ-1\"]", "[]", "mj-1", "2026-09-01", "2026-09-01", "", "", "[]", "[]"],
+  ] }]);
+  await jdr.saveJdrSheet({ key: "sessions", spreadsheetId: id, name: "Sessions", tabName: "Sessions", webViewLink: "" });
+  const sessions = await vite.ssrLoadModule("/lib/campaign-sessions.ts");
+  const reveal = await vite.ssrLoadModule("/lib/session-reveal.ts");
+  // Une session d'avant la colonne reste visible des joueurs.
+  const [old] = await sessions.listCampaignSessions("CAMP-1");
+  assert.equal(old.draft, false);
+  assert.deepEqual(reveal.sessionsForPlayers([old]).map((session) => session.id), ["S-1"]);
+  const hidden = await sessions.updateSessionDraft("CAMP-1", "S-1", true);
+  assert.equal(hidden.draft, true);
+  const headers = google.grid(id, "Sessions")[0];
+  assert.deepEqual(headers.slice(0, sessionHeaders.length), sessionHeaders);
+  assert.equal(google.grid(id, "Sessions")[1][headers.indexOf("Cachée aux joueurs")], "Oui");
+  const [reread] = await sessions.listCampaignSessions("CAMP-1");
+  assert.equal(reread.draft, true);
+  // Rien n'en sort pour un joueur, même ce que le MJ y a déjà révélé.
+  assert.deepEqual(reveal.sessionsForPlayers([reread]), []);
+  const shown = reveal.revealedSession(reread);
+  assert.deepEqual([shown.characterIds, shown.npcIds, shown.shopIds, shown.eventIds], [[], [], [], []]);
+  // La montrer vide la case ; les autres colonnes n'ont pas bougé.
+  await sessions.updateSessionDraft("CAMP-1", "S-1", false);
+  assert.equal(google.grid(id, "Sessions")[1][headers.indexOf("Cachée aux joueurs")], "");
+  assert.equal((await sessions.listCampaignSessions("CAMP-1"))[0].draft, false);
+  assert.equal(google.grid(id, "Sessions")[1][4], "[\"PJ-1\"]");
+});
+
 test("Feuille reliée : un onglet renommé à la main n'est jamais remplacé par un onglet vide", async () => {
   const renamed = fresh("camps");
   google.addSpreadsheet(renamed, [{ title: "Mes campagnes", grid: [["ID", "MJ", "Nom de la campagne"], ["CAMP-1", "mj-1", "Les Brumes"]] }, { title: "Notes", grid: [["libre"]] }]);

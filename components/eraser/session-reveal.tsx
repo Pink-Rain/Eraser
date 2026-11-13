@@ -4,6 +4,7 @@ import { createContext, useContext, type ReactNode } from "react"
 import { Eye, EyeOff, LoaderCircle } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import type { SessionRevealKind } from "@/lib/session-reveal"
 
 /**
@@ -35,6 +36,33 @@ export function RevealToggle({ kind, id, name, className = "" }: { kind: Session
   return <Button type="button" size="icon-sm" variant={hidden ? "ghost" : "secondary"} aria-pressed={!hidden} disabled={saving} title={hidden ? "Caché aux joueurs — cliquer pour le révéler dans le journal" : "Révélé dans le journal — cliquer pour le cacher"} aria-label={label} onClick={() => reveal.toggle(kind, id)} className={`${hidden ? "text-muted-foreground" : "text-primary"} ${className}`}>
     {saving ? <LoaderCircle className="animate-spin" /> : hidden ? <EyeOff /> : <Eye />}
   </Button>
+}
+
+/**
+ * La sélection du Créateur de session : plusieurs joueurs ou PNJ choisis ensemble pour les
+ * révéler, les cacher, les envoyer ou les déplacer dans une autre session, ou les retirer.
+ * Hors du Créateur, pas de contexte : la case ne s'affiche pas.
+ */
+type SessionSelection = {
+  isSelected: (kind: SessionRevealKind, id: string) => boolean
+  toggle: (kind: SessionRevealKind, id: string) => void
+  /** Au moins une chose choisie : toutes les cases restent visibles. */
+  active: boolean
+}
+
+const SessionSelectionContext = createContext<SessionSelection | null>(null)
+
+export function SessionSelectionProvider({ value, children }: { value: SessionSelection | null; children: ReactNode }) {
+  return <SessionSelectionContext.Provider value={value}>{children}</SessionSelectionContext.Provider>
+}
+
+/** La case d'une carte de la session : discrète tant que rien n'est choisi. */
+export function SelectToggle({ kind, id, name, className = "" }: { kind: SessionRevealKind; id: string; name: string; className?: string }) {
+  const selection = useContext(SessionSelectionContext)
+  if (!selection) return null
+  const selected = selection.isSelected(kind, id)
+  return <Checkbox checked={selected} onCheckedChange={() => selection.toggle(kind, id)} aria-label={selected ? `Désélectionner ${name}` : `Sélectionner ${name}`} title={selected ? "Désélectionner" : "Sélectionner (pour agir sur plusieurs à la fois)"}
+    className={`size-5 bg-card shadow-sm transition-opacity ${selected || selection.active ? "" : "opacity-40 hover:opacity-100 focus-visible:opacity-100"} ${className}`} />
 }
 
 /** « Tout révéler » / « Tout cacher », en haut du Créateur de session, avec le compte de ce qui est caché. */

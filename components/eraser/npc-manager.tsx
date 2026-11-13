@@ -22,7 +22,7 @@ import { Progress } from "@/components/ui/progress"
 import { CharacterInventory } from "@/components/eraser/character-inventory"
 import { CharacteristicBadges, CharacteristicInputs } from "@/components/eraser/characteristic-fields"
 import { npcCharacteristicKeys, npcCharacteristics, type CharacteristicName } from "@/lib/characteristics"
-import { RevealToggle } from "@/components/eraser/session-reveal"
+import { RevealToggle, SelectToggle } from "@/components/eraser/session-reveal"
 import { AddToSessionDialog, patchSession } from "@/components/eraser/session-picker"
 import { SpellPicker, useSpellOptions } from "@/components/eraser/spell-picker"
 import { TokenButton } from "@/components/eraser/token-editor"
@@ -220,7 +220,7 @@ function NpcCard({ npc, pending, mode, action, shops = [], onEdit, onAction, onS
       <div className="aspect-[4/5] overflow-hidden rounded-xl border bg-muted/40">{npc.portrait ? <img src={npc.portrait} alt={`Portrait de ${npc.name}`} className="size-full object-cover" /> : <div className="grid size-full place-items-center"><UserRound className="size-10 text-primary/25" /></div>}</div>
       <div className="min-w-0 space-y-3">
         <div className="flex items-start justify-between gap-3">
-          <div><h3 className="font-display text-xl font-semibold">{npc.name}</h3><p className="text-xs text-muted-foreground">{[richTextPlainText(npc.title), richTextPlainText(npc.occupation), npc.people].filter(Boolean).join(" · ")}{campaignNpc && <>{(npc.title || npc.occupation || npc.people) ? " · " : ""}PV {npc.currentHp} / {npc.totalHp}</>}</p>{campaignNpc && npc.inPlayerGroup && <p className="mt-1 inline-flex items-center gap-1 rounded-full border border-primary/35 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary"><UsersRound className="size-3" />Groupe</p>}</div>
+          <div className="flex min-w-0 items-start gap-2.5">{action.kind === "remove-from-session" && <SelectToggle kind="npc" id={npc.id} name={npc.name} className="mt-1 shrink-0" />}<div className="min-w-0"><h3 className="font-display text-xl font-semibold">{npc.name}</h3><p className="text-xs text-muted-foreground">{[richTextPlainText(npc.title), richTextPlainText(npc.occupation), npc.people].filter(Boolean).join(" · ")}{campaignNpc && <>{(npc.title || npc.occupation || npc.people) ? " · " : ""}PV {npc.currentHp} / {npc.totalHp}</>}</p>{campaignNpc && npc.inPlayerGroup && <p className="mt-1 inline-flex items-center gap-1 rounded-full border border-primary/35 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary"><UsersRound className="size-3" />Groupe</p>}</div></div>
           <div className="flex gap-1">
             <Button type="button" variant="ghost" size="icon-sm" onClick={onEdit} disabled={pending} title="Modifier" aria-label={`Modifier ${npc.name}`}><Pencil /></Button>
             {campaignNpc && <Button type="button" variant={npc.inPlayerGroup ? "secondary" : "ghost"} size="icon-sm" onClick={onToggleGroup} disabled={pending} title={npc.inPlayerGroup ? "Retirer des PNJs du groupe" : "Ajouter aux PNJs du groupe"} aria-label={npc.inPlayerGroup ? `Retirer ${npc.name} des PNJs du groupe` : `Ajouter ${npc.name} aux PNJs du groupe`} aria-pressed={npc.inPlayerGroup}><UsersRound className={npc.inPlayerGroup ? "text-primary" : ""} /></Button>}

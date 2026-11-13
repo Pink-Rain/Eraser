@@ -6,6 +6,7 @@ import { CalendarPlus, Check, LoaderCircle, MapPinned, Plus, Search } from "luci
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Checkbox } from "@/components/ui/checkbox"
 import { announceCampaignChange } from "@/lib/campaign-live"
 import type { CampaignSessionRecord, SessionMembership, SessionPlace } from "@/lib/campaign-sessions"
 import { cn } from "@/lib/utils"
@@ -27,15 +28,16 @@ export async function fetchSessions(campaignId: string) {
   return payload.sessions
 }
 
-export async function createSession(campaignId: string, name: string) {
+/** `draft` : préparée en avance, absente du journal des joueurs jusqu'à ce que le MJ la montre. */
+export async function createSession(campaignId: string, name: string, draft = false) {
   const payload = await sessionJson<{ session: CampaignSessionRecord }>(await fetch(sessionsUrl(campaignId), {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }),
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, ...(draft ? { draft } : {}) }),
   }), "La session n’a pas pu être créée.")
   announceCampaignChange(campaignId, { kind: "session", sessionId: payload.session.id })
   return payload.session
 }
 
-export async function patchSession(campaignId: string, sessionId: string, body: { name?: string; add?: SessionMembership; remove?: SessionMembership; places?: string; document?: string; events?: { add?: string[]; remove?: string[] }; visibility?: { reveal?: string[]; hide?: string[]; all?: "reveal" | "hide" }; placeLinks?: { add?: SessionPlace[]; remove?: string[] }; dates?: { calendar: string; startDate: string; endDate: string } } | FormData) {
+export async function patchSession(campaignId: string, sessionId: string, body: { name?: string; add?: SessionMembership; remove?: SessionMembership; places?: string; document?: string; events?: { add?: string[]; remove?: string[] }; visibility?: { reveal?: string[]; hide?: string[]; all?: "reveal" | "hide" }; placeLinks?: { add?: SessionPlace[]; remove?: string[] }; dates?: { calendar: string; startDate: string; endDate: string }; draft?: boolean } | FormData) {
   const init: RequestInit = body instanceof FormData
     ? { method: "PATCH", body }
     : { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }
@@ -65,9 +67,13 @@ export function sessionDateLabel(value: string) {
   return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium" }).format(date)
 }
 
-/** « Créer une nouvelle session » : un titre, et c'est tout. */
-export function CreateSessionDialog({ open, campaignId, onClose, onCreated }: { open: boolean; campaignId: string; onClose: () => void; onCreated: (session: CampaignSessionRecord) => void }) {
+/**
+ * « Créer une nouvelle session » : un titre, et, depuis le Créateur de session, le choix de la
+ * préparer en avance (cachée aux joueurs). `allowDraft` : la case s'affiche.
+ */
+export function CreateSessionDialog({ open, campaignId, onClose, onCreated, allowDraft = false }: { open: boolean; campaignId: string; onClose: () => void; onCreated: (session: CampaignSessionRecord) => void; allowDraft?: boolean }) {
   const [name, setName] = useState("")
+  const [draft, setDraft] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState("")
   async function submit(event: FormEvent) {
@@ -75,8 +81,8 @@ export function CreateSessionDialog({ open, campaignId, onClose, onCreated }: { 
     if (!name.trim() || pending) return
     setPending(true); setError("")
     try {
-      const session = await createSession(campaignId, name.trim())
-      setName("")
+      const session = await createSession(campaignId, name.trim(), allowDraft && draft)
+      setName(""); setDraft(false)
       onCreated(session)
     } catch (caught) { setError(caught instanceof Error ? caught.message : "La session n’a pas pu être créée.") }
     setPending(false)
@@ -86,6 +92,10 @@ export function CreateSessionDialog({ open, campaignId, onClose, onCreated }: { 
       <DialogHeader><DialogTitle>Créer une nouvelle session</DialogTitle><DialogDescription>Les personnages joueurs de la campagne y sont ajoutés automatiquement.</DialogDescription></DialogHeader>
       <form className="space-y-4" onSubmit={submit}>
         <Input autoFocus value={name} onChange={(event) => setName(event.target.value)} maxLength={160} placeholder="Titre de la session" aria-label="Titre de la session" />
+        {allowDraft && <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border bg-muted/30 px-3 py-2.5 text-sm">
+          <Checkbox checked={draft} onCheckedChange={(checked) => setDraft(checked === true)} className="mt-0.5" />
+          <span><span className="font-medium">Préparer en avance</span><span className="block text-xs text-muted-foreground">La session reste absente du journal des joueurs jusqu’à ce que tu la montres.</span></span>
+        </label>}
         {error && <p className="text-sm text-destructive">{error}</p>}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" disabled={pending} onClick={onClose}>Annuler</Button>

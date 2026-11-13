@@ -15,7 +15,7 @@ import { ownedBy } from "@/lib/ownership"
 import { campaignReader } from "@/lib/session-access"
 import { listSessionNotes } from "@/lib/session-notes"
 import { authorizedAccount } from "@/lib/server-auth"
-import { revealedSession } from "@/lib/session-reveal"
+import { revealedSession, sessionsForPlayers } from "@/lib/session-reveal"
 import { hiddenCampaignCharacters } from "@/lib/campaign-hidden-characters"
 import { playerNamesFor } from "@/lib/chat-accounts"
 import { NO_CLASS } from "@/lib/class-visibility"
@@ -111,7 +111,8 @@ export default async function CampaignJournalPage({ params, searchParams }: { pa
   const ownIds = mine.map((character) => character.id)
   const veiledCharacters = reader.manager ? new Set<string>() : new Set(hiddenCharacters.filter((characterId) => !ownIds.includes(characterId)))
   const members = listedMembers.filter((member) => !veiledCharacters.has(member.id))
-  const list = (sessions ?? []).map((session) => {
+  // Une session préparée en avance n'existe pas encore pour les joueurs.
+  const list = (reader.manager ? sessions ?? [] : sessionsForPlayers(sessions ?? [])).map((session) => {
     if (reader.manager) return session
     const shown = revealedSession(session)
     return { ...shown, characterIds: shown.characterIds.filter((characterId) => !veiledCharacters.has(characterId)) }
@@ -149,6 +150,8 @@ export default async function CampaignJournalPage({ params, searchParams }: { pa
     calendar: session.calendar,
     startDate: session.startDate,
     endDate: session.endDate,
+    // Le MJ voit les sessions qu'il prépare encore en avance (cachées aux joueurs).
+    ...(reader.manager && session.draft ? { draft: true } : {}),
     // Le MJ voit ce qui reste caché aux joueurs ; un joueur ne voit les personnages cachés ni dans le groupe, ni parmi les absents.
     ...(reader.manager ? { hidden: session.hidden } : { veiledCharacterIds: (sessions ?? []).find((candidate) => candidate.id === session.id)?.characterIds.filter((characterId) => !session.characterIds.includes(characterId)) ?? [] }),
   }))

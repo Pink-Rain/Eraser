@@ -30,7 +30,8 @@ async function sessionScope(account: AuthorizedUser, campaignId: string, session
   const reader = await campaignReader(campaignId)
   if (!reader) return null
   if (reader.manager) return new Set((await listCampaignMembers(campaignId).catch(() => [])).map((member) => member.id))
-  const session = (await listCampaignSessionsForDisplay(campaignId).catch(() => [])).find((entry) => entry.id === sessionId)
+  // Une session préparée en avance n'ouvre rien aux joueurs.
+  const session = (await listCampaignSessionsForDisplay(campaignId).catch(() => [])).find((entry) => entry.id === sessionId && !entry.draft)
   if (!session) return null
   const present = new Set(session.characterIds)
   const mine = await listCharactersForUser(account.uid).catch(() => [])

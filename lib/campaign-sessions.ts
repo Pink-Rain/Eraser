@@ -62,6 +62,11 @@ export type CampaignSessionRecord = {
   calendar: string
   startDate: string
   endDate: string
+  /**
+   * Session préparée en avance : absente du journal des joueurs (et de tout ce qu'ils lisent
+   * des sessions) jusqu'à ce que le MJ la montre. Case « Cachée aux joueurs » : « Oui ».
+   */
+  draft: boolean
 }
 
 /** Un lieu de l'Index des lieux : son identifiant (« LIE-… »), son nom et son onglet (Villes…). */
@@ -194,7 +199,13 @@ function sessionFromRow(row: string[], strict = false, strictEvents = false): Ca
     calendar: row[15] || "",
     startDate: row[16] || "",
     endDate: row[17] || "",
+    draft: isYes(row[18]),
   }
+}
+
+/** « Oui » (ou « TRUE » coché à la main dans la feuille) ; vide pour une session d'avant la colonne. */
+function isYes(value: string | undefined) {
+  return /^(oui|true|vrai|1|x)$/i.test((value ?? "").trim())
 }
 
 /** Les choses cachées d'une session ; une case illisible cache tout ce que la session contient. */
@@ -226,6 +237,7 @@ function sessionCells(change: Partial<CampaignSessionRecord>) {
   if (change.calendar !== undefined) cells["Calendrier"] = change.calendar
   if (change.startDate !== undefined) cells["Date de début"] = change.startDate
   if (change.endDate !== undefined) cells["Date de fin"] = change.endDate
+  if (change.draft !== undefined) cells["Cachée aux joueurs"] = change.draft ? "Oui" : ""
   return cells
 }
 
@@ -236,6 +248,7 @@ function sessionRow(session: CampaignSessionRecord) {
     session.createdByUid, session.createdAt, session.updatedAt,
     session.places, session.document, eventsJson(session), JSON.stringify(session.hidden),
     JSON.stringify(session.placeLinks), session.calendar, session.startDate, session.endDate,
+    session.draft ? "Oui" : "",
   ]
 }
 
@@ -325,7 +338,7 @@ async function updateSession(campaignId: string, sessionId: string, change: (cur
  * première reprend aussi ce que l'ancien Créateur de session contenait (PNJs et
  * magasins marqués « dans la campagne ») : rien de ce qui était préparé ne disparaît.
  */
-export async function createCampaignSession(campaignId: string, name: string, createdByUid: string) {
+export async function createCampaignSession(campaignId: string, name: string, createdByUid: string, options: { draft?: boolean } = {}) {
   const [existing, members] = await Promise.all([listCampaignSessions(campaignId), listCampaignMembers(campaignId)])
   const [legacyNpcs, legacyShops] = existing.length
     ? [[], []]
@@ -351,6 +364,7 @@ export async function createCampaignSession(campaignId: string, name: string, cr
     calendar: "",
     startDate: "",
     endDate: "",
+    draft: Boolean(options.draft),
   }
   // Tout ce qu'une nouvelle session reçoit est caché aux joueurs jusqu'à ce que le MJ le révèle.
   session.hidden = sessionItemKeys(session)
@@ -385,6 +399,11 @@ export async function updateSessionVisibility(campaignId: string, sessionId: str
     const hidden = [...new Set([...session.hidden.filter((key) => !revealed.has(key)), ...(change.hide ?? []).filter((key) => known.has(key))])]
     return { hidden }
   })
+}
+
+/** Cache toute la session aux joueurs (préparée en avance) ou la leur montre. */
+export async function updateSessionDraft(campaignId: string, sessionId: string, draft: boolean) {
+  return updateSession(campaignId, sessionId, () => ({ draft }))
 }
 
 export async function renameCampaignSession(campaignId: string, sessionId: string, name: string) {

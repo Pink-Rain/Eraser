@@ -9,7 +9,9 @@ import { readToken, readTokenFrames, tokenVersion, type TokenKind } from "@/lib/
 import { resolveTokenFrame, shopInterior, type TokenSubject } from "@/lib/token-frames"
 import { readNpcPortrait } from "@/lib/npc-portraits"
 import type { AuthorizedUser } from "@/lib/server-auth"
-import { listCampaignSessions } from "@/lib/campaign-sessions"
+import { listCampaignSessions, type CampaignSessionRecord, type SessionEvent } from "@/lib/campaign-sessions"
+import { listCampaignEvents } from "@/lib/campaign-events"
+import { getSharedMedia } from "@/lib/shared-media"
 import { shopForPlayers } from "@/lib/shop-purchase"
 import { documentFileName, documentPdf, listCampaignDocuments, readDocumentRender } from "@/lib/campaign-documents"
 import { documentPageCount } from "@/lib/document-model"
@@ -92,6 +94,36 @@ export async function roll20SessionList(link: typeof roll20CampaignLinks.$inferS
   return [...sessions].reverse().map((session) => ({ id: session.id, name: session.name, createdAt: session.createdAt, npcCount: session.npcIds.length, shopCount: session.shopIds.length, documentCount: documents.filter((document) => document.sessionId === session.id && document.renderVersion).length }))
 }
 
+/** L'identifiant du portrait importé d'une créature (« creatures/<id>/portrait »), celui de son token. */
+function creaturePortraitId(image: string) {
+  return image.match(/\/api\/resources\/creature-portraits\/([\w-]+)/)?.[1] || ""
+}
+
+/**
+ * Le token d'une créature : celui de son portrait importé, sinon celui de sa fiche de l'index,
+ * sinon celui de l'événement — la même règle que le bouton Token du Créateur de session.
+ */
+function creatureTokenOwner(event: Pick<SessionEvent, "id" | "refId" | "image">) {
+  return creaturePortraitId(event.image) || event.refId || event.id
+}
+
+/**
+ * Les créatures des sessions (événements « Créature », et ceux de l'alpha 193 écrits dans la
+ * session) : une fiche Roll20 par créature de l'index, même si elle revient dans plusieurs
+ * sessions. Rangées par le token qu'elles portent.
+ */
+async function sessionCreatures(campaignId: string, sessions: CampaignSessionRecord[]) {
+  const wanted = new Set(sessions.flatMap((session) => session.eventIds))
+  const events = wanted.size ? (await listCampaignEvents(campaignId).catch(() => [])).filter((event) => wanted.has(event.id)) : []
+  const all = [...events, ...sessions.flatMap((session) => session.legacyEvents)].filter((event) => event.kind === "creature" && event.name)
+  const byOwner = new Map<string, SessionEvent>()
+  for (const event of all) {
+    const owner = creatureTokenOwner(event)
+    if (!byOwner.has(owner)) byOwner.set(owner, event)
+  }
+  return [...byOwner.entries()].map(([owner, event]) => ({ owner, event }))
+}
+
 /** « players » : les personnages joueurs seuls ; « documents » : les documents seuls. */
 export type Roll20Scope = "" | "players" | "documents"
 
@@ -117,6 +149,8 @@ export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$in
         return [allNpcs.filter((npc) => npcIds.has(npc.id)), allShops.filter((shop) => shopIds.has(shop.id))] as const
       })
       : await Promise.all([listNpcs(link.campaignId, true), listSavedShops(link.campaignId, true)])
+  // Les créatures des événements : ceux de la session, ou de toutes les sessions (« Tout synchroniser »).
+  const creatures = !withSheets ? [] : await sessionCreatures(link.campaignId, session ? [session] : await listCampaignSessions(link.campaignId))
   // Les personnages joueurs : ceux de la session, ou tous ceux de la campagne.
   const characterIds = !withEntities ? [] : session ? session.characterIds : (await listCampaignMembers(link.campaignId)).map((member) => member.id)
   const [inventories, characters, framings, frames, documents, companions] = await Promise.all([
@@ -149,6 +183,8 @@ export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$in
   const imageUrl = (kind: TokenKind | "document", id: string, type: "portrait" | "token" | "image" | "pdf", version = "") =>
     `${origin}/api/roll20/bridge/portrait/${encodeURIComponent(id)}?campaign=${encodeURIComponent(link.campaignId)}&key=${encodeURIComponent(link.imageToken)}&kind=${kind}&type=${type}${version ? `&v=${encodeURIComponent(version.replace(/[^0-9A-Za-z]/g, ""))}` : ""}`
   const portraitUrl = (npcId: string, portrait: string) => portrait ? imageUrl("npc", npcId, "portrait") : ""
+  // Une créature : son portrait importé (Drive) ou une adresse https collée dans l'index.
+  const creaturePortrait = (owner: string, image: string) => (creaturePortraitId(image) || /^https:\/\//i.test(image)) ? imageUrl("creature", owner, "portrait") : ""
   // Version du portrait : le compagnon refait le token par défaut quand elle change.
   const portraitVersion = async (key: string, portrait: string) => /^https?:\/\//i.test(portrait)
     ? portrait
@@ -200,6 +236,22 @@ export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$in
       gmNotes: npc.gmNotes,
       inventory: inventories[npc.id] || [],
     }))),
+    // Les créatures des événements de session, avec le token préparé dans Eraser (sinon le
+    // compagnon dessine le token par défaut d'une créature, cadre argenté).
+    creatures: await Promise.all(creatures.map(async ({ owner, event }) => {
+      const portraitId = creaturePortraitId(event.image)
+      return {
+        id: `creature:${owner}`,
+        name: event.name,
+        portraitUrl: creaturePortrait(owner, event.image),
+        tokenUrl: await tokenUrl("creature", owner),
+        portraitVersion: portraitId ? await portraitVersion(`creatures/${portraitId}/portrait`, "") : /^https:\/\//i.test(event.image) ? event.image : "",
+        framing: framing("creature", owner),
+        frame: frame("creature", owner, { kind: "creature" }, true),
+        tag: event.tag,
+        gmNotes: event.description,
+      }
+    })),
     shops: await Promise.all(shops.map(async (shop) => {
       const seller = npcById.get(shop.npcId)
       return {
@@ -268,6 +320,19 @@ export async function roll20Image(campaignId: string, kind: string, id: string, 
     const object = await readCharacterPortrait(id)
     if (object) return { body: object.body, contentType: object.httpMetadata?.contentType || "image/jpeg" }
     if (character && /^https:\/\//i.test(character.portrait)) return { redirect: character.portrait }
+    return null
+  }
+  if (kind === "creature") {
+    // Seulement une créature d'un événement de session de la campagne liée.
+    const creature = (await sessionCreatures(campaignId, await listCampaignSessions(campaignId))).find((candidate) => candidate.owner === id)
+    if (!creature) return null
+    if (type === "token") return tokenImage("creature", id)
+    const portraitId = creaturePortraitId(creature.event.image)
+    if (portraitId) {
+      const object = await getSharedMedia(`creatures/${portraitId}/portrait`)
+      return object ? { body: object.body, contentType: object.httpMetadata?.contentType || "image/jpeg" } : null
+    }
+    if (/^https:\/\//i.test(creature.event.image)) return { redirect: creature.event.image }
     return null
   }
   if (kind === "shop" && type === "token") {

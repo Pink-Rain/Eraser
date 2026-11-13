@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useId, useMemo, useRef, useState,
 import Link from "next/link"
 import dynamic from "next/dynamic"
 import { useRouter } from "next/navigation"
-import { ArrowUpRight, BookOpen, CalendarDays, Check, Hourglass, ChevronDown, ChevronLeft, ChevronRight, CircleUserRound, Feather, Lock, NotebookPen, NotebookText, Plus, Store, type LucideIcon } from "lucide-react"
+import { ArrowUpRight, BookOpen, CalendarDays, Check, Hourglass, ChevronDown, ChevronLeft, ChevronRight, CircleUserRound, EyeOff, Feather, Lock, NotebookPen, NotebookText, Plus, Store, type LucideIcon } from "lucide-react"
 
 import { replaceAppUrl } from "@/components/eraser/app-tabs"
 import { RevealToggle, SessionRevealProvider } from "@/components/eraser/session-reveal"
@@ -52,6 +52,8 @@ export type JournalSessionDetail = JournalSession & {
   marketIds?: string[]
   /** Pour le MJ : ce que le Créateur de session cache encore aux joueurs (« npc:ID », « event:shop:ID »…). */
   hidden?: string[]
+  /** Pour le MJ : session préparée en avance, absente du journal des joueurs. */
+  draft?: boolean
   /** Pour un joueur : les personnages de la session qu'on ne lui montre pas (ni dans le groupe, ni parmi les absents). */
   veiledCharacterIds?: string[]
 }
@@ -806,6 +808,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
                     </span>
                     <span className="mt-1.5 inline-flex items-center gap-1.5 text-[12.5px] text-banner-ink/80">
                       {worldDate && <><Hourglass className="size-3.5" aria-hidden /><span title={current.calendar}>{worldDate}</span><span aria-hidden>·</span></>}
+                      {current.draft && <><EyeOff className="size-3.5" aria-hidden /><span>Préparée — cachée aux joueurs</span><span aria-hidden>·</span></>}
                       {date && <><CalendarDays className="size-3.5" aria-hidden />{date}<span className="hidden sm:inline" aria-hidden>·</span></>}
                       <span className="hidden sm:inline">toutes les sessions</span>
                       <ChevronDown className={cn("size-3.5 transition-transform", listOpen && "rotate-180")} aria-hidden />
@@ -827,7 +830,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
                       className={cn("grid w-full grid-cols-[2.5rem_minmax(0,1fr)_1rem] items-center gap-1.5 rounded-xl px-2.5 py-2 text-left outline-none hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40", position === index && "bg-journal/10 hover:bg-journal/15")}
                     >
                       <span className="font-display font-semibold tabular-nums text-journal-ink">S{position + 1}</span>
-                      <span className="min-w-0"><span className="block truncate font-display text-[15px]">{session.name}</span>{sessionDate(session.createdAt) && <span className="block text-[11.5px] text-muted-foreground">{sessionDate(session.createdAt)}</span>}</span>
+                      <span className="min-w-0"><span className="flex items-center gap-1.5"><span className="truncate font-display text-[15px]">{session.name}</span>{session.draft && <EyeOff className="size-3.5 shrink-0 text-muted-foreground" aria-label="Préparée, cachée aux joueurs" />}</span>{sessionDate(session.createdAt) && <span className="block text-[11.5px] text-muted-foreground">{sessionDate(session.createdAt)}</span>}</span>
                       {position === index && <Check className="size-4 text-journal-ink" aria-hidden />}
                     </button>)}
                   </div>

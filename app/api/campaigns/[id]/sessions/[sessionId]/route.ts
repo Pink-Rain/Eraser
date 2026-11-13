@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { sessionManager } from "@/lib/session-access"
-import { cleanSessionPlace, deleteCampaignSession, renameCampaignSession, saveSessionBanner, updateSessionDates, updateSessionEvents, updateSessionMembership, updateSessionPlaces, updateSessionTexts, updateSessionVisibility, type SessionMembership } from "@/lib/campaign-sessions"
+import { cleanSessionPlace, deleteCampaignSession, renameCampaignSession, saveSessionBanner, updateSessionDates, updateSessionEvents, updateSessionMembership, updateSessionPlaces, updateSessionTexts, updateSessionDraft, updateSessionVisibility, type SessionMembership } from "@/lib/campaign-sessions"
 
 function ids(value: unknown) {
   return Array.isArray(value) && value.length <= 200 && value.every((item) => typeof item === "string" && item.length > 0 && item.length <= 200) ? value as string[] : undefined
@@ -30,7 +30,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (!(file instanceof File)) throw new Error("INVALID_BANNER")
       return NextResponse.json({ session: await saveSessionBanner(id, sessionId, file) })
     }
-    const body = (await request.json()) as { name?: unknown; add?: unknown; remove?: unknown; places?: unknown; document?: unknown; events?: unknown; visibility?: unknown; placeLinks?: unknown; dates?: unknown }
+    const body = (await request.json()) as { name?: unknown; add?: unknown; remove?: unknown; places?: unknown; document?: unknown; events?: unknown; visibility?: unknown; placeLinks?: unknown; dates?: unknown; draft?: unknown }
+    // Toute la session cachée aux joueurs (préparée en avance) ou montrée dans leur journal.
+    if (typeof body.draft === "boolean") return NextResponse.json({ session: await updateSessionDraft(id, sessionId, body.draft) })
     // Les lieux de l'Index des lieux liés ou déliés.
     if (body.placeLinks && typeof body.placeLinks === "object") {
       const change = body.placeLinks as Record<string, unknown>

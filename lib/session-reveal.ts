@@ -18,7 +18,7 @@ export function sessionItemKey(kind: SessionRevealKind, id: string) {
   return `${kind}:${id}`
 }
 
-type SessionLists = { characterIds: string[]; npcIds: string[]; shopIds: string[]; eventIds: string[]; legacyEvents?: Array<{ id: string }>; /** Les lieux de l'Index des lieux liés à la session. */ placeLinks?: Array<{ id: string }>; hidden?: string[] }
+type SessionLists = { /** Session préparée en avance : rien n'en est montré aux joueurs. */ draft?: boolean; characterIds: string[]; npcIds: string[]; shopIds: string[]; eventIds: string[]; legacyEvents?: Array<{ id: string }>; /** Les lieux de l'Index des lieux liés à la session. */ placeLinks?: Array<{ id: string }>; hidden?: string[] }
 
 /** Toutes les choses de la session, sous leur clé (« Tout cacher » les cache toutes). */
 export function sessionItemKeys(session: SessionLists) {
@@ -30,6 +30,11 @@ export function sessionItemKeys(session: SessionLists) {
     ...(session.legacyEvents ?? []).map((event) => sessionItemKey("event", event.id)),
     ...(session.placeLinks ?? []).map((place) => sessionItemKey("place", place.id)),
   ]
+}
+
+/** Les sessions qu'un joueur voit : sans celles que le MJ prépare en avance. */
+export function sessionsForPlayers<T extends Pick<SessionLists, "draft">>(sessions: T[]): T[] {
+  return sessions.filter((session) => !session.draft)
 }
 
 export function isSessionItemHidden(session: Pick<SessionLists, "hidden">, kind: SessionRevealKind, id: string) {
@@ -50,6 +55,8 @@ export function hiddenAfterChange(hidden: string[], kind: SessionRevealKind, bef
 
 /** La session telle qu'un joueur la voit : seulement ce que le MJ a révélé. */
 export function revealedSession<T extends SessionLists>(session: T): T {
+  // Une session préparée en avance ne montre rien, même ce que le MJ y a déjà révélé.
+  if (session.draft) return { ...session, characterIds: [], npcIds: [], shopIds: [], eventIds: [], ...(session.legacyEvents ? { legacyEvents: [] } : {}), ...(session.placeLinks ? { placeLinks: [] } : {}) }
   if (!session.hidden?.length) return session
   const hidden = new Set(session.hidden)
   const shown = (kind: SessionRevealKind) => (id: string) => !hidden.has(sessionItemKey(kind, id))

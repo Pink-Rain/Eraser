@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  const VERSION = '0.8.0';
+  const VERSION = '0.9.0';
   const API = 'http://127.0.0.1:32147/api/roll20/bridge';
   const IS_TOP = window.top === window;
   let syncing = false;
@@ -242,7 +242,7 @@
     if (!canvas) {
       const style = kind === 'shop'
         ? { kind: 'shop', shopKey: art.shopFronts[value.key] ? value.key : 'market' }
-        : { kind: kind === 'character' ? 'character' : 'npc' };
+        : { kind: kind === 'character' ? 'character' : kind === 'creature' ? 'creature' : 'npc' };
       canvas = art.renderDefaultToken(style, image, value.framing || null);
     }
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
@@ -544,15 +544,17 @@
       const characters = Array.isArray(payload.characters) ? payload.characters : [];
       // Une application Eraser plus ancienne ne connaît pas les documents.
       const documents = Array.isArray(payload.documents) ? payload.documents : [];
-      const total = characters.length + payload.npcs.length + payload.shops.length + documents.length;
-      if (!total) throw new Error(scope === 'players' ? 'Aucun personnage joueur dans cette campagne Eraser.' : scope === 'documents' ? 'Aucun document dans cette campagne Eraser : écris-en un dans la page Document.' : payload.session ? 'La session « ' + payload.session.name + ' » ne contient aucun joueur, PNJ, magasin ni document.' : 'Eraser a renvoyé 0 PNJ et 0 magasin. Ajoute des PNJ ou des magasins à une session dans le Créateur de session.');
+      // Les créatures des événements de session (Eraser alpha 295 et suivantes).
+      const creatures = Array.isArray(payload.creatures) ? payload.creatures : [];
+      const total = characters.length + payload.npcs.length + creatures.length + payload.shops.length + documents.length;
+      if (!total) throw new Error(scope === 'players' ? 'Aucun personnage joueur dans cette campagne Eraser.' : scope === 'documents' ? 'Aucun document dans cette campagne Eraser : écris-en un dans la page Document.' : payload.session ? 'La session « ' + payload.session.name + ' » ne contient aucun joueur, PNJ, créature, magasin ni document.' : 'Eraser a renvoyé 0 PNJ et 0 magasin. Ajoute des PNJ ou des magasins à une session dans le Créateur de session.');
       // Une session range ses PNJs, magasins et documents dans un dossier à son nom (les joueurs ne bougent pas).
       const folder = payload.session ? payload.session.name : '';
       const documentFolder = folder || 'Documents Eraser';
 
       const failures = [];
       const warnings = [];
-      let imported = 0, players = 0, tokens = 0, eraserTokens = 0, autoTokens = 0, portraits = 0, shops = 0, docs = 0, pdfs = 0, done = 0;
+      let imported = 0, beasts = 0, players = 0, tokens = 0, eraserTokens = 0, autoTokens = 0, portraits = 0, shops = 0, docs = 0, pdfs = 0, done = 0;
       const filed = [];
       const filedDocuments = [];
       const collect = (report, fileInFolder) => {
@@ -575,6 +577,11 @@
         status(label);
         if (collect(await importWithImages(payload, 'npc', npc, label, folder), true)) imported += 1;
       }
+      for (const creature of creatures) {
+        const label = 'Créature ' + (++done) + '/' + total + ' — ' + creature.name;
+        status(label);
+        if (collect(await importWithImages(payload, 'creature', creature, label, folder), true)) beasts += 1;
+      }
       for (const shop of payload.shops) {
         const label = 'Magasin ' + (++done) + '/' + total + ' — ' + shop.name;
         status(label);
@@ -589,7 +596,7 @@
         if (report.pdf) pdfs += 1;
       }
 
-      // Les PNJs et magasins de la session vont dans son dossier ; les joueurs ne bougent pas.
+      // Les PNJs, créatures et magasins de la session vont dans son dossier ; les joueurs ne bougent pas.
       let folderNote = '';
       if (folder && filed.length) {
         status('Rangement dans le dossier « ' + folder + ' »…');
@@ -604,13 +611,13 @@
 
       await sendCommand('!eraser-import-done');
       const seconds = Math.round((Date.now() - started) / 1000);
-      const withToken = characters.concat(payload.npcs, payload.shops).filter((entry) => entry.tokenUrl).length;
+      const withToken = characters.concat(payload.npcs, creatures, payload.shops).filter((entry) => entry.tokenUrl).length;
       const documentNote = documents.length ? ' · ' + docs + '/' + documents.length + ' document(s), ' + pdfs + ' PDF déposé(s)' : '';
       const summary = scope === 'players'
         ? 'Personnages joueurs · ' + players + '/' + characters.length + ' à jour · ' + tokens + ' jeton(s) OK · ' + portraits + ' portrait(s) · ' + eraserTokens + ' token(s) Eraser · ' + autoTokens + ' token(s) par défaut · ' + seconds + ' s'
         : scope === 'documents'
           ? 'Documents · ' + docs + '/' + documents.length + ' handout(s) · ' + pdfs + ' PDF déposé(s) dans le Journal · ' + seconds + ' s'
-          : (payload.session ? 'Session « ' + payload.session.name + ' » · ' : 'Tout · ') + players + '/' + characters.length + ' joueur(s) · ' + imported + '/' + payload.npcs.length + ' PNJ · ' + shops + '/' + payload.shops.length + ' magasin(s) · ' + tokens + ' jeton(s) OK · ' + portraits + ' portrait(s) importé(s) · ' + eraserTokens + ' token(s) Eraser importé(s) sur ' + withToken + ' préparé(s) · ' + autoTokens + ' token(s) par défaut' + documentNote + folderNote + ' · ' + seconds + ' s';
+          : (payload.session ? 'Session « ' + payload.session.name + ' » · ' : 'Tout · ') + players + '/' + characters.length + ' joueur(s) · ' + imported + '/' + payload.npcs.length + ' PNJ · ' + (creatures.length ? beasts + '/' + creatures.length + ' créature(s) · ' : '') + shops + '/' + payload.shops.length + ' magasin(s) · ' + tokens + ' jeton(s) OK · ' + portraits + ' portrait(s) importé(s) · ' + eraserTokens + ' token(s) Eraser importé(s) sur ' + withToken + ' préparé(s) · ' + autoTokens + ' token(s) par défaut' + documentNote + folderNote + ' · ' + seconds + ' s';
       if (failures.length) status('Synchronisation incomplète — ' + summary + '\n\n' + failures.concat(warnings).join('\n'), true);
       else if (warnings.length) status('Synchronisation faite — ' + summary + '\n\n' + warnings.join('\n') + '\n\nAstuce : sélectionne un jeton puis « !eraser-placeholder » pour donner une image par défaut aux PNJ sans portrait.', false);
       else status('Synchronisation terminée — ' + summary);
@@ -622,7 +629,7 @@
   }
 
   async function resetAllImports() {
-    if (!window.confirm('Supprimer les PNJ, magasins et documents créés par Eraser dans cette partie Roll20, puis repartir de zéro ? (Les PDF déposés dans le Journal restent à supprimer à la main.)')) return;
+    if (!window.confirm('Supprimer les PNJ, créatures, magasins et documents créés par Eraser dans cette partie Roll20, puis repartir de zéro ? (Les PDF déposés dans le Journal restent à supprimer à la main.)')) return;
     try {
       const result = await command('!eraser-reset-all', null, 15000);
       await storageSet({ eraserPdfs: {} });

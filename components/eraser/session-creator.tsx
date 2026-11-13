@@ -3,7 +3,7 @@
 import { NO_CLASS } from "@/lib/class-visibility"
 import { displayedMultipleValue } from "@/lib/multiple-values"
 import { useEffect, useRef, useState } from "react"
-import { ArrowUpRight, CalendarDays, CalendarPlus, CircleMinus, CircleUserRound, ImagePlus, LoaderCircle, Pencil, Plus, Trash2, UsersRound } from "lucide-react"
+import { ArrowRightLeft, ArrowUpRight, CalendarDays, CalendarPlus, CircleMinus, CircleUserRound, Eye, EyeOff, ImagePlus, ListChecks, LoaderCircle, Pencil, Plus, Send, Trash2, UsersRound, X } from "lucide-react"
 import Link from "next/link"
 
 import {
@@ -15,14 +15,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { NpcManager } from "@/components/eraser/npc-manager"
-import { CreateSessionDialog, deleteSession, patchSession, SESSION_UPDATED_EVENT, sessionDateLabel, type CampaignSessionRecord } from "@/components/eraser/session-picker"
+import { AddToSessionDialog, CreateSessionDialog, deleteSession, patchSession, SESSION_UPDATED_EVENT, sessionDateLabel, type CampaignSessionRecord } from "@/components/eraser/session-picker"
 import { SavedShopCollection } from "@/components/eraser/shop-generator"
 import { SessionEvents } from "@/components/eraser/session-events"
 import { SessionDocuments } from "@/components/eraser/session-documents"
 import { RichTextField } from "@/components/eraser/rich-text"
 import { CalendarDateField } from "@/components/eraser/calendar-date-field"
 import { SessionPlaces } from "@/components/eraser/session-places"
-import { RevealAllBar, RevealToggle, SessionRevealProvider } from "@/components/eraser/session-reveal"
+import { RevealAllBar, RevealToggle, SelectToggle, SessionRevealProvider, SessionSelectionProvider } from "@/components/eraser/session-reveal"
 import { hiddenAfterChange, sessionItemKey, sessionItemKeys, type SessionRevealKind } from "@/lib/session-reveal"
 import { replaceAppUrl } from "@/components/eraser/app-tabs"
 import type { CampaignNpcRecord, SavedShopRecord, ShopGeneratorItem } from "@/lib/shop-schema"
@@ -57,6 +57,7 @@ function PlayerCard({ member, pending, onRemove }: { member: SessionMember; pend
       <div className="absolute inset-0 grid place-items-center"><CircleUserRound className="size-9 text-primary/20" /></div>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={`/api/characters/portrait/${encodeURIComponent(member.id)}`} alt={`Portrait de ${member.name}`} loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover" onError={(event) => { event.currentTarget.style.display = "none" }} />
+      <SelectToggle kind="character" id={member.id} name={member.name} className="absolute left-2 top-2" />
     </div>
     <div className="min-w-0 p-4 pr-11">
       <h3 className="font-display text-lg font-semibold leading-tight">{member.name}</h3>
@@ -121,11 +122,13 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
   const [deleting, setDeleting] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState("")
+  const [notice, setNotice] = useState("")
   const session = sessions.find((candidate) => candidate.id === selectedId) || null
 
   function select(id: string) {
     setSelectedId(id)
     setError("")
+    setNotice("")
     // L'adresse garde la session choisie (retour arrière, rechargement) sans recharger la page.
     const url = new URL(window.location.href)
     if (id) url.searchParams.set("session", id); else url.searchParams.delete("session")
@@ -139,7 +142,8 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
   useEffect(() => {
     const listener = (event: Event) => {
       const updated = (event as CustomEvent<CampaignSessionRecord>).detail
-      if (updated?.campaignId === campaignId) setSessions((current) => current.map((candidate) => candidate.id === updated.id ? updated : candidate))
+      // Une session créée depuis la fenêtre d'envoi arrive aussi dans le menu des sessions.
+      if (updated?.campaignId === campaignId) setSessions((current) => current.some((candidate) => candidate.id === updated.id) ? current.map((candidate) => candidate.id === updated.id ? updated : candidate) : [...current, updated])
     }
     window.addEventListener(SESSION_UPDATED_EVENT, listener)
     return () => window.removeEventListener(SESSION_UPDATED_EVENT, listener)
@@ -154,7 +158,7 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
     const before = session
     const seq = ++changeSeq.current
     const membership = !(body instanceof FormData) && (body.add || body.remove) ? body : null
-    const shown = membership ? withMembership(session, membership.add ?? {}, membership.remove ?? {}) : body instanceof FormData ? null : withPlacesAndDates(session, body)
+    const shown = membership ? withMembership(session, membership.add ?? {}, membership.remove ?? {}) : body instanceof FormData ? null : typeof body.draft === "boolean" ? { ...session, draft: body.draft } : withPlacesAndDates(session, body)
     if (shown) replace(shown)
     try {
       const saved = await patchSession(campaignId, session.id, body)
@@ -197,6 +201,52 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
   const allKeys = session ? sessionItemKeys(session) : []
   const hiddenCount = allKeys.filter((key) => hiddenKeys.includes(key)).length
 
+  // Plusieurs joueurs et PNJ choisis ensemble (cases des cartes) : la sélection vaut pour la
+  // session affichée, et ne garde que ce qui y est encore.
+  const [picked, setPicked] = useState<{ sessionId: string; keys: string[] }>({ sessionId: "", keys: [] })
+  const present = new Set(session ? [...session.characterIds.map((id) => sessionItemKey("character", id)), ...session.npcIds.map((id) => sessionItemKey("npc", id))] : [])
+  const selectedKeys = session && picked.sessionId === session.id ? picked.keys.filter((key) => present.has(key)) : []
+  const selectedIds = (kind: SessionRevealKind) => selectedKeys.filter((key) => key.startsWith(`${kind}:`)).map((key) => key.slice(kind.length + 1))
+  const setSelected = (keys: string[]) => setPicked({ sessionId: session?.id ?? "", keys: [...new Set(keys)] })
+  const selection = session ? {
+    isSelected: (kind: SessionRevealKind, id: string) => selectedKeys.includes(sessionItemKey(kind, id)),
+    toggle: (kind: SessionRevealKind, id: string) => {
+      const key = sessionItemKey(kind, id)
+      setSelected(selectedKeys.includes(key) ? selectedKeys.filter((known) => known !== key) : [...selectedKeys, key])
+    },
+    active: selectedKeys.length > 0,
+  } : null
+  /** « Tout sélectionner » d'une section : coche tout, ou décoche tout si tout l'est déjà. */
+  function selectAll(kind: SessionRevealKind, ids: string[]) {
+    const keys = ids.map((id) => sessionItemKey(kind, id))
+    setSelected(keys.every((key) => selectedKeys.includes(key)) ? selectedKeys.filter((key) => !keys.includes(key)) : [...selectedKeys, ...keys])
+  }
+  const [sending, setSending] = useState<"copy" | "move" | null>(null)
+  const [bulkPending, setBulkPending] = useState(false)
+  const chosen = () => ({ characterIds: selectedIds("character"), npcIds: selectedIds("npc") })
+  /** Retire la sélection de la session (ils restent dans la campagne). */
+  function removeSelected() {
+    const { characterIds, npcIds } = chosen()
+    setSelected([])
+    changePlayers({ remove: { ...(characterIds.length ? { characterIds } : {}), ...(npcIds.length ? { npcIds } : {}) } })
+  }
+  /** Envoie la sélection dans une autre session ; « move » la retire aussi de celle-ci. */
+  async function sendSelected(targetId: string) {
+    if (!session || !sending) return
+    const { characterIds, npcIds } = chosen()
+    const lists = { ...(characterIds.length ? { characterIds } : {}), ...(npcIds.length ? { npcIds } : {}) }
+    const target = sessions.find((candidate) => candidate.id === targetId)
+    setBulkPending(true); setError("")
+    try {
+      await patchSession(campaignId, targetId, { add: lists })
+      if (sending === "move") await change({ remove: lists })
+      setSelected([])
+      setSending(null)
+      setNotice(`${characterIds.length + npcIds.length} ${sending === "move" ? "déplacé(s) vers" : "envoyé(s) dans"} « ${target?.name ?? "l’autre session"} » (caché(s) aux joueurs là-bas jusqu’à ce que tu les révèles).`)
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "La sélection n’a pas pu être envoyée.") }
+    setBulkPending(false)
+  }
+
   async function guarded(task: () => Promise<void>) {
     setPending(true); setError("")
     try { await task() } catch (caught) { setError(caught instanceof Error ? caught.message : "La session n’a pas pu être modifiée.") }
@@ -233,20 +283,28 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
   const players = members.filter((member) => inSession.has(member.id))
   const addable = members.filter((member) => !inSession.has(member.id))
 
-  return <SessionRevealProvider value={reveal}><div className="mt-7 space-y-8">
+  return <SessionRevealProvider value={reveal}><SessionSelectionProvider value={selection}><div className="mt-7 space-y-8">
     <div className="flex flex-col gap-3 rounded-2xl border bg-card/65 p-3 sm:flex-row sm:items-center">
       <NativeSelect value={selectedId} onChange={(event) => select(event.target.value)} aria-label="Session" className="w-full sm:w-auto" disabled={!sessions.length}>
         {!sessions.length && <NativeSelectOption value="">Aucune session</NativeSelectOption>}
-        {sessions.map((candidate) => <NativeSelectOption key={candidate.id} value={candidate.id}>{candidate.name}{candidate.createdAt ? ` — ${sessionDateLabel(candidate.createdAt)}` : ""}</NativeSelectOption>)}
+        {sessions.map((candidate) => <NativeSelectOption key={candidate.id} value={candidate.id}>{candidate.name}{candidate.createdAt ? ` — ${sessionDateLabel(candidate.createdAt)}` : ""}{candidate.draft ? " · préparée (cachée)" : ""}</NativeSelectOption>)}
       </NativeSelect>
       <Button type="button" onClick={() => setCreating(true)}><CalendarPlus />Créer une nouvelle session</Button>
-      {session && <div className="flex gap-1 sm:ml-auto">
+      {session && <div className="flex items-center gap-1 sm:ml-auto">
+        {/* Toute la session cachée aux joueurs : elle se prépare en avance, absente de leur journal. */}
+        <Button type="button" variant={session.draft ? "secondary" : "ghost"} size="sm" aria-pressed={Boolean(session.draft)} disabled={pending}
+          title={session.draft ? "Préparée en avance : absente du journal des joueurs. Cliquer pour la leur montrer." : "Visible dans le journal des joueurs. Cliquer pour la cacher (session préparée en avance)."}
+          onClick={() => void change({ draft: !session.draft }).catch((caught) => setError(caught instanceof Error ? caught.message : "La session n’a pas pu être modifiée."))}>
+          {session.draft ? <><EyeOff />Cachée aux joueurs</> : <><Eye />Visible des joueurs</>}
+        </Button>
         <Button type="button" variant="ghost" size="icon-sm" title="Renommer la session" aria-label="Renommer la session" disabled={pending} onClick={() => setRenaming(session)}><Pencil /></Button>
         <Button type="button" variant="ghost" size="icon-sm" className="text-destructive" title="Supprimer la session" aria-label="Supprimer la session" disabled={pending} onClick={() => setDeleting(true)}><Trash2 /></Button>
       </div>}
     </div>
 
     {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive">{error}</p>}
+    {notice && <p className="rounded-xl border border-primary/25 bg-primary/5 px-4 py-3 text-sm text-primary">{notice}</p>}
+    {session?.draft && <p className="flex items-center gap-2 rounded-xl border border-dashed px-4 py-3 text-sm text-muted-foreground"><EyeOff className="size-4 shrink-0" />Session préparée en avance : les joueurs ne la voient pas encore dans leur journal. « Cachée aux joueurs », en haut, la leur montre.</p>}
 
     {!session ? <section className="grid min-h-60 place-items-center rounded-2xl border border-dashed bg-card/35 p-8 text-center">
       <div>
@@ -265,7 +323,7 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/15 to-transparent" />
           <div className="absolute inset-x-5 bottom-4 flex flex-wrap items-end justify-between gap-3 text-white sm:inset-x-7 sm:bottom-6">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/75">Session{session.createdAt ? ` · ${sessionDateLabel(session.createdAt)}` : ""}</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/75">Session{session.createdAt ? ` · ${sessionDateLabel(session.createdAt)}` : ""}{session.draft ? " · préparée, cachée aux joueurs" : ""}</p>
               <h2 className="font-display mt-1 text-3xl font-semibold drop-shadow sm:text-4xl">{session.name}</h2>
             </div>
             <label className="flex cursor-pointer items-center gap-2 rounded-lg bg-black/55 px-3 py-2 text-xs font-medium backdrop-blur transition hover:bg-black/70">
@@ -305,6 +363,7 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
       <section className="border-t pt-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <SectionTitle count={players.length}>Joueurs</SectionTitle>
+          {players.length > 1 && <Button type="button" variant="ghost" size="sm" className="mb-3 mr-auto" onClick={() => selectAll("character", players.map((member) => member.id))}><ListChecks />{players.every((member) => selectedKeys.includes(sessionItemKey("character", member.id))) ? "Tout désélectionner" : "Tout sélectionner"}</Button>}
           {addable.length > 0 && <NativeSelect value="" aria-label="Ajouter un joueur" disabled={pending} onChange={(event) => { const id = event.target.value; if (id) changePlayers({ add: { characterIds: [id] } }) }}>
             <NativeSelectOption value="">+ Ajouter un joueur…</NativeSelectOption>
             {addable.map((member) => <NativeSelectOption key={member.id} value={member.id}>{member.name}</NativeSelectOption>)}
@@ -316,7 +375,10 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
       </section>
 
       <section className="border-t pt-8">
-        <SectionTitle count={session.npcIds.length}>PNJs</SectionTitle>
+        <div className="flex flex-wrap items-center gap-3">
+          <SectionTitle count={session.npcIds.length}>PNJs</SectionTitle>
+          {session.npcIds.length > 1 && <Button type="button" variant="ghost" size="sm" className="mb-3" onClick={() => selectAll("npc", session.npcIds)}><ListChecks />{session.npcIds.every((id) => selectedKeys.includes(sessionItemKey("npc", id))) ? "Tout désélectionner" : "Tout sélectionner"}</Button>}
+        </div>
         <NpcManager initialNpcs={npcs} pageLinked={campaignId} mode="session" shops={shops} session={{
           currentId: session.id,
           ids: session.npcIds,
@@ -346,7 +408,22 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
       </section>
     </>}
 
-    <CreateSessionDialog open={creating} campaignId={campaignId} onClose={() => setCreating(false)} onCreated={(created) => {
+    {/* Ce qui est coché : une barre collée en bas de l'écran, comme une sélection de fichiers. */}
+    {session && selectedKeys.length > 0 && <div role="toolbar" aria-label="Actions sur la sélection" className="sticky bottom-4 z-20 mx-auto flex w-fit max-w-full flex-wrap items-center gap-1.5 rounded-2xl border bg-card/95 px-3 py-2 shadow-lg backdrop-blur">
+      <span className="px-1 text-sm font-semibold">{selectedKeys.length} sélectionné{selectedKeys.length > 1 ? "s" : ""}</span>
+      <Button type="button" size="sm" variant="ghost" disabled={Boolean(savingReveal) || bulkPending} onClick={() => void changeVisibility({ reveal: selectedKeys }, "*")}><Eye />Révéler</Button>
+      <Button type="button" size="sm" variant="ghost" disabled={Boolean(savingReveal) || bulkPending} onClick={() => void changeVisibility({ hide: selectedKeys }, "*")}><EyeOff />Cacher</Button>
+      <Button type="button" size="sm" variant="ghost" disabled={bulkPending} title="Les ajouter aussi à une autre session" onClick={() => setSending("copy")}><Send />Envoyer…</Button>
+      <Button type="button" size="sm" variant="ghost" disabled={bulkPending} title="Les retirer d’ici et les mettre dans une autre session" onClick={() => setSending("move")}><ArrowRightLeft />Déplacer…</Button>
+      <Button type="button" size="sm" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={bulkPending} title="Retirer de la session (ils restent dans la campagne)" onClick={removeSelected}><CircleMinus />Retirer</Button>
+      <Button type="button" size="icon-sm" variant="ghost" aria-label="Tout désélectionner" title="Tout désélectionner" onClick={() => setSelected([])}><X /></Button>
+    </div>}
+    <AddToSessionDialog open={Boolean(sending)} campaignId={campaignId} excludeId={session?.id}
+      title={sending === "move" ? "Déplacer vers une autre session" : "Envoyer dans une autre session"}
+      confirmLabel={sending === "move" ? "Déplacer" : "Envoyer"}
+      subject={sending === "move" ? `Les ${selectedKeys.length} sélectionnés quittent cette session et rejoignent celle choisie.` : `Les ${selectedKeys.length} sélectionnés restent dans cette session et rejoignent aussi celle choisie.`}
+      pending={bulkPending} onClose={() => setSending(null)} onConfirm={(targetId) => void sendSelected(targetId)} />
+    <CreateSessionDialog allowDraft open={creating} campaignId={campaignId} onClose={() => setCreating(false)} onCreated={(created) => {
       setCreating(false)
       setSessions((current) => [...current, created])
       select(created.id)
@@ -358,5 +435,5 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
         <AlertDialogFooter><AlertDialogCancel disabled={pending}>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" disabled={pending} onClick={(event) => { event.preventDefault(); void removeSession() }}>{pending ? <LoaderCircle className="animate-spin" /> : <Trash2 />}Supprimer</AlertDialogAction></AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
-  </div></SessionRevealProvider>
+  </div></SessionSelectionProvider></SessionRevealProvider>
 }

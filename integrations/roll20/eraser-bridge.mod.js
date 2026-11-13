@@ -10,10 +10,11 @@
  * 0.8.0 : « Mettre à jour les personnages joueurs », jetons déjà posés sur les cartes mis à
  * jour avec leur fiche, image renvoyée si elle a disparu de Roll20, documents d'Eraser en
  * handouts (image du document ; le PDF est déposé dans le Journal par le compagnon).
+ * 0.9.0 : les créatures des événements de session (fiche, portrait et token d'Eraser).
  */
 var EraserBridge = EraserBridge || (function () {
   'use strict';
-  var VERSION = '0.8.0';
+  var VERSION = '0.9.0';
   var SCRIPT = 'Eraser';
   var BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   var PORTRAIT_WINDOW_MS = 90000;
@@ -38,12 +39,12 @@ var EraserBridge = EraserBridge || (function () {
   ];
 
   function freshState() {
-    return { version: VERSION, campaign: null, npcs: {}, shops: {}, characters: {}, handouts: {}, handoutImages: {}, chunks: {}, portraits: {}, tokens: {}, tokenHashes: {}, tokenImages: {}, names: {}, placeholder: '' };
+    return { version: VERSION, campaign: null, npcs: {}, creatures: {}, shops: {}, characters: {}, handouts: {}, handoutImages: {}, chunks: {}, portraits: {}, tokens: {}, tokenHashes: {}, tokenImages: {}, names: {}, placeholder: '' };
   }
 
   function ensureState() {
     var s = state.EraserBridge = state.EraserBridge || freshState();
-    ['npcs', 'shops', 'characters', 'handouts', 'handoutImages', 'chunks', 'portraits', 'tokens', 'tokenHashes', 'tokenImages', 'names'].forEach(function (key) { s[key] = s[key] || {}; });
+    ['npcs', 'creatures', 'shops', 'characters', 'handouts', 'handoutImages', 'chunks', 'portraits', 'tokens', 'tokenHashes', 'tokenImages', 'names'].forEach(function (key) { s[key] = s[key] || {}; });
     s.placeholder = s.placeholder || '';
     s.version = VERSION;
   }
@@ -130,7 +131,7 @@ var EraserBridge = EraserBridge || (function () {
     ensureState();
     var s = state.EraserBridge;
     var found = '';
-    [s.npcs, s.characters, s.shops].forEach(function (map) {
+    [s.npcs, s.creatures, s.characters, s.shops].forEach(function (map) {
       if (!found) found = Object.keys(map).filter(function (id) { return map[id] === characterId; })[0] || '';
     });
     return found;
@@ -197,6 +198,32 @@ var EraserBridge = EraserBridge || (function () {
         needsToken: needs.needsToken,
         created: created
       }
+    };
+  }
+
+  // Créature d'un événement de session : une fiche par créature de l'index (« creature:… »),
+  // rangée avec les PNJs de la session. Son étiquette et la description de l'événement vont
+  // dans les notes du MJ ; ses PV restent ceux que le MJ règle dans Roll20.
+  function upsertCreature(creature) {
+    var s = state.EraserBridge;
+    var character = s.creatures[creature.id] && getObj('character', s.creatures[creature.id]);
+    if (!character) character = characterWithEraserId(creature.id);
+    var created = false;
+    if (!character) {
+      character = createObj('character', { name: creature.name, inplayerjournals: '', controlledby: '' });
+      s.tokens[creature.id] = false;
+      s.portraits[creature.id] = '';
+      created = true;
+    }
+    s.creatures[creature.id] = character.id;
+    var notes = (creature.tag ? '<p><strong>' + html(creature.tag) + '</strong></p>' : '') + (creature.gmNotes ? '<p>' + html(creature.gmNotes).replace(/\n/g, '<br>') + '</p>' : '');
+    character.set({ name: creature.name, gmnotes: notes });
+    upsertAttribute(character.id, 'eraser_id', creature.id);
+    hpAttribute(character);
+    var needs = imageNeeds(creature.id, creature.portraitUrl, creature.tokenUrl, character);
+    return {
+      character: character,
+      meta: { characterId: character.id, eraserId: creature.id, portraitHash: needs.portraitHash, tokenHash: needs.tokenHash, needsAvatar: needs.needsAvatar, needsToken: needs.needsToken, created: created }
     };
   }
 
@@ -483,8 +510,8 @@ var EraserBridge = EraserBridge || (function () {
         done(null, Object.assign(player.meta, token));
       });
     }
-    if (payload.kind !== 'npc') return done(null, {});
-    var result = upsertNpc(payload.value);
+    if (payload.kind !== 'npc' && payload.kind !== 'creature') return done(null, {});
+    var result = payload.kind === 'creature' ? upsertCreature(payload.value) : upsertNpc(payload.value);
 
     // Le portrait doit d'abord arriver : le jeton sera construit à sa réception.
     if (result.meta.needsAvatar || result.meta.needsToken) return done(null, result.meta);
@@ -504,12 +531,12 @@ var EraserBridge = EraserBridge || (function () {
   function rebuildAllTokens() {
     ensureState();
     var s = state.EraserBridge;
-    var ids = Object.keys(s.npcs).concat(Object.keys(s.characters));
+    var ids = Object.keys(s.npcs).concat(Object.keys(s.creatures), Object.keys(s.characters));
     var ok = 0, skipped = [];
     (function next() {
       var eraserId = ids.shift();
       if (!eraserId) return whisper('Jetons par défaut vérifiés : ' + ok + ' OK' + (skipped.length ? '<br>Sans image : ' + skipped.map(html).join(', ') : ''));
-      var character = getObj('character', s.npcs[eraserId] || s.characters[eraserId]);
+      var character = getObj('character', s.npcs[eraserId] || s.creatures[eraserId] || s.characters[eraserId]);
       if (!character) return next();
       syncDefaultToken(character, eraserId, {}, function (error, result) {
         if (!error && result && result.token) ok += 1;
@@ -522,7 +549,8 @@ var EraserBridge = EraserBridge || (function () {
   function resetAllImports() {
     ensureState();
     var s = state.EraserBridge;
-    var ids = Object.keys(s.npcs).map(function (id) { return s.npcs[id]; }).concat(Object.keys(s.shops).map(function (id) { return s.shops[id]; }));
+    var ids = Object.keys(s.npcs).map(function (id) { return s.npcs[id]; })
+      .concat(Object.keys(s.creatures).map(function (id) { return s.creatures[id]; }), Object.keys(s.shops).map(function (id) { return s.shops[id]; }));
     var removed = 0;
     ids.forEach(function (characterId) {
       findObjs({ _type: 'graphic', represents: characterId }).forEach(function (graphic) { graphic.remove(); });
