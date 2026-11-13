@@ -295,7 +295,12 @@ function handleSheets(path: string, init: RequestInit) {
   const entered = (raw: boolean, values: unknown[][]) => raw ? values : values.map((line) => line.map((value) => typeof value === "string" && value.startsWith("'") ? value.slice(1) : value))
   if (action === "batchUpdate") {
     const raw = body.valueInputOption === "RAW"
-    const responses = (body.data as Array<{ range: string; values: unknown[][] }>).map((item) => ({ updatedRange: writeArea(parseRange(file, item.range), entered(raw, item.values)) }))
+    // Comme Google : avec `includeValuesInResponse`, chaque réponse rend les cases écrites, relues.
+    const responses = (body.data as Array<{ range: string; values: unknown[][] }>).map((item) => {
+      const area = parseRange(file, item.range)
+      const updatedRange = writeArea(area, entered(raw, item.values))
+      return body.includeValuesInResponse ? { updatedRange, updatedData: { range: updatedRange, values: readArea({ ...area, bottom: area.top + item.values.length - 1 }) } } : { updatedRange }
+    })
     return json({ responses })
   }
   const rangeText = tail.join("/")

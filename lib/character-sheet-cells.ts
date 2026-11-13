@@ -99,6 +99,27 @@ export function applyCharacteristicDefaults(values: string[], layout: CharacterL
 }
 
 /**
+ * Les cases que les formules écrites par Eraser lisent : caractéristiques (et leurs critiques),
+ * critiques globaux, bonus des compétences et des totaux calculés. Une modification qui n'en
+ * touche aucune ne change aucun total : la fiche n'a pas besoin d'être relue après l'écriture.
+ */
+export function formulaInputIndexes(layout: CharacterLayout, catalog: CharacterCatalog, calculatedBonusIndexes: readonly number[]) {
+  const inputs = new Set<number>(calculatedBonusIndexes)
+  const add = (index: number) => { if (index >= 0) inputs.add(index) }
+  add(layout.index(CRITICAL_SUCCESS_METRIC))
+  add(layout.index(CRITICAL_FAILURE_METRIC))
+  for (const skill of skillsWithColumns(catalog, layout)) {
+    for (const metric of [0, 3, 6]) add(layout.index(skill.key, skillMetrics[metric]))
+    const characteristic = skill.characteristicKey
+    if (!characteristic) continue
+    add(layout.index(characteristic))
+    add(layout.index(characteristic, CRITICAL_SUCCESS_METRIC))
+    add(layout.index(characteristic, CRITICAL_FAILURE_METRIC))
+  }
+  return inputs
+}
+
+/**
  * Les colonnes calculées par la feuille (totaux, modificateurs) : une modification
  * envoyée par la fiche ne les écrase jamais, elles gardent leurs formules.
  */

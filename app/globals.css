@@ -360,6 +360,8 @@ h1.font-display,
 .deferred-section {
   content-visibility: auto;
   contain-intrinsic-size: auto 520px;
+  /* L'ombre d'une carte survolée au bord de la section n'est pas coupée. */
+  overflow-clip-margin: 1rem;
 }
 
 .admin-view-only {

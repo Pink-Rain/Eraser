@@ -260,9 +260,14 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
     presence.clear()
     queueMicrotask(() => { if (!cancelled) { setConnection("connecting"); setOnline([]) } })
     const refreshOnline = () => setOnline([...new Map([...presence.values()].filter((peer) => peer.name).map((peer) => [peer.uid, { uid: peer.uid, name: peer.name }])).values()])
-    void import("trystero").then(({ joinRoom }) => {
+    void import("trystero").then(async ({ joinRoom }) => {
       if (cancelled) return
+      // WebRTC mis en route, puis le salon rejoint dans une tâche suivante : deux gels courts au
+      // lieu d'un seul de plus d'une seconde (relevés de novembre 2026), un clic entre les deux
+      // passe aussitôt.
       startWebRtc()
+      await new Promise((resolve) => window.setTimeout(resolve, 60))
+      if (cancelled) return
       room = joinRoom({ appId: "com-eraser-jdr-chat-v1", password: campaignId }, roomId, { onJoinError: () => setConnection("error") })
       const activityAction = room.makeAction("activity")
       const presenceAction = room.makeAction("presence")

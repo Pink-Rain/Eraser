@@ -66,7 +66,7 @@ import {
 } from "@/lib/character-sheet-schema"
 import { planCatalogColumns, type CharacterCatalog, type CharacterLayout } from "@/lib/character-catalog"
 import { characterSheetAliases, characterSheetMap, characterSheetRow, characterValuesOf, type CharacterSheetMap } from "@/lib/character-sheet-map"
-import { applyCharacteristicDefaults, applySkillCells, characterValueCell, computedCellIndexes } from "@/lib/character-sheet-cells"
+import { applyCharacteristicDefaults, applySkillCells, characterValueCell, computedCellIndexes, formulaInputIndexes } from "@/lib/character-sheet-cells"
 import {
   baseInventoryContainerTypes,
   baseInventoryTypeIds,
@@ -392,8 +392,17 @@ async function charactersSource() {
 }
 
 /** Quelques colonnes de la feuille des personnages, par leur nom (la feuille entière est très large). */
-function readCharacterColumns(source: { spreadsheetId: string; tabName: string }, wanted: readonly string[], options: { fresh?: boolean } = {}) {
-  return readNamedColumns(source.spreadsheetId, source.tabName, characterSheetHeaders, ["ID", ...wanted], { aliases: characterSheetAliases, fresh: options.fresh })
+async function readCharacterColumns(source: { spreadsheetId: string; tabName: string }, wanted: readonly string[], options: { fresh?: boolean } = {}) {
+  const sheet = await readNamedColumns(source.spreadsheetId, source.tabName, characterSheetHeaders, ["ID", ...wanted], { aliases: characterSheetAliases, fresh: options.fresh })
+  // La ligne de chaque fiche, apprise au passage (liste des personnages, accueil) : la fiche
+  // ouverte ensuite relit sa ligne avec l'en-tête, en une lecture Google au lieu de deux. Ce
+  // n'est qu'une supposition, toujours vérifiée par la case ID lue avec elle.
+  sheet.rows.forEach((row, index) => {
+    const id = sheet.columns.get(row, "ID").trim()
+    const key = `${source.spreadsheetId}:${source.tabName}:${id}`
+    if (id && !knownCharacterRows.has(key)) knownCharacterRows.set(key, index + 2)
+  })
+  return sheet
 }
 
 async function classesSource() {
@@ -5703,6 +5712,27 @@ function cellRuns(tabName: string, rowNumber: number, cells: Map<number, SheetCe
 }
 
 /**
+ * La ligne lue avant l'écriture, avec les cases écrites telles que Google les rend (mises en
+ * forme comme une lecture). Null si une réponse manque : la ligne est alors relue.
+ */
+function withWrittenCells(current: CharacterRow, cells: Map<number, SheetCell>, responses: readonly UpdateValuesResponse[]): CharacterRow | null {
+  const columns = [...cells.keys()].sort((left, right) => left - right)
+  const starts = columns.filter((column, index) => index === 0 || columns[index - 1] !== column - 1)
+  if (responses.length !== starts.length) return null
+  const row = [...current.row]
+  for (const [runIndex, start] of starts.entries()) {
+    const values = responses[runIndex]?.updatedData?.values
+    if (!values) return null
+    let column = start
+    while (cells.has(column)) {
+      row[column] = String(values[0]?.[column - start] ?? "")
+      column += 1
+    }
+  }
+  return { ...current, row, values: characterValuesOf(current.map, row) }
+}
+
+/**
  * Écrit les valeurs d'une fiche qui vient d'être ajoutée, chacune dans sa colonne. Index des
  * caractéristiques injoignable : les colonnes ajoutées par l'index ne sont pas réécrites
  * (leurs formules ne sont pas connues sans lui).
@@ -6099,8 +6129,16 @@ export async function patchCharacterSheet(accountUid: string | null, id: string,
   }
   if (name !== undefined && (!name.trim() || name.trim().length > 120)) throw new Error("INVALID_CHARACTER_NAME")
   const data = cellRuns(source.tabName, rowNumber, cells)
-  for (let start = 0; start < data.length; start += 200) await updateRanges(source.spreadsheetId, data.slice(start, start + 200))
-  let written = data.length ? await rereadCharacterRow(source, current, id) : current
+  // Une case qu'aucune formule ne lit (vie actuelle, notes, états, onglets…) ne change aucun
+  // total : Google rend les cases écrites avec l'écriture, la ligne n'est pas relue. En séance,
+  // le classeur des fiches est celui que tous les joueurs écrivent à la fois : une relecture de
+  // moins par enregistrement, c'est une file de moins chez Google (jusqu'à 25 s par relecture).
+  // Une colonne ajoutée à la main (peut-être une formule) fait toujours relire.
+  const inputs = formulaInputIndexes(layout, catalog, characterSecondaryCalculatedFields.map((_, fieldIndex) => characterSecondaryCalculationValueIndex(fieldIndex, "bonus")))
+  const touchesFormulas = map.writable.some((writable) => !writable) || changes.some((change) => cells.has(map.valueColumns[change.index] ?? -1) && (inputs.has(change.index) || computed.has(change.index)))
+  const responses: UpdateValuesResponse[] = []
+  for (let start = 0; start < data.length; start += 200) responses.push(...await updateRanges(source.spreadsheetId, data.slice(start, start + 200), touchesFormulas ? {} : { includeValuesInResponse: true }))
+  let written = !data.length ? current : (!touchesFormulas && withWrittenCells(current, cells, responses)) || await rereadCharacterRow(source, current, id)
   if (!written) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
   // Une fiche jamais passée par l'enregistrement complet (ou abîmée dans Sheets) retrouve ses formules.
   if (hasBrokenTotals(written.values)) written = await repairCharacterFormulas(source, written, id)

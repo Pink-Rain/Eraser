@@ -333,3 +333,39 @@ test("PNJ compagnons : retrouvés dans les onglets Compagnon de toutes les fiche
   ]);
   assert.deepEqual([...await sheets.companionNpcIds()].sort(), ["NPC-7", "NPC-9"]);
 });
+
+test("Case qu'aucune formule ne lit (vie actuelle, note) : écrite sans relire la ligne ; une caractéristique la fait relire", async () => {
+  const id = fresh("PERSO");
+  const characters = await linkCharacters([{ "ID": id, "Joueur": "uid-1", "Nom personnage": "Aldor", "Vie actuelle": "12", "Force": "40" }]);
+  await sheets.syncExistingIdentityIndexes();
+  await sheets.getCharacterSheet(null, id);
+  const life = characterValueHeaders.indexOf("Vie actuelle");
+  google.world.requests.length = 0;
+  const saved = await sheets.patchCharacterSheet(null, id, [{ index: life, header: "Vie actuelle", value: "7" }]);
+  assert.equal(saved.values[life], "7");
+  assert.equal(saved.values[characterValueHeaders.indexOf("Force")], "40");
+  assert.equal(record(google.grid(characters, "Personnages"), 1)["Vie actuelle"], "7");
+  // Une lecture (en-tête, colonne ID, ligne) puis l'écriture : plus de relecture après.
+  assert.deepEqual(google.world.requests.filter((request) => request.includes("values")), ["POST /values:batchGetByDataFilter", "POST /values:batchUpdate"]);
+  // La Force entre dans les totaux des compétences : la ligne est relue pour les rendre à jour.
+  const strength = characterValueHeaders.indexOf("Force");
+  google.world.requests.length = 0;
+  const stronger = await sheets.patchCharacterSheet(null, id, [{ index: strength, header: "Force", value: "45" }]);
+  assert.equal(stronger.values[strength], "45");
+  assert.deepEqual(google.world.requests.filter((request) => request.includes("values")), ["POST /values:batchGetByDataFilter", "POST /values:batchUpdate", "POST /values:batchGetByDataFilter"]);
+});
+
+test("Ligne apprise par la liste des personnages : la fiche s'ouvre en une seule lecture Google", async () => {
+  const [a, b] = ["A", "B"].map((letter) => fresh(`PERSO-${letter}`));
+  await linkCharacters([{ "ID": a, "Joueur": "uid-1", "Nom personnage": "Aldor" }, { "ID": b, "Joueur": "uid-1", "Nom personnage": "Brin" }]);
+  await sheets.syncExistingIdentityIndexes();
+  // Aldor ouvert d'abord : les colonnes de la feuille sont prêtes.
+  await sheets.getCharacterSheet(null, a);
+  google.world.requests.length = 0;
+  const sheet = await sheets.getCharacterSheet(null, b);
+  assert.equal(sheet.values[0], "Brin");
+  // En-tête, colonne ID et ligne de Brin lus ensemble ; pas de seconde lecture pour la ligne.
+  const reads = google.world.requests.filter((request) => request.includes("values"));
+  assert.equal(reads[0], "POST /values:batchGetByDataFilter");
+  assert.notEqual(reads[1], "POST /values:batchGetByDataFilter");
+});

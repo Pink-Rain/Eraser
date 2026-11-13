@@ -144,7 +144,8 @@ function HeadAction({ color, onClick, children }: { color: string; onClick: () =
 }
 
 function Section({ id, icon: Icon, title, count, action, children }: { id: string; icon: LucideIcon; title: string; count?: ReactNode; action?: ReactNode; children: ReactNode }) {
-  return <section id={id} aria-labelledby={`${id}-titre`} tabIndex={-1} className="scroll-mt-24 outline-none">
+  // Une section hors de l'écran n'est ni mise en page ni dessinée (`deferred-section`).
+  return <section id={id} aria-labelledby={`${id}-titre`} tabIndex={-1} className="deferred-section scroll-mt-24 outline-none">
     <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
       <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-journal/10 text-journal-ink ring-1 ring-journal/15" aria-hidden><Icon className="size-4" /></span>
       <h2 id={`${id}-titre`} className="font-display text-[1.35rem] font-semibold leading-tight">{title}</h2>
@@ -759,6 +760,20 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
   function scrollTo(id: string, focus?: () => void) {
     const target = document.getElementById(id)
     target?.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" })
+    // Les sections pas encore affichées (`deferred-section`) n'ont qu'une hauteur estimée : le
+    // défilement se recale sur la vraie place une fois arrivé, sauf si on a repris la main.
+    if (target) {
+      const settle = () => { stop(); target.scrollIntoView({ behavior: "auto", block: "start" }) }
+      const stop = () => {
+        document.removeEventListener("scrollend", settle, true)
+        for (const type of ["wheel", "pointerdown", "keydown", "touchstart"]) window.removeEventListener(type, stop, true)
+        window.clearTimeout(timer)
+      }
+      const timer = window.setTimeout(stop, 2_000)
+      // Capturé sur le document : la page peut défiler dans un conteneur, pas dans la fenêtre.
+      document.addEventListener("scrollend", settle, { capture: true, once: true })
+      for (const type of ["wheel", "pointerdown", "keydown", "touchstart"]) window.addEventListener(type, stop, { capture: true, passive: true })
+    }
     if (focus) focus(); else target?.focus({ preventScroll: true })
   }
   const showNotes = () => scrollTo("journal-notes", () => board.current?.focusSearch())
@@ -849,8 +864,12 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
         <p className="sr-only" aria-live="polite">Session affichée : S{index + 1} - {current.name}</p>
 
         {/* Téléphone : bilan, notes, puis le récit ; ordinateur : les notes à gauche, collées en défilant. */}
-        <div className="mt-6 grid items-start gap-6 lg:mt-7 lg:grid-cols-[21.25rem_minmax(0,1fr)] lg:grid-rows-[auto_1fr] lg:gap-x-7 lg:gap-y-7">
-          <section key={`bilan-${current.id}`} aria-labelledby="journal-bilan" className="journal-rise relative min-w-0 overflow-hidden rounded-2xl border border-border/70 bg-card p-4 pl-5 shadow-[0_1px_2px_rgb(67_50_31/0.06)] sm:p-5 sm:pl-6 lg:col-start-2 lg:row-start-1">
+        {/* Deux colonnes sans rangées : les notes, collées, à gauche ; bilan et récit l'un sous l'autre à
+            droite. Une colonne de notes étalée sur deux rangées (`auto` puis `1fr`) obligeait le
+            navigateur à mettre en page tout le récit plusieurs fois (gels de 0,5 à 3 s relevés). */}
+        <div className="mt-6 grid items-start gap-6 lg:mt-7 lg:grid-cols-[21.25rem_minmax(0,1fr)] lg:gap-x-7">
+          <div className="contents lg:col-start-2 lg:row-start-1 lg:block lg:min-w-0 lg:space-y-7">
+          <section key={`bilan-${current.id}`} aria-labelledby="journal-bilan" className="journal-rise relative min-w-0 overflow-hidden rounded-2xl border border-border/70 bg-card p-4 pl-5 shadow-[0_1px_2px_rgb(67_50_31/0.06)] sm:p-5 sm:pl-6">
             <span className="absolute inset-y-0 left-0 w-1 bg-journal" aria-hidden />
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <h2 id="journal-bilan" className="font-display text-[1.35rem] font-semibold">Bilan de la session</h2>
@@ -892,12 +911,12 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
             </div>
           </section>
 
-          <aside className="min-w-0 lg:sticky lg:top-4 lg:col-start-1 lg:row-span-2 lg:row-start-1 lg:max-h-[calc(100svh-2rem)] lg:overflow-y-auto lg:overscroll-contain lg:rounded-2xl lg:scrollbar-thin">
+          <aside className="order-2 min-w-0 lg:sticky lg:top-4 lg:order-none lg:col-start-1 lg:row-start-1 lg:max-h-[calc(100svh-2rem)] lg:overflow-y-auto lg:overscroll-contain lg:rounded-2xl lg:scrollbar-thin">
             {notesError && <p className="mb-3 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive" role="alert">Les notes n’ont pas pu être lues dans Google Sheets. Actualise dans un instant.</p>}
             <SessionNotesBoard id="journal-notes" handle={board} authorLabel={authorLabel} campaignId={campaignId} sessions={refs} sessionId={current.id} notes={notes} onNotesChange={setNotes} entities={entities} viewer={viewer} />
           </aside>
 
-          <div key={`recit-${current.id}`} className="journal-rise min-w-0 space-y-10 lg:col-start-2 lg:row-start-2">
+          <div key={`recit-${current.id}`} className="journal-rise order-3 min-w-0 space-y-10 lg:order-none">
             <Section id="journal-groupe" icon={linkKindLabels.character.icon} title="Le groupe" count={absents.length ? `${group.length} · ${plural(absents.length, "absent", "absents")}` : group.length} action={restAction}>
               {group.length + absents.length ? <div className={groupGrid}>
                 {group.map((member) => <CharacterCard key={member.id} member={member} reveal />)}
@@ -1010,6 +1029,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
                 </div>}
               </div> : <EmptyHint icon={linkKindLabels.event.icon} action={<Button type="button" size="xs" variant="outline" onClick={() => newNote("evenement")}><Plus />Ajouter un événement</Button>}>Aucun événement. Une note « Événement » remplit la frise.</EmptyHint>}
             </Section>
+          </div>
           </div>
         </div>
 

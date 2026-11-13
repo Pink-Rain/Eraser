@@ -339,9 +339,36 @@ function maskUrl(context: CanvasRenderingContext2D, pixels: ImageData, keep: Uin
   return context.canvas.toDataURL()
 }
 
+/**
+ * Les silhouettes déjà calculées restent d'une ouverture d'Eraser à l'autre : le calcul (dessin,
+ * remplissage, encodage en image) gelait la fiche jusqu'à 0,7 s quand plusieurs icônes
+ * arrivaient ensemble. Une silhouette ne dépend que du dessin de l'icône.
+ */
+const SILHOUETTE_STORE = "eraser-silhouette:v1:"
+
+function storedSilhouette(name: string): Silhouette | null {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(SILHOUETTE_STORE + name) ?? "null") as Silhouette | null
+    return stored && typeof stored.full === "string" && typeof stored.inner === "string" && stored.full.startsWith("data:image/") ? stored : null
+  } catch {
+    return null
+  }
+}
+
+function storeSilhouette(name: string, shape: Silhouette) {
+  if (!shape.full) return
+  try { window.localStorage.setItem(SILHOUETTE_STORE + name, JSON.stringify(shape)) } catch { /* stockage plein ou fermé : recalculée la prochaine fois */ }
+}
+
 function silhouetteOf(name: string, svg: SVGSVGElement) {
   let promise = silhouettes.get(name)
   if (promise) return promise
+  const stored = storedSilhouette(name)
+  if (stored) {
+    promise = Promise.resolve(stored)
+    silhouettes.set(name, promise)
+    return promise
+  }
   promise = new Promise<Silhouette>((resolve) => {
     const copy = svg.cloneNode(true) as SVGSVGElement
     copy.setAttribute("width", String(SILHOUETTE_SIZE))
@@ -354,7 +381,9 @@ function silhouetteOf(name: string, svg: SVGSVGElement) {
     image.onload = () => {
       const canvas = document.createElement("canvas")
       canvas.width = canvas.height = SILHOUETTE_SIZE
-      const context = canvas.getContext("2d")
+      // Lu pixel à pixel puis encodé : un dessin gardé en mémoire vive, pas sur la carte
+      // graphique (chaque relecture depuis la carte attendait qu'elle ait fini de dessiner).
+      const context = canvas.getContext("2d", { willReadFrequently: true })
       if (!context) return resolve({ full: "", inner: "" })
       context.drawImage(image, 0, 0, SILHOUETTE_SIZE, SILHOUETTE_SIZE)
       const pixels = context.getImageData(0, 0, SILHOUETTE_SIZE, SILHOUETTE_SIZE)
@@ -386,7 +415,9 @@ function silhouetteOf(name: string, svg: SVGSVGElement) {
         inner = next
       }
       const full = maskUrl(context, pixels, inside)
-      resolve({ full, inner: maskUrl(context, pixels, inner) })
+      const shape = { full, inner: maskUrl(context, pixels, inner) }
+      storeSilhouette(name, shape)
+      resolve(shape)
     }
     image.onerror = () => resolve({ full: "", inner: "" })
     image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(copy))}`
