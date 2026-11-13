@@ -150,7 +150,7 @@ export default async function CampaignFolderPage({ params }: { params: Promise<{
             <details id="roll20" className="group rounded-2xl border bg-card/70 [&_summary::-webkit-details-marker]:hidden">
               <summary className="flex cursor-pointer list-none items-center gap-3 px-5 py-4">
                 <span className="flex size-10 items-center justify-center rounded-xl border border-primary/20 bg-primary/8 font-display text-sm font-bold text-primary">R20</span>
-                <span className="min-w-0 flex-1"><span className="block font-display text-2xl font-semibold">Compagnon Roll20</span><span className="block text-xs text-muted-foreground">{link ? "Relié à cette campagne." : "Pas encore relié."} Déplier pour le mettre à jour en 3 étapes.</span></span>
+                <span className="min-w-0 flex-1"><span className="block font-display text-2xl font-semibold">Compagnon Roll20</span><span className="block text-xs text-muted-foreground">{link ? "Relié" : "Pas encore relié"} · mise à jour en 3 clics</span></span>
                 <ChevronDown className="size-5 text-muted-foreground transition-transform group-open:rotate-180" />
               </summary>
               <div className="border-t px-5 pb-6"><Roll20BridgePanel key={id} campaignId={id} initialLink={link} embedded scriptsUrl={scriptsUrl} suggestedScriptsUrl={roll20ScriptsUrlFrom(gameUrl)} /></div>

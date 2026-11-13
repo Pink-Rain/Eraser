@@ -221,12 +221,18 @@
   authentification par cookie aux routes `/api/roll20/bridge`.
 - Le MJ met le compagnon à jour depuis le dossier de campagne, en 3 étapes : le serveur local
   écrit lui-même ses fichiers dans le dossier du PC (`lib/roll20-companion.ts`, fichiers
-  d'`integrations/roll20/extension` inclus par `?raw`), ouvre Chrome ou Opera sur leur page des
-  extensions, puis le MJ copie le script Mod. Jamais de lien qui fait naviguer la fenêtre d'Eraser
-  vers un fichier (`.js`, `.zip`) : elle l'affiche sans retour possible. Le compagnon se recharge
-  seul quand son dossier a une version plus récente (`/api/roll20/bridge/companion`).
-- Le compagnon et le script Mod portent la même version (`VERSION`, `manifest.json`) : le
-  compagnon refuse un Mod d'une autre version. Après toute modification, recopier le Mod dans
+  d'`integrations/roll20/extension` inclus par `?raw`), le MJ clique ↻ dans `chrome://extensions`
+  ou `opera://extensions`, puis colle le script Mod. Chrome et Opera refusent d'être ouverts sur
+  ces pages par un autre programme : écrire l'adresse à copier, jamais un bouton qui lance le
+  navigateur. Jamais de lien qui fait naviguer la fenêtre d'Eraser vers un fichier (`.js`,
+  `.zip`) : elle l'affiche sans retour possible. Le compagnon signale sa version et celle du Mod
+  (`/api/roll20/bridge/companion`) : les étapes se cochent seules, et il se recharge seul quand
+  son dossier a une version plus récente.
+- Ces écrans sont pour un MJ qui ne lit pas : des boutons, des adresses, des mots-clés en gras,
+  pas de paragraphes.
+- Le compagnon et le script Mod ont les deux mêmes premiers nombres de version (`VERSION`,
+  `manifest.json`, 0.10.x) : le compagnon refuse un Mod d'une autre famille. Un correctif du
+  compagnon seul monte le 3e nombre sans toucher au Mod (le MJ n'a pas à le recoller). Après toute modification, recopier le Mod dans
   `public/roll20/` et refaire `public/roll20/eraser-roll20-companion.zip` (fichiers à la racine).
 
 ## Extensions

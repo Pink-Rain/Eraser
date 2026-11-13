@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  const VERSION = '0.10.0';
+  const VERSION = '0.10.1';
   const API = 'http://127.0.0.1:32147/api/roll20/bridge';
   const IS_TOP = window.top === window;
   let syncing = false;
@@ -123,8 +123,12 @@
   }
 
   async function checkModBridge() {
-    const result = await command('!eraser-ping', null, 8000, 'Le script Mod Eraser Bridge ne répond pas. Installe la version ' + VERSION + ' et vérifie la console Mod.');
-    if (result.version !== VERSION) throw new Error('Le script Mod est en version ' + (result.version || 'ancienne') + ', l’extension en ' + VERSION + '. Mets le script Mod à jour.');
+    const result = await command('!eraser-ping', null, 8000, 'Le script Mod Eraser Bridge ne répond pas. Colle-le dans la partie (dossier de campagne › Compagnon Roll20 › étape 3) et vérifie la console Mod.');
+    // Le compagnon et le Mod s'entendent tant que les deux premiers nombres sont les mêmes : un
+    // correctif du compagnon seul (0.10.0 → 0.10.1) ne demande pas de recoller le script.
+    const family = (version) => String(version || '').split('.').slice(0, 2).join('.');
+    void runtimeMessage({ type: 'eraser-report-mod', version: result.version || '' });
+    if (family(result.version) !== family(VERSION)) throw new Error('Le script Mod est en version ' + (result.version || 'ancienne') + ', l’extension en ' + VERSION + '. Mets le script Mod à jour (dossier de campagne › Compagnon Roll20 › étape 3).');
   }
 
   async function importPayload(payload) {

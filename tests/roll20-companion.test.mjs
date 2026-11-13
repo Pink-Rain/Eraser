@@ -20,9 +20,12 @@ const source = (name) => readFile(join(root, "integrations/roll20/extension", na
 test("les fichiers écrits sur le PC sont ceux du compagnon (integrations/roll20/extension), comme dans le ZIP", async () => {
   assert.deepEqual(Object.keys(companion.companionFiles).sort(), ["background.js", "content.css", "content.js", "manifest.json", "page.js", "token-art.js"]);
   for (const [name, text] of Object.entries(companion.companionFiles)) assert.equal(text, await source(name), name);
-  // Le compagnon et le script Mod portent la même version.
+  // Le compagnon et le script Mod ont les deux mêmes premiers nombres (0.10.x) : un correctif du
+  // compagnon seul ne demande pas de recoller le script.
+  const family = (version) => version.split(".").slice(0, 2).join(".");
   const version = JSON.parse(await source("manifest.json")).version;
-  assert.match(await readFile(join(root, "integrations/roll20/eraser-bridge.mod.js"), "utf8"), new RegExp(`var VERSION = '${version.replace(/\./g, "\\.")}';`));
+  const mod = (await readFile(join(root, "integrations/roll20/eraser-bridge.mod.js"), "utf8")).match(/var VERSION = '([\d.]+)';/)[1];
+  assert.equal(family(mod), family(version));
   assert.equal(await readFile(join(root, "public/roll20/eraser-bridge.mod.js"), "utf8"), await readFile(join(root, "integrations/roll20/eraser-bridge.mod.js"), "utf8"));
 });
 
@@ -62,6 +65,16 @@ test("mettre à jour : les fichiers remplacés, le dossier retenu, les autres fi
   assert.equal(await readFile(join(folder, "notes du MJ.txt"), "utf8"), "à garder");
   assert.equal((await readdir(folder)).some((name) => name.endsWith(".tmp")), false);
   await assert.rejects(companion.rememberCompanionFolder("relatif/dossier"), /COMPANION_FOLDER_INVALID/);
+});
+
+test("le compagnon signale sa version et celle du Mod ; une valeur qui n'est pas une version est ignorée", async () => {
+  await companion.recordCompanionSeen({ running: "0.10.1" });
+  await companion.recordCompanionSeen({ mod: "0.10.0" });
+  await companion.recordCompanionSeen({ running: "<script>", mod: "" });
+  const state = await companion.companionState();
+  assert.equal(state.browserVersion, "0.10.1");
+  assert.equal(state.modVersion, "0.10.0");
+  assert.ok(state.browserSeenAt);
 });
 
 test("la page des scripts Mod se déduit du lien de la partie Roll20", () => {

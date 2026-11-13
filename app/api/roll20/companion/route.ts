@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server"
 
 import { authorizedAccount } from "@/lib/server-auth"
-import { companionState, installCompanion, openBrowserExtensions, openCompanionFolder, pickCompanionFolder, rememberCompanionFolder } from "@/lib/roll20-companion"
+import { companionState, installCompanion, openCompanionFolder, pickCompanionFolder, rememberCompanionFolder } from "@/lib/roll20-companion"
 
 /**
- * Le compagnon Roll20 sur ce PC (dossier du compagnon, mise à jour en un clic, page des
- * extensions du navigateur) : pour le MJ et l'admin, dans l'application Windows. Le pont lui-même
- * (`/api/roll20/bridge`) reste à part, authentifié par la clé de la campagne.
+ * Le compagnon Roll20 sur ce PC (dossier du compagnon, mise à jour en un clic) : pour le MJ et
+ * l'admin, dans l'application Windows. Le pont lui-même (`/api/roll20/bridge`) reste à part,
+ * authentifié par la clé de la campagne.
  */
 function errorMessage(error: unknown) {
   const code = error instanceof Error ? error.message : ""
@@ -26,7 +26,7 @@ export async function GET() {
 export async function POST(request: Request) {
   if (!await authorizedAccount(["admin", "mj"])) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
-    const body = (await request.json().catch(() => ({}))) as { action?: unknown; browser?: unknown }
+    const body = (await request.json().catch(() => ({}))) as { action?: unknown }
     // Étape 1 : écrire les fichiers du compagnon dans son dossier.
     if (body.action === "install") return NextResponse.json(await installCompanion())
     // Choisir (ou retrouver) le dossier où le navigateur charge le compagnon.
@@ -38,10 +38,6 @@ export async function POST(request: Request) {
     if (body.action === "open-folder") {
       await openCompanionFolder()
       return NextResponse.json({ ok: true })
-    }
-    // Étape 2 : Chrome ou Opera ouvert sur sa page des extensions.
-    if (body.action === "open-browser" && (body.browser === "chrome" || body.browser === "opera")) {
-      return NextResponse.json({ opened: openBrowserExtensions(body.browser) })
     }
     return NextResponse.json({ error: "Action inconnue." }, { status: 400 })
   } catch (error) {

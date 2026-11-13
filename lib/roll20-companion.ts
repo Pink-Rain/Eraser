@@ -94,6 +94,44 @@ export async function companionFolderFrom(chosen: string) {
   return entries.length ? join(folder, SUBFOLDER) : folder
 }
 
+/**
+ * Ce que le compagnon a dit de lui-même (`/api/roll20/bridge/companion`) : la version qui tourne
+ * dans le navigateur, et celle du script Mod de la dernière partie où il a synchronisé. Rangé à
+ * part du dossier choisi : le compagnon écrit ici, le MJ là.
+ */
+type CompanionSeen = { browserVersion: string; browserSeenAt: string; modVersion: string; modSeenAt: string }
+
+function seenPath() {
+  return join(dataDirectory(), "roll20-companion-seen.json")
+}
+
+async function companionSeen(): Promise<CompanionSeen> {
+  const empty = { browserVersion: "", browserSeenAt: "", modVersion: "", modSeenAt: "" }
+  if (!dataDirectory()) return empty
+  try {
+    const parsed = JSON.parse(await readFile(seenPath(), "utf8")) as Partial<CompanionSeen>
+    const text = (value: unknown) => typeof value === "string" ? value : ""
+    return { browserVersion: text(parsed.browserVersion), browserSeenAt: text(parsed.browserSeenAt), modVersion: text(parsed.modVersion), modSeenAt: text(parsed.modSeenAt) }
+  } catch {
+    return empty
+  }
+}
+
+const VERSION_PATTERN = /^\d{1,4}(\.\d{1,6}){0,3}$/
+
+/** Le compagnon signale sa version (et celle du Mod) ; une valeur qui n'est pas une version est ignorée. */
+export async function recordCompanionSeen(report: { running?: string | null; mod?: string | null }) {
+  if (!dataDirectory()) return
+  const now = new Date().toISOString()
+  const running = report.running && VERSION_PATTERN.test(report.running) ? report.running : ""
+  const mod = report.mod && VERSION_PATTERN.test(report.mod) ? report.mod : ""
+  if (!running && !mod) return
+  const seen = await companionSeen()
+  const next = { ...seen, ...(running ? { browserVersion: running, browserSeenAt: now } : {}), ...(mod ? { modVersion: mod, modSeenAt: now } : {}) }
+  await mkdir(dataDirectory(), { recursive: true })
+  await writeFile(seenPath(), JSON.stringify(next, null, 2))
+}
+
 export type CompanionState = {
   /** L'application Windows : Eraser peut écrire le compagnon sur ce PC. */
   available: boolean
@@ -104,13 +142,14 @@ export type CompanionState = {
   /** La version qui s'y trouve ("" : rien, ou pas le compagnon). */
   folderVersion: string
   defaultFolder: string
-}
+} & CompanionSeen
 
 export async function companionState(): Promise<CompanionState> {
   const version = companionManifest.version
-  if (!companionInstallAvailable()) return { available: false, version, folder: "", folderVersion: "", defaultFolder: "" }
+  const seen = await companionSeen()
+  if (!companionInstallAvailable()) return { available: false, version, folder: "", folderVersion: "", defaultFolder: "", ...seen }
   const folder = await savedCompanionFolder()
-  return { available: true, version, folder, folderVersion: folder ? await companionVersionIn(folder) : "", defaultFolder: defaultCompanionFolder() }
+  return { available: true, version, folder, folderVersion: folder ? await companionVersionIn(folder) : "", defaultFolder: defaultCompanionFolder(), ...seen }
 }
 
 /**
@@ -186,30 +225,4 @@ export async function openCompanionFolder() {
   const folder = await savedCompanionFolder()
   if (!folder || !existsSync(folder) || process.platform !== "win32") throw new Error("COMPANION_FOLDER_MISSING")
   spawn("explorer.exe", [folder], { detached: true, stdio: "ignore", windowsHide: false }).unref()
-}
-
-export type CompanionBrowser = "chrome" | "opera"
-
-/** La page des extensions de chaque navigateur (elle ne s'ouvre pas depuis un simple lien). */
-export const browserExtensionsPage: Record<CompanionBrowser, string> = { chrome: "chrome://extensions", opera: "opera://extensions" }
-
-function browserCandidates(browser: CompanionBrowser) {
-  const local = process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local")
-  const programs = [process.env.ProgramFiles, process.env["ProgramFiles(x86)"], process.env.ProgramW6432].filter((value): value is string => Boolean(value))
-  return browser === "chrome"
-    ? [...programs.map((root) => join(root, "Google", "Chrome", "Application", "chrome.exe")), join(local, "Google", "Chrome", "Application", "chrome.exe")]
-    : [
-      join(local, "Programs", "Opera", "opera.exe"), join(local, "Programs", "Opera", "launcher.exe"),
-      ...programs.flatMap((root) => [join(root, "Opera", "opera.exe"), join(root, "Opera", "launcher.exe")]),
-      join(local, "Programs", "Opera GX", "opera.exe"), join(local, "Programs", "Opera GX", "launcher.exe"),
-    ]
-}
-
-/** Lance Chrome ou Opera directement sur sa page des extensions ; `false` s'il est introuvable. */
-export function openBrowserExtensions(browser: CompanionBrowser) {
-  if (process.platform !== "win32") return false
-  const executable = browserCandidates(browser).find((candidate) => existsSync(candidate))
-  if (!executable) return false
-  spawn(executable, [browserExtensionsPage[browser]], { detached: true, stdio: "ignore" }).unref()
-  return true
 }
